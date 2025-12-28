@@ -113,6 +113,9 @@ export default function ManowarPage() {
                     hasCoordinator: manowar.hasCoordinator,
                     coordinatorModel: manowar.coordinatorModel,
                     totalPrice: manowar.totalPrice,
+                    // Send agent wallet addresses (unique identifiers from IPFS metadata)
+                    // NOT numeric agentIds which can conflict across contract deployments
+                    agentWalletAddresses: manowar.metadata?.agents?.map(a => a.walletAddress).filter(Boolean) || [],
                 }),
             });
 
