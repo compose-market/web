@@ -55,8 +55,9 @@ export function AgentCard({ agent, onCopyEndpoint }: AgentCardProps) {
     const model = agent.metadata?.model || "Unknown";
     const plugins = agent.metadata?.plugins || [];
 
+    // API endpoint URL - direct path without double /api/
     const apiEndpoint = agent.walletAddress
-        ? `https://api.compose.market/api/agent/${agent.walletAddress}`
+        ? `https://api.compose.market/agent/${agent.walletAddress}`
         : null;
 
     const handleCopyEndpoint = () => {
@@ -196,12 +197,12 @@ export function AgentCard({ agent, onCopyEndpoint }: AgentCardProps) {
                         </div>
                     )}
 
-                    {/* A2A Endpoint - Bottom */}
+                    {/* API Endpoint - Backend proxies to Pinata */}
                     {apiEndpoint && (
                         <div className="pt-3 border-t border-sidebar-border mt-auto shrink-0">
                             <div className="flex items-center gap-2 mb-2">
                                 <Globe className="w-4 h-4 text-cyan-400" />
-                                <span className="text-xs text-muted-foreground uppercase">API Endpoint</span>
+                                <span className="text-xs text-muted-foreground uppercase">A2A Endpoint</span>
                             </div>
                             <div className="flex items-center gap-2 p-2 bg-background border border-sidebar-border rounded-lg font-mono text-xs">
                                 <code className="flex-1 truncate text-cyan-400">{apiEndpoint}</code>
