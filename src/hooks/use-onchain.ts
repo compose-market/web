@@ -158,7 +158,7 @@ async function fetchAgentMetadata(agent: OnchainAgent): Promise<OnchainAgent> {
  * Find an agent by its wallet address (stored in IPFS metadata)
  * Iterates through all agents and checks metadata for matching wallet
  */
-async function fetchAgentByWalletAddress(walletAddress: string): Promise<OnchainAgent | null> {
+export async function fetchAgentByWalletAddress(walletAddress: string): Promise<OnchainAgent | null> {
   try {
     const contract = getAgentFactoryContract();
 

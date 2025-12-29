@@ -20,7 +20,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
-import { useOnchainManowarByIdentifier } from "@/hooks/use-onchain";
+import { useOnchainManowarByIdentifier, fetchAgentByWalletAddress } from "@/hooks/use-onchain";
 import { fileToDataUrl } from "@/lib/pinata";
 import { MultimodalCanvas } from "@/components/canvas";
 import { type ChatMessage } from "@/components/chat";
@@ -114,13 +114,48 @@ export default function ManowarPage() {
                     coordinatorModel: manowar.coordinatorModel,
                     totalPrice: manowar.totalPrice,
                     // Send agent wallet addresses (unique identifiers from IPFS metadata)
-                    // NOT numeric agentIds which can conflict across contract deployments
+                    // Basic numeric agentIds can conflict across contract deployments
                     agentWalletAddresses: manowar.metadata?.agents?.map(a => a.walletAddress).filter(Boolean) || [],
                 }),
             });
 
             if (response.ok || response.status === 409) {
                 console.log(`[manowar] Auto-registered manowar ${manowar.walletAddress}`);
+
+                // Also register each component agent so orchestrator can delegate to them
+                const agents = manowar.metadata?.agents || [];
+                for (const agentCard of agents) {
+                    if (!agentCard.walletAddress) continue;
+                    try {
+                        // Fetch the full on-chain agent data of the agentCardUri
+                        const onchainAgent = await fetchAgentByWalletAddress(agentCard.walletAddress);
+                        if (!onchainAgent) {
+                            console.warn(`[manowar] Component agent ${agentCard.walletAddress.slice(0, 10)}... not found on-chain`);
+                            continue;
+                        }
+
+                        const agentRes = await fetch(`${MANOWAR_URL}/agent/register`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                walletAddress: onchainAgent.walletAddress,
+                                dnaHash: onchainAgent.dnaHash,
+                                name: onchainAgent.metadata?.name || agentCard.name || `Agent ${agentCard.walletAddress.slice(0, 8)}`,
+                                description: onchainAgent.metadata?.description || agentCard.description || "",
+                                agentCardUri: onchainAgent.agentCardUri, // From blockchain
+                                creator: onchainAgent.creator,
+                                model: onchainAgent.metadata?.model || agentCard.model,
+                                plugins: onchainAgent.metadata?.plugins?.map((p) => p.registryId) || [],
+                            }),
+                        });
+                        if (agentRes.ok || agentRes.status === 409) {
+                            console.log(`[manowar] Registered component agent ${agentCard.walletAddress.slice(0, 10)}...`);
+                        }
+                    } catch (err) {
+                        console.warn(`[manowar] Failed to register component agent:`, err);
+                    }
+                }
+
                 return true;
             }
 
