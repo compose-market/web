@@ -21,7 +21,6 @@ import { useToast } from "@/hooks/use-toast";
 import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
 import { useOnchainManowarByIdentifier, fetchAgentByWalletAddress } from "@/hooks/use-onchain";
-import { fileToDataUrl } from "@/lib/pinata";
 import { MultimodalCanvas } from "@/components/canvas";
 import { type ChatMessage } from "@/components/chat";
 import { useChat } from "@/hooks/use-chat";
@@ -221,12 +220,12 @@ export default function ManowarPage() {
                 { maxValue: BigInt(10_000) } // $0.01 - matches MANOWAR_PRICES.ORCHESTRATION
             );
 
-            // Pre-compute attachment base64 data
-            let attachmentBase64: string | undefined;
+            // Use Pinata URL for attachments (not base64)
+            // The file is already uploaded by useFileAttachment hook
+            let attachmentUrl: string | undefined;
             let attachmentType: "image" | "audio" | undefined;
-            if (attached && attached.file) {
-                const base64Data = await fileToDataUrl(attached.file);
-                attachmentBase64 = base64Data.split(",")[1];
+            if (attached && attached.url) {
+                attachmentUrl = attached.url;
                 attachmentType = attached.type;
             }
 
@@ -248,18 +247,18 @@ export default function ManowarPage() {
                     headers["x-session-user-address"] = userAddress;
                 }
 
-                // Build request body with optional file attachment
+                // Build request body with Pinata URL for attachments
                 const requestBody: Record<string, unknown> = {
                     message: userMessage.content,
                     threadId: threadId,
                 };
 
-                if (attachmentBase64) {
-                    if (attachmentType === "image") {
-                        requestBody.image = attachmentBase64;
-                    } else if (attachmentType === "audio") {
-                        requestBody.audio = attachmentBase64;
-                    }
+                // Send Pinata URLs, not base64 data
+                if (attachmentUrl && attachmentType) {
+                    requestBody.attachment = {
+                        type: attachmentType,
+                        url: attachmentUrl,
+                    };
                 }
 
                 // Use the /manowar/:id/chat endpoint - prefer wallet address for routing
@@ -297,7 +296,8 @@ export default function ManowarPage() {
 
                 setChatStatus("streaming");
                 const decoder = new TextDecoder();
-                let fullResponse = "";
+                let buffer = "";
+                let finalOutput = "";
 
                 currentAssistantIdRef.current = assistantId;
                 streamedTextRef.current = "";
@@ -321,26 +321,66 @@ export default function ManowarPage() {
                     updateAssistantMessage(streamedTextRef.current);
                 };
 
+                // Parse SSE events
+                const processSSEBuffer = (rawBuffer: string) => {
+                    const lines = rawBuffer.split("\n");
+                    let currentEvent = "";
+                    let currentData = "";
+
+                    for (const line of lines) {
+                        if (line.startsWith("event:")) {
+                            currentEvent = line.substring(6).trim();
+                        } else if (line.startsWith("data:")) {
+                            currentData = line.substring(5).trim();
+
+                            // Process completed event
+                            if (currentEvent && currentData) {
+                                try {
+                                    const data = JSON.parse(currentData);
+
+                                    if (currentEvent === "start") {
+                                        streamedTextRef.current = data.message || "Starting workflow...";
+                                    } else if (currentEvent === "step" || currentEvent === "agent") {
+                                        streamedTextRef.current = data.message || `Processing ${data.agentName || data.stepName}...`;
+                                    } else if (currentEvent === "complete") {
+                                        streamedTextRef.current = data.message || "Workflow complete!";
+                                    } else if (currentEvent === "result") {
+                                        // Final result - use this as the output
+                                        finalOutput = data.output || "";
+                                        streamedTextRef.current = finalOutput;
+                                    } else if (currentEvent === "error") {
+                                        streamedTextRef.current = `Error: ${data.error || "Unknown error"}`;
+                                    }
+
+                                    if (rafRef.current === null) {
+                                        rafRef.current = requestAnimationFrame(flushStreamedContent);
+                                    }
+                                } catch {
+                                    // Invalid JSON, ignore
+                                }
+                            }
+                        }
+                    }
+                };
+
                 while (true) {
                     const { done, value } = await reader.read();
                     if (done) break;
 
                     const chunk = decoder.decode(value, { stream: true });
-                    fullResponse += chunk;
-                    streamedTextRef.current = fullResponse;
-
-                    if (rafRef.current === null) {
-                        rafRef.current = requestAnimationFrame(flushStreamedContent);
-                    }
+                    buffer += chunk;
+                    processSSEBuffer(buffer);
                 }
 
                 if (rafRef.current !== null) {
                     cancelAnimationFrame(rafRef.current);
                     rafRef.current = null;
                 }
-                updateAssistantMessage(fullResponse);
 
-                if (!fullResponse) {
+                // Use final output from result event, or fallback to last streamed content
+                updateAssistantMessage(finalOutput || streamedTextRef.current || "Workflow completed");
+
+                if (!finalOutput && !streamedTextRef.current) {
                     setMessages(prev =>
                         prev.map(m => m.id === assistantId ? { ...m, content: "No response received" } : m)
                     );
@@ -368,29 +408,48 @@ export default function ManowarPage() {
                 );
                 recordUsage();
             } else {
-                // JSON response - handle multimodal results with base64 data
+                // JSON response - handle multimodal results
                 const data = await response.json();
 
-                if (data.success && data.data && data.type && data.type !== "text") {
-                    const base64Data = data.data;
-                    const mimeType = data.mimeType || (data.type === "image" ? "image/png" : data.type === "audio" ? "audio/wav" : "video/mp4");
+                if (data.success && data.type && data.type !== "text") {
+                    // Prefer Pinata URL if available (new pattern)
+                    if (data.pinataUrl || data.url) {
+                        const mediaUrl = data.pinataUrl || data.url;
+                        if (data.type === "image") {
+                            setMessages(prev =>
+                                prev.map(m => m.id === assistantId ? { ...m, content: `Generated image:`, imageUrl: mediaUrl, type: "image" } : m)
+                            );
+                        } else if (data.type === "audio") {
+                            setMessages(prev =>
+                                prev.map(m => m.id === assistantId ? { ...m, content: `Generated audio:`, audioUrl: mediaUrl, type: "audio" } : m)
+                            );
+                        } else if (data.type === "video") {
+                            setMessages(prev =>
+                                prev.map(m => m.id === assistantId ? { ...m, content: `Generated video:`, videoUrl: mediaUrl, type: "video" } : m)
+                            );
+                        }
+                    } else if (data.data) {
+                        // Fallback: convert base64 data to blob URL
+                        const base64Data = data.data;
+                        const mimeType = data.mimeType || (data.type === "image" ? "image/png" : data.type === "audio" ? "audio/wav" : "video/mp4");
 
-                    const byteArray = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-                    const blob = new Blob([byteArray], { type: mimeType });
-                    const blobUrl = URL.createObjectURL(blob);
+                        const byteArray = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+                        const blob = new Blob([byteArray], { type: mimeType });
+                        const blobUrl = URL.createObjectURL(blob);
 
-                    if (data.type === "image") {
-                        setMessages(prev =>
-                            prev.map(m => m.id === assistantId ? { ...m, content: `Generated image:`, imageUrl: blobUrl, type: "image" } : m)
-                        );
-                    } else if (data.type === "audio") {
-                        setMessages(prev =>
-                            prev.map(m => m.id === assistantId ? { ...m, content: `Generated audio:`, audioUrl: blobUrl, type: "audio" } : m)
-                        );
-                    } else if (data.type === "video") {
-                        setMessages(prev =>
-                            prev.map(m => m.id === assistantId ? { ...m, content: `Generated video:`, videoUrl: blobUrl, type: "video" } : m)
-                        );
+                        if (data.type === "image") {
+                            setMessages(prev =>
+                                prev.map(m => m.id === assistantId ? { ...m, content: `Generated image:`, imageUrl: blobUrl, type: "image" } : m)
+                            );
+                        } else if (data.type === "audio") {
+                            setMessages(prev =>
+                                prev.map(m => m.id === assistantId ? { ...m, content: `Generated audio:`, audioUrl: blobUrl, type: "audio" } : m)
+                            );
+                        } else if (data.type === "video") {
+                            setMessages(prev =>
+                                prev.map(m => m.id === assistantId ? { ...m, content: `Generated video:`, videoUrl: blobUrl, type: "video" } : m)
+                            );
+                        }
                     }
                 } else if (!data.success && data.error) {
                     throw new Error(data.error);
