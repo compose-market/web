@@ -102,10 +102,11 @@ export default function ManowarPage() {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    manowarId: manowar.id,
+                    // Use walletAddress as primary identifier - manowarId only for on-chain reference
                     walletAddress: manowar.walletAddress,
+                    manowarId: manowar.id, // for backward compat display only
                     dnaHash: manowar.dnaHash,
-                    title: manowar.title || `Manowar #${manowar.id}`,
+                    title: manowar.title || "",
                     description: manowar.description || "",
                     image: manowar.image,
                     creator: manowar.creator,
@@ -232,10 +233,10 @@ export default function ManowarPage() {
             const makeChatRequest = async (): Promise<Response> => {
                 // Persistent thread ID scoped to user and manowar workflow
                 const userAddress = wallet.getAccount()?.address;
-                const threadKey = `manowar-thread-${userAddress}-${manowar.id}`;
+                const threadKey = `manowar-thread-${userAddress}-${manowar.walletAddress}`;
                 let threadId = sessionStorage.getItem(threadKey);
                 if (!threadId) {
-                    threadId = `manowar-${manowar.id}-user-${userAddress}-${crypto.randomUUID()}`;
+                    threadId = `manowar-${manowar.walletAddress}-user-${userAddress}-${crypto.randomUUID()}`;
                     sessionStorage.setItem(threadKey, threadId);
                 }
 
@@ -533,7 +534,7 @@ export default function ManowarPage() {
 
                 <Badge className="bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30 text-xs">
                     <Layers className="w-3 h-3 mr-1" />
-                    Manowar #{manowar.id}
+                    Manowar {manowar.walletAddress?.slice(0, 6)}…{manowar.walletAddress?.slice(-4)}
                 </Badge>
 
                 {/* Mobile Card Button - only visible on mobile */}

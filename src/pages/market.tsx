@@ -582,7 +582,7 @@ const RFACard = React.memo(function RFACard({
 
         {/* Meta info */}
         <div className="flex items-center justify-between text-[10px] sm:text-xs text-muted-foreground">
-          <span>For: Manowar #{rfa.manowarId}</span>
+          <span>For: Manowar #{rfa.}</span>
           <span>{createdDate.toLocaleDateString()}</span>
         </div>
       </CardContent>
