@@ -24,7 +24,6 @@ import { useToast } from "@/hooks/use-toast";
 import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
 import { useOnchainAgentByIdentifier } from "@/hooks/use-onchain";
-import { fileToDataUrl } from "@/lib/pinata";
 import { MultimodalCanvas } from "@/components/canvas";
 import { type ChatMessage } from "@/components/chat";
 import { useChat } from "@/hooks/use-chat";
@@ -222,13 +221,11 @@ export default function AgentDetailPage() {
         { maxValue: BigInt(INFERENCE_PRICE_WEI) } // $0.005
       );
 
-      // Pre-compute attachment base64 data BEFORE defining makeChatRequest
-      // This ensures we capture the file data before any async operations
-      let attachmentBase64: string | undefined;
+      // Use Pinata URL for attachments (not base64)
+      let attachmentUrl: string | undefined;
       let attachmentType: "image" | "audio" | undefined;
-      if (attached && attached.file) {
-        const base64Data = await fileToDataUrl(attached.file);
-        attachmentBase64 = base64Data.split(",")[1]; // Strip data:mime;base64,
+      if (attached && attached.url) {
+        attachmentUrl = attached.url;
         attachmentType = attached.type;
       }
 
@@ -267,13 +264,12 @@ export default function AgentDetailPage() {
           grantedPermissions, // Pass to backend for proactive permission checks
         };
 
-        // Add attachment base64 data if present (pre-computed above)
-        if (attachmentBase64) {
-          if (attachmentType === "image") {
-            requestBody.image = attachmentBase64;
-          } else if (attachmentType === "audio") {
-            requestBody.audio = attachmentBase64;
-          }
+        // Send Pinata URLs
+        if (attachmentUrl && attachmentType) {
+          requestBody.attachment = {
+            type: attachmentType,
+            url: attachmentUrl,
+          };
         }
 
         return fetchWithPayment(`${MANOWAR_URL}/agent/${agentWallet}/chat`, {

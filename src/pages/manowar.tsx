@@ -105,6 +105,8 @@ export default function ManowarPage() {
                     // Use walletAddress as primary identifier - manowarId only for on-chain reference
                     walletAddress: manowar.walletAddress,
                     manowarId: manowar.id, // for backward compat display only
+                    // IPFS URI to manowarCard
+                    manowarCardUri: manowar.manowarCardUri,
                     dnaHash: manowar.dnaHash,
                     title: manowar.title || "",
                     description: manowar.description || "",
