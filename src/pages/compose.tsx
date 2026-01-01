@@ -39,7 +39,7 @@ import { readContract } from "thirdweb";
 import { uploadManowarBanner, uploadManowarMetadata, getIpfsUri, getIpfsUrl, fileToDataUrl, isPinataConfigured, fetchFromIpfs, type ManowarMetadata, type AgentCard } from "@/lib/pinata";
 import { CHAIN_IDS, CHAIN_CONFIG, thirdwebClient, INFERENCE_PRICE_WEI, getPaymentTokenContract } from "@/lib/thirdweb";
 import { createNormalizedFetch } from "@/lib/payment";
-import { AVAILABLE_MODELS } from "@/lib/models";
+// Models are fetched via useModels hook - no static imports needed
 import { AGENTIC_COORDINATOR_MODELS } from "@/hooks/use-coordinator";
 import { useSession } from "@/hooks/use-session.tsx";
 import {
@@ -1310,8 +1310,8 @@ function TriggerPicker({
       {/* Parse Result */}
       {parseResult && (
         <div className={`p-2 rounded-sm border text-xs ${parseResult.success
-            ? "bg-green-500/10 border-green-500/30"
-            : "bg-red-500/10 border-red-500/30"
+          ? "bg-green-500/10 border-green-500/30"
+          : "bg-red-500/10 border-red-500/30"
           }`}>
           {parseResult.success ? (
             <div className="space-y-1">

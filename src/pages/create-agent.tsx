@@ -34,7 +34,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Cpu, DollarSign, ShieldCheck, Upload, ExternalLink, Sparkles, Plug, Search, X, ChevronRight, Loader2, Play, AlertCircle, CheckCircle2, Boxes, Brain, ArrowRightLeft, Plus, Globe } from "lucide-react";
 import { WarpAgentForm, type WarpAgentData } from "@/components/warp-form";
 import { ModelSelector } from "@/components/model-selector";
-import { AVAILABLE_MODELS, type AIModel } from "@/lib/models";
+import { type AIModel } from "@/lib/models";
 import { useRegistryServers, useRegistrySearch, type RegistryServer, type ServerOrigin } from "@/hooks/use-registry";
 import {
   uploadAgentAvatar,

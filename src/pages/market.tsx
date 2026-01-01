@@ -81,24 +81,24 @@ export default function Market() {
         <TabsList className="bg-sidebar-accent border border-sidebar-border p-1 mb-4 sm:mb-6 lg:mb-8 w-full sm:w-auto">
           <TabsTrigger
             value="manowars"
-            className="flex-1 sm:flex-none data-[state=active]:bg-cyan-500 data-[state=active]:text-black font-bold font-mono tracking-wide px-3 sm:px-6 lg:px-8 text-xs sm:text-sm"
+            className="flex-1 sm:flex-none data-[state=active]:bg-cyan-500 data-[state=active]:text-black font-bold font-mono tracking-wide px-2 sm:px-6 lg:px-8 text-[10px] sm:text-sm min-w-0"
           >
-            <Layers className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
-            MANOWARS
+            <Layers className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2 shrink-0" />
+            <span className="truncate">MANOWARS</span>
           </TabsTrigger>
           <TabsTrigger
             value="agents"
-            className="flex-1 sm:flex-none data-[state=active]:bg-cyan-500 data-[state=active]:text-black font-bold font-mono tracking-wide px-3 sm:px-6 lg:px-8 text-xs sm:text-sm"
+            className="flex-1 sm:flex-none data-[state=active]:bg-cyan-500 data-[state=active]:text-black font-bold font-mono tracking-wide px-2 sm:px-6 lg:px-8 text-[10px] sm:text-sm min-w-0"
           >
-            <Bot className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
-            AGENTS
+            <Bot className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2 shrink-0" />
+            <span className="truncate">AGENTS</span>
           </TabsTrigger>
           <TabsTrigger
             value="rfas"
-            className="flex-1 sm:flex-none data-[state=active]:bg-fuchsia-500 data-[state=active]:text-white font-bold font-mono tracking-wide px-3 sm:px-6 lg:px-8 text-xs sm:text-sm"
+            className="flex-1 sm:flex-none data-[state=active]:bg-fuchsia-500 data-[state=active]:text-white font-bold font-mono tracking-wide px-2 sm:px-6 lg:px-8 text-[10px] sm:text-sm min-w-0"
           >
-            <FileQuestion className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
-            RFAs
+            <FileQuestion className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2 shrink-0" />
+            <span className="truncate">RFAs</span>
           </TabsTrigger>
         </TabsList>
 
@@ -587,20 +587,20 @@ const RFACard = React.memo(function RFACard({
         </div>
       </CardContent>
 
-      <CardFooter className="p-3 sm:p-4 pt-0 flex flex-col sm:flex-row gap-2">
+      <CardFooter className="p-3 sm:p-4 pt-0 flex flex-row gap-1.5 sm:gap-2">
         <Button
           onClick={onViewDetails}
-          className="flex-1 bg-fuchsia-500 hover:bg-fuchsia-600 text-white font-bold font-mono text-[10px] sm:text-xs h-8 sm:h-9"
+          className="flex-1 bg-fuchsia-500 hover:bg-fuchsia-600 text-white font-bold font-mono text-[9px] sm:text-xs h-8 sm:h-9 px-2 sm:px-3 min-w-0"
         >
-          <Award className="w-3 h-3 mr-1" />
-          VIEW & SUBMIT
+          <Award className="w-3 h-3 mr-0.5 sm:mr-1 shrink-0" />
+          <span className="truncate">VIEW & SUBMIT</span>
         </Button>
         <Button
           variant="outline"
-          className="border-sidebar-border hover:border-fuchsia-500/50 h-8 sm:h-9 text-[10px] sm:text-xs"
+          className="border-sidebar-border hover:border-fuchsia-500/50 h-8 sm:h-9 text-[9px] sm:text-xs px-2 sm:px-3 shrink-0"
           onClick={onViewDetails}
         >
-          Details
+          <span className="truncate">Details</span>
         </Button>
       </CardFooter>
     </Card>
@@ -765,18 +765,18 @@ const AgentCard = React.memo(function AgentCard({ agent }: { agent: OnchainAgent
     >
       {/* Header with Avatar */}
       <CardHeader className="p-3 sm:p-4 pb-2">
-        <div className="flex items-start gap-3">
-          <Avatar className="w-12 h-12 border-2 border-cyan-500/30 group-hover:border-cyan-500/60 transition-colors shrink-0">
+        <div className="flex items-start gap-2 sm:gap-3">
+          <Avatar className="w-10 h-10 sm:w-12 sm:h-12 border-2 border-cyan-500/30 group-hover:border-cyan-500/60 transition-colors shrink-0">
             <AvatarImage src={avatarUrl || undefined} alt={name} />
-            <AvatarFallback className="bg-cyan-500/10 text-cyan-400 font-mono text-sm">
+            <AvatarFallback className="bg-cyan-500/10 text-cyan-400 font-mono text-xs sm:text-sm">
               {initials}
             </AvatarFallback>
           </Avatar>
           <div className="min-w-0 flex-1">
-            <CardTitle className="text-base sm:text-lg font-display font-bold text-white group-hover:text-cyan-400 transition-colors truncate">
+            <CardTitle className="text-sm sm:text-lg font-display font-bold text-white group-hover:text-cyan-400 transition-colors truncate">
               {name}
             </CardTitle>
-            <p className="text-[10px] sm:text-xs font-mono text-muted-foreground mt-0.5">
+            <p className="text-[9px] sm:text-xs font-mono text-muted-foreground mt-0.5 truncate">
               Agent #{agent.id} • ERC8004
             </p>
           </div>
@@ -841,25 +841,25 @@ const AgentCard = React.memo(function AgentCard({ agent }: { agent: OnchainAgent
         </div>
       </CardContent>
 
-      <CardFooter className="p-3 sm:p-4 pt-0 flex gap-2">
+      <CardFooter className="p-3 sm:p-4 pt-0 flex gap-1.5 sm:gap-2">
         <Button
-          className="flex-1 bg-cyan-500 hover:bg-cyan-600 text-black font-bold font-mono text-[10px] sm:text-xs h-8 sm:h-9"
+          className="flex-1 bg-cyan-500 hover:bg-cyan-600 text-black font-bold font-mono text-[9px] sm:text-xs h-8 sm:h-9 px-2 sm:px-3 min-w-0"
           onClick={(e) => { e.stopPropagation(); window.location.href = agentPageUrl; }}
         >
-          <Zap className="w-3 h-3 mr-1" />
-          USE IT
+          <Zap className="w-3 h-3 mr-0.5 sm:mr-1 shrink-0" />
+          <span className="truncate">USE IT</span>
         </Button>
         <Button
           variant="outline"
-          className="flex-1 border-fuchsia-500/30 hover:bg-fuchsia-500/10 font-bold font-mono text-[10px] sm:text-xs h-8 sm:h-9"
+          className="flex-1 border-fuchsia-500/30 hover:bg-fuchsia-500/10 font-bold font-mono text-[9px] sm:text-xs h-8 sm:h-9 px-2 sm:px-3 min-w-0"
           onClick={(e) => { e.stopPropagation(); /* TODO: Nest / License */ }}
         >
-          <Layers className="w-3 h-3 mr-1" />
-          NEST
+          <Layers className="w-3 h-3 mr-0.5 sm:mr-1 shrink-0" />
+          <span className="truncate">NEST</span>
         </Button>
         <Button
           variant="outline"
-          className="border-sidebar-border hover:border-cyan-500/50 h-8 sm:h-9 w-8 sm:w-9"
+          className="border-sidebar-border hover:border-cyan-500/50 h-8 sm:h-9 w-8 sm:w-9 shrink-0 p-0"
           onClick={(e) => { e.stopPropagation(); window.open(`https://testnet.snowtrace.io/token/${import.meta.env.VITE_AGENT_FACTORY_CONTRACT}?a=${agent.id}`, "_blank"); }}
         >
           <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4" />

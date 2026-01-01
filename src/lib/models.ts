@@ -24,23 +24,48 @@ export interface ProviderPricing {
     input: number;  // USD per million tokens
     output: number; // USD per million tokens
   };
+  supportsTools?: boolean;
+  supportsStructuredOutput?: boolean;
+}
+
+/**
+ * Model Capabilities - dynamic metadata about what a model supports
+ * All values come from the backend registry, NO hardcoding needed
+ */
+export interface ModelCapabilities {
+  tools: boolean;              // Function calling support
+  reasoning: boolean;          // o1/DeepSeek-R1 style extended reasoning  
+  structuredOutputs: boolean;  // JSON mode / structured outputs
+  vision: boolean;             // Image input support
+  codeExecution: boolean;      // Google's code execution tool
+  searchGrounding: boolean;    // Google Search grounding
+  thinking: boolean;           // Extended thinking (Gemini thinking models)
+  streaming: boolean;          // Streaming support
+  liveApi: boolean;            // Real-time bidirectional (Live API)
 }
 
 export interface AIModel {
   id: string;
   name: string;
-  ownedBy: string;
+  ownedBy?: string;
   source: ModelProvider;
   task?: string;
-  description?: string; // Optional, often constructed on frontend if missing
+  description?: string;
   available: boolean;
   contextLength?: number;
+  maxOutputTokens?: number;
   pricing?: {
-    provider: string;
+    provider?: string;
     input: number;
     output: number;
   };
   providers?: ProviderPricing[];
+  // Model capabilities - array of capability names (positive only)
+  // e.g., ["tools", "vision", "reasoning", "streaming"]
+  capabilities?: string[];
+  // Architecture info for multimodal models
+  inputModalities?: string[];
+  outputModalities?: string[];
 }
 
 export interface ModelRegistry {
@@ -54,13 +79,40 @@ const API_BASE = import.meta.env.VITE_API_URL || "";
 /**
  * Fetch available models from the backend registry
  * This endpoint returns deduplicated models with valid inference providers
+ * 
+ * Paginates through all pages (limit=500 per request) to load full dataset
  */
 export async function fetchAvailableModels(): Promise<AIModel[]> {
+  const allModels: AIModel[] = [];
+  let page = 1;
+  const limit = 500; // Max allowed by backend
+  let hasMore = true;
+
   try {
-    const res = await fetch(`${API_BASE}/api/registry/models/available`);
-    if (!res.ok) throw new Error(`Failed to fetch models: ${res.status}`);
-    const data = await res.json();
-    return data.models || [];
+    while (hasMore) {
+      const res = await fetch(`${API_BASE}/api/registry/models/available?page=${page}&limit=${limit}`);
+      if (!res.ok) throw new Error(`Failed to fetch models: ${res.status}`);
+
+      const data = await res.json();
+      const models = (data.models || []).map((m: any) => ({
+        ...m,
+        id: m.modelId || m.id,
+        source: m.provider || m.source,
+        task: m.taskType || m.task,
+        contextLength: m.contextWindow || m.contextLength,
+      }));
+
+      allModels.push(...models);
+
+      hasMore = data.hasMore === true;
+      page++;
+
+      // Safety: prevent infinite loops (max 150 pages = 75,000 models)
+      if (page > 150) break;
+    }
+
+    console.log(`[models] Loaded ${allModels.length} models from registry`);
+    return allModels;
   } catch (error) {
     console.error("[models] Failed to fetch available models:", error);
     return [];
@@ -117,9 +169,22 @@ export function isAsiModel(model: AIModel): boolean {
 // Default model ID to use if selection is missing
 export const DEFAULT_MODEL_ID = "asi1-mini";
 
-// Export legacy list for backward compatibility with `compose.tsx` and `create-agent.tsx`
-// This will be populated dynamically, but keeping the export avoids breaking imports
-// Since those files depend on it being an array, we export a static list of "core" models
+/**
+ * @deprecated Use the `useModels` hook from `@/hooks/use-model` instead.
+ * This static array is only kept for backward compatibility and contains minimal fallback data.
+ * All model data should be fetched dynamically via the registry API.
+ * 
+ * Example migration:
+ * ```tsx
+ * // Old (deprecated):
+ * import { AVAILABLE_MODELS } from "@/lib/models";
+ * const models = AVAILABLE_MODELS;
+ * 
+ * // New (recommended):
+ * import { useModels } from "@/hooks/use-model";
+ * const { models, isLoading } = useModels();
+ * ```
+ */
 export const AVAILABLE_MODELS: AIModel[] = [
   {
     id: "asi1-mini",
@@ -127,6 +192,8 @@ export const AVAILABLE_MODELS: AIModel[] = [
     ownedBy: "asi-cloud",
     source: "asi-cloud",
     available: true,
-    pricing: { provider: "asi-cloud", input: 0.1, output: 0.1 }
+    task: "text-generation",
+    capabilities: ["streaming", "structured-outputs"],
+    pricing: { provider: "asi-cloud", input: 0, output: 0 }
   }
 ];
