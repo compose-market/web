@@ -31,6 +31,7 @@ import {
     Mic,
     MicOff,
     Music,
+    Video,
     X,
     Layers,
     Trash2,
@@ -43,7 +44,7 @@ export interface AttachedFile {
     url?: string;
     preview?: string;
     uploading: boolean;
-    type: "image" | "audio";
+    type: "image" | "audio" | "video";
 }
 
 export interface MultimodalCanvasProps {
@@ -276,6 +277,16 @@ export function MultimodalCanvas({
                                             alt="Preview"
                                             className="h-full w-full object-cover"
                                         />
+                                    ) : file.type === "video" ? (
+                                        file.preview ? (
+                                            <video
+                                                src={file.preview}
+                                                className="h-full w-full object-cover"
+                                                muted
+                                            />
+                                        ) : (
+                                            <Video className="h-6 w-6 text-pink-500" />
+                                        )
                                     ) : (
                                         <Music className="h-6 w-6 text-zinc-500" />
                                     )}
@@ -412,7 +423,7 @@ export function MultimodalCanvas({
                         type="file"
                         ref={fileInputRef}
                         onChange={onFileInputChange}
-                        accept="image/*,audio/*"
+                        accept="image/*,audio/*,video/*"
                         className="hidden"
                     />
                 )}

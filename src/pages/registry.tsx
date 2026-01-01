@@ -178,7 +178,7 @@ function ServerCard({
     >
       <CardHeader className="p-3 sm:p-4 pb-2">
         <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
             <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-sm flex items-center justify-center border shrink-0 ${style.bg} ${style.border}`}>
               {isGoat ? (
                 <Zap className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${style.text}`} />
@@ -188,7 +188,7 @@ function ServerCard({
                 <Server className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${style.text}`} />
               )}
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <CardTitle className="text-xs sm:text-sm font-display font-bold truncate group-hover:text-cyan-400 transition-colors">
                 {server.name}
               </CardTitle>
@@ -239,9 +239,9 @@ function ServerCard({
         </div>
 
         <div className="flex items-center justify-between pt-2 border-t border-sidebar-border">
-          <div className="flex gap-1">
-            {server.tags.slice(0, 3).map((tag) => (
-              <span key={tag} className="text-[9px] sm:text-[10px] text-muted-foreground">
+          <div className="flex gap-1 min-w-0 flex-1 overflow-hidden">
+            {server.tags.slice(0, 2).map((tag) => (
+              <span key={tag} className="text-[9px] sm:text-[10px] text-muted-foreground truncate max-w-[60px] sm:max-w-[80px]">
                 #{tag}
               </span>
             ))}
