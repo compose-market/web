@@ -1,6 +1,5 @@
 /**
  * MCP Registry Hooks
- * 
  * React Query hooks for the MCP registry API.
  * Registry runs on the connector server (port 4001), not the lambda API server.
  */
@@ -9,10 +8,7 @@ import { useMemo, useCallback } from "react";
 
 /**
  * Build the registry base URL
- * 
- * In production: Uses VITE_CONNECTOR_URL from env (https://services.compose.market/connector)
  * In development: Falls back to localhost:4001
- * 
  * The registry is on the connector server under /registry path.
  */
 function getRegistryBaseUrl(): string {
@@ -22,12 +18,11 @@ function getRegistryBaseUrl(): string {
     return `${connectorUrl.replace(/\/$/, "")}/registry`;
   }
 
-  // Production fallback: services.compose.market/connector
   if (typeof window !== "undefined" && window.location.hostname !== "localhost") {
     return "https://services.compose.market/connector/registry";
   }
 
-  // Development fallback
+  // Development
   return "http://localhost:4001/registry";
 }
 

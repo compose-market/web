@@ -30,7 +30,7 @@ export interface AgenticModel {
 // Model IDs verified against the project's normalized registry in models.json
 // =============================================================================
 
-export const AGENTIC_COORDINATOR_MODELS: AgenticModel[] = [
+export const coordinatorModels: AgenticModel[] = [
     {
         id: "nvidia/nemotron-3-nano-30b-a3b:free",
         name: "Nemotron 3 Nano 30B",
@@ -97,7 +97,7 @@ export const AGENTIC_COORDINATOR_MODELS: AgenticModel[] = [
 export function useAgenticModels() {
     return useQuery({
         queryKey: ["agentic-coordinator-models"],
-        queryFn: () => Promise.resolve(AGENTIC_COORDINATOR_MODELS),
+        queryFn: () => Promise.resolve(coordinatorModels),
         staleTime: Infinity, // Static data, never stale
         gcTime: Infinity,
     });
@@ -110,7 +110,7 @@ export function useAgenticModel(modelId: string | undefined) {
     return useQuery({
         queryKey: ["agentic-coordinator-model", modelId],
         queryFn: () => {
-            const model = AGENTIC_COORDINATOR_MODELS.find(m => m.id === modelId);
+            const model = coordinatorModels.find(m => m.id === modelId);
             return model || null;
         },
         enabled: !!modelId,
@@ -130,12 +130,12 @@ export function getDefaultCoordinatorModel(): string {
  * Get all agentic model IDs (for filtering)
  */
 export function getAgenticModelIds(): string[] {
-    return AGENTIC_COORDINATOR_MODELS.map(m => m.id);
+    return coordinatorModels.map(m => m.id);
 }
 
 /**
  * Check if a model ID is an approved agentic coordinator model
  */
 export function isAgenticCoordinatorModel(modelId: string): boolean {
-    return AGENTIC_COORDINATOR_MODELS.some(m => m.id === modelId);
+    return coordinatorModels.some(m => m.id === modelId);
 }

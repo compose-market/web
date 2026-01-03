@@ -120,7 +120,7 @@ export default function Home() {
 
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-24 sm:w-32 p-2 sm:p-3 bg-sidebar-accent border border-fuchsia-500/50 rounded-sm shadow-[0_0_15px_rgba(217,70,239,0.2)]">
               <div className="text-[8px] sm:text-[10px] text-fuchsia-400 font-mono mb-0.5 sm:mb-1">PROCESSOR</div>
-              <div className="font-bold text-xs sm:text-sm text-white truncate">GPT-4_Analysis</div>
+              <div className="font-bold text-xs sm:text-sm text-white truncate">GPT-5_Analysis</div>
             </div>
 
             <div className="absolute bottom-3 right-3 sm:bottom-8 sm:right-8 w-24 sm:w-32 p-2 sm:p-3 bg-sidebar-accent border border-yellow-500/50 rounded-sm shadow-[0_0_15px_rgba(234,179,8,0.2)]">

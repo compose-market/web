@@ -40,7 +40,7 @@ import { uploadManowarBanner, uploadManowarMetadata, getIpfsUri, getIpfsUrl, fil
 import { CHAIN_IDS, CHAIN_CONFIG, thirdwebClient, INFERENCE_PRICE_WEI, getPaymentTokenContract } from "@/lib/thirdweb";
 import { createNormalizedFetch } from "@/lib/payment";
 // Models are fetched via useModels hook - no static imports needed
-import { AGENTIC_COORDINATOR_MODELS } from "@/hooks/use-coordinator";
+import { coordinatorModels } from "@/hooks/use-coordinator";
 import { useSession } from "@/hooks/use-session.tsx";
 import {
   Dialog,
@@ -1695,7 +1695,7 @@ function MintManowarDialog({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No coordinator</SelectItem>
-                    {AGENTIC_COORDINATOR_MODELS.map((model) => (
+                    {coordinatorModels.map((model) => (
                       <SelectItem key={model.id} value={model.id}>
                         <div className="flex items-center gap-2">
                           <span>{model.name}</span>

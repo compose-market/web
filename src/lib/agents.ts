@@ -412,7 +412,6 @@ function getConnectorBaseUrl(): string {
     return connectorUrl.replace(/\/$/, "");
   }
 
-  // Production fallback: services.compose.market/connector
   if (typeof window !== "undefined" && window.location.hostname !== "localhost") {
     return "https://services.compose.market/connector";
   }

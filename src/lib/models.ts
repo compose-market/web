@@ -169,22 +169,6 @@ export function isAsiModel(model: AIModel): boolean {
 // Default model ID to use if selection is missing
 export const DEFAULT_MODEL_ID = "asi1-mini";
 
-/**
- * @deprecated Use the `useModels` hook from `@/hooks/use-model` instead.
- * This static array is only kept for backward compatibility and contains minimal fallback data.
- * All model data should be fetched dynamically via the registry API.
- * 
- * Example migration:
- * ```tsx
- * // Old (deprecated):
- * import { AVAILABLE_MODELS } from "@/lib/models";
- * const models = AVAILABLE_MODELS;
- * 
- * // New (recommended):
- * import { useModels } from "@/hooks/use-model";
- * const { models, isLoading } = useModels();
- * ```
- */
 export const AVAILABLE_MODELS: AIModel[] = [
   {
     id: "asi1-mini",
