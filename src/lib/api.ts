@@ -1,36 +1,450 @@
 /**
- * API Configuration
+ * API Configuration and Types
  * 
- * Provides the base URL for API calls.
- * In development, uses Vite proxy (/api).
- * In production, uses the Lambda Function URL.
+ * - Base URL configuration for Lambda API
+ * - OpenAI-compatible response types (from backend)
+ * - SSE stream parser
+ * - Response handling utilities
  */
 
-// API base URL - Lambda Function URL in production, proxy in development
-export const API_BASE_URL = import.meta.env.VITE_API_URL 
-  ? import.meta.env.VITE_API_URL.replace(/\/$/, "") // Remove trailing slash
+// =============================================================================
+// API Configuration
+// =============================================================================
+
+export const API_BASE_URL = import.meta.env.VITE_API_URL
+  ? import.meta.env.VITE_API_URL.replace(/\/$/, "")
   : "";
 
-/**
- * Build full API URL from path
- * @param path - API path starting with /api/
- */
 export function apiUrl(path: string): string {
-  if (API_BASE_URL) {
-    // Production: Lambda Function URL
-    return `${API_BASE_URL}${path}`;
-  }
-  // Development: use Vite proxy
-  return path;
+  return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
 }
 
-/**
- * Fetch helper with API base URL
- */
-export async function apiFetch(
-  path: string,
-  init?: RequestInit
-): Promise<Response> {
+export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   return fetch(apiUrl(path), init);
 }
 
+// =============================================================================
+// OpenAI-Compatible Types (from lambda/shared/api/openai/types.ts)
+// =============================================================================
+
+/** OpenAI API message format - for requests/responses */
+export interface APIChatMessage {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string | APIChatContentPart[] | null;
+  name?: string;
+  tool_calls?: ToolCall[];
+  tool_call_id?: string;
+}
+
+export interface APIChatContentPart {
+  type: "text" | "image_url";
+  text?: string;
+  image_url?: { url: string; detail?: "auto" | "low" | "high" };
+}
+
+export interface ToolCall {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+}
+
+// =============================================================================
+// UI Chat Types - Single Source of Truth for Frontend
+// =============================================================================
+
+export type MessageType = "text" | "image" | "audio" | "video" | "embedding";
+
+/** UI message format - for frontend state management */
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: number;
+  type?: MessageType;
+  imageUrl?: string;
+  audioUrl?: string;
+  videoUrl?: string;
+}
+
+/** Attached file for uploads */
+export interface AttachedFile {
+  file: File;
+  cid?: string;
+  url?: string;
+  preview?: string;
+  uploading: boolean;
+  type: "image" | "audio" | "video";
+}
+
+// =============================================================================
+// OpenAI Response Types
+// =============================================================================
+
+export interface ChatCompletionChoice {
+  index: number;
+  message: APIChatMessage;
+  finish_reason: "stop" | "length" | "tool_calls" | "content_filter" | null;
+}
+
+export interface TokenUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
+export interface ChatCompletionResponse {
+  id: string;
+  object: "chat.completion";
+  created: number;
+  model: string;
+  choices: ChatCompletionChoice[];
+  usage: TokenUsage;
+}
+
+// SSE Streaming
+export interface ChatCompletionChunk {
+  id: string;
+  object: "chat.completion.chunk";
+  created: number;
+  model: string;
+  choices: { index: number; delta: Partial<APIChatMessage>; finish_reason: string | null }[];
+}
+
+// Images
+export interface ImageData {
+  b64_json?: string;
+  url?: string;
+  revised_prompt?: string;
+}
+
+export interface ImagesResponse {
+  created: number;
+  data: ImageData[];
+}
+
+// Audio
+export interface AudioTranscriptionResponse {
+  text: string;
+  language?: string;
+  duration?: number;
+}
+
+// Video
+export interface VideoData {
+  url?: string;
+  b64_json?: string;
+  duration?: number;
+}
+
+export interface VideoGenerationResponse {
+  created: number;
+  data: VideoData[];
+  model: string;
+}
+
+// Async video job response (for long-running generation)
+export interface VideoJobResponse {
+  id: string;
+  object: "video.generation";
+  status: "queued" | "processing" | "completed" | "failed";
+  created?: number;
+  model?: string;
+  url?: string;
+  error?: string;
+  progress?: number;
+}
+
+// Embeddings
+export interface EmbeddingData {
+  object: "embedding";
+  embedding: number[];
+  index: number;
+}
+
+export interface EmbeddingResponse {
+  object: "list";
+  data: EmbeddingData[];
+  model: string;
+  usage: { prompt_tokens: number; total_tokens: number };
+}
+
+// =============================================================================
+// Unified Multimodal Result (for frontend consumption)
+// =============================================================================
+
+export type MultimodalType = "text" | "image" | "audio" | "video" | "embedding";
+
+export interface MultimodalResult {
+  type: MultimodalType;
+  success: boolean;
+  content?: string;       // For text/transcription
+  url?: string;           // For media (IPFS URL after Pinata upload)
+  base64?: string;        // Raw base64 if not yet uploaded
+  mimeType?: string;
+  embeddings?: number[];  // For embeddings
+  error?: string;
+  // Async video generation
+  jobId?: string;         // Video job ID for polling
+  polling?: boolean;      // True if async video job needs polling
+}
+
+// =============================================================================
+// SSE Stream Parser
+// =============================================================================
+
+/**
+ * Parse SSE stream from text/event-stream response
+ * Yields text content chunks as they arrive
+ */
+export async function* parseSSEStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>
+): AsyncGenerator<string, void, unknown> {
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+
+    // Process complete lines
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || ""; // Keep incomplete line in buffer
+
+    for (const line of lines) {
+      if (line.startsWith("data: ")) {
+        const data = line.slice(6).trim();
+        if (data === "[DONE]") return;
+
+        try {
+          const parsed = JSON.parse(data) as ChatCompletionChunk;
+          const delta = parsed.choices?.[0]?.delta;
+          if (delta?.content && typeof delta.content === "string") {
+            yield delta.content;
+          }
+        } catch {
+          // Plain text SSE (not JSON)
+          if (data) yield data;
+        }
+      } else if (line.trim() && !line.startsWith(":")) {
+        // Plain text streaming (no SSE format)
+        yield line;
+      }
+    }
+  }
+
+  // Process remaining buffer
+  if (buffer.trim()) {
+    yield buffer;
+  }
+}
+
+// =============================================================================
+// Response Content Type Detection
+// =============================================================================
+
+export type ResponseType = "sse" | "json" | "image" | "audio" | "video" | "binary" | "text";
+
+export function detectResponseType(contentType: string): ResponseType {
+  if (contentType.includes("text/event-stream")) return "sse";
+  if (contentType.includes("text/plain")) return "text";
+  if (contentType.includes("application/json")) return "json";
+  if (contentType.includes("image/")) return "image";
+  if (contentType.includes("audio/")) return "audio";
+  if (contentType.includes("video/")) return "video";
+  return "binary";
+}
+
+// =============================================================================
+// Parse OpenAI-format JSON responses
+// =============================================================================
+
+/**
+ * Parse JSON response from Lambda API into unified MultimodalResult
+ */
+export function parseJsonResponse(data: unknown): MultimodalResult {
+  // Error response - handle first to catch errors early
+  if (isErrorResponse(data)) {
+    const err = data.error;
+    const msg = typeof err === "string" ? err : (err?.message || JSON.stringify(err));
+    return { type: "text", success: false, error: msg };
+  }
+
+  // Agent chat response: { output: string, messages?: [...] }
+  if (isAgentChatResponse(data)) {
+    return { type: "text", success: true, content: data.output };
+  }
+
+  // Manowar multimodal response: { success, type, data (base64 string), mimeType }
+  if (isManowarMultimodalResponse(data)) {
+    return {
+      type: data.type,
+      success: data.success,
+      base64: data.data,
+      content: data.content,
+      mimeType: data.mimeType,
+      error: data.error,
+    };
+  }
+
+  // Chat completion
+  if (isChatCompletionResponse(data)) {
+    const rawContent = data.choices?.[0]?.message?.content;
+    let content: string;
+    if (typeof rawContent === "string") {
+      content = rawContent;
+    } else if (Array.isArray(rawContent)) {
+      content = rawContent.map(p => p.text || "").join("");
+    } else {
+      content = "";
+    }
+    return {
+      type: "text",
+      success: true,
+      content,
+    };
+  }
+
+  // Image response
+  if (isImagesResponse(data)) {
+    const item = data.data?.[0];
+    return {
+      type: "image",
+      success: true,
+      base64: item?.b64_json,
+      url: item?.url,
+      mimeType: "image/png",
+    };
+  }
+
+  // Async video job response (needs polling)
+  if (isVideoJobResponse(data)) {
+    if (data.status === "completed" && data.url) {
+      return {
+        type: "video",
+        success: true,
+        url: data.url,
+        mimeType: "video/mp4",
+      };
+    }
+    if (data.status === "failed") {
+      return {
+        type: "video",
+        success: false,
+        error: data.error || "Video generation failed",
+      };
+    }
+    // Job is still processing - return polling info
+    return {
+      type: "video",
+      success: true,
+      jobId: data.id,
+      polling: true,
+      content: `Video generating... (${data.status})`,
+    };
+  }
+
+  // Video response (sync - has data array)
+  if (isVideoResponse(data)) {
+    const item = data.data?.[0];
+    return {
+      type: "video",
+      success: true,
+      base64: item?.b64_json,
+      url: item?.url,
+      mimeType: "video/mp4",
+    };
+  }
+
+  // Embedding response
+  if (isEmbeddingResponse(data)) {
+    return {
+      type: "embedding",
+      success: true,
+      embeddings: data.data?.[0]?.embedding,
+      content: JSON.stringify(data.data?.[0]?.embedding),
+    };
+  }
+
+  // Transcription response
+  if (isTranscriptionResponse(data)) {
+    return {
+      type: "text",
+      success: true,
+      content: data.text,
+    };
+  }
+
+  // Fallback: stringify unknown
+  return {
+    type: "text",
+    success: true,
+    content: typeof data === "string" ? data : JSON.stringify(data),
+  };
+}
+
+// Type guards
+function isChatCompletionResponse(data: unknown): data is ChatCompletionResponse {
+  return !!data && typeof data === "object" && "choices" in data && Array.isArray((data as ChatCompletionResponse).choices);
+}
+
+function isImagesResponse(data: unknown): data is ImagesResponse {
+  return !!data && typeof data === "object" && "data" in data &&
+    Array.isArray((data as ImagesResponse).data) &&
+    ((data as ImagesResponse).data[0]?.b64_json !== undefined || (data as ImagesResponse).data[0]?.url !== undefined);
+}
+
+function isVideoResponse(data: unknown): data is VideoGenerationResponse {
+  if (!data || typeof data !== "object" || !("data" in data)) return false;
+  const arr = (data as VideoGenerationResponse).data;
+  if (!Array.isArray(arr) || arr.length === 0) return false;
+  // Must have video data item with either b64_json or url
+  const item = arr[0];
+  return item && (item.b64_json !== undefined || item.url !== undefined);
+}
+
+function isVideoJobResponse(data: unknown): data is VideoJobResponse {
+  if (!data || typeof data !== "object") return false;
+  const d = data as Record<string, unknown>;
+  // Must have id and status, and object should be "video.generation"
+  return typeof d.id === "string" &&
+    typeof d.status === "string" &&
+    d.object === "video.generation";
+}
+
+function isEmbeddingResponse(data: unknown): data is EmbeddingResponse {
+  return !!data && typeof data === "object" && "data" in data &&
+    (data as EmbeddingResponse).object === "list";
+}
+
+function isTranscriptionResponse(data: unknown): data is AudioTranscriptionResponse {
+  return !!data && typeof data === "object" && "text" in data &&
+    typeof (data as AudioTranscriptionResponse).text === "string";
+}
+
+function isErrorResponse(data: unknown): data is { error: string | { message?: string } } {
+  return !!data && typeof data === "object" && "error" in data;
+}
+
+function isAgentChatResponse(data: unknown): data is { output: string; messages?: unknown[] } {
+  return !!data && typeof data === "object" && "output" in data &&
+    typeof (data as { output: unknown }).output === "string";
+}
+
+function isManowarMultimodalResponse(data: unknown): data is {
+  success: boolean;
+  type: MultimodalType;
+  data?: string;  // base64 encoded
+  content?: string;
+  mimeType?: string;
+  error?: string;
+} {
+  if (!data || typeof data !== "object") return false;
+  const d = data as Record<string, unknown>;
+  // Must have success (boolean) and type (valid multimodal type)
+  if (typeof d.success !== "boolean") return false;
+  if (typeof d.type !== "string") return false;
+  const validTypes: MultimodalType[] = ["text", "image", "audio", "video", "embedding"];
+  return validTypes.includes(d.type as MultimodalType);
+}
