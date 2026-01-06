@@ -57,7 +57,7 @@ export function AgentCard({ agent, onCopyEndpoint }: AgentCardProps) {
 
     // API endpoint URL - direct path without double /api/
     const apiEndpoint = agent.walletAddress
-        ? `https://api.compose.market/agent/${agent.walletAddress}`
+        ? `https://manowar.compose.market/agent/${agent.walletAddress}`
         : null;
 
     const handleCopyEndpoint = () => {
