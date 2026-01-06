@@ -37,7 +37,7 @@ import { prepareContractCall } from "thirdweb";
 import { getManowarContract, usdcToWei, computeExternalAgentHash, getWarpContract, getContractAddress, getAgentFactoryContract, formatUsdcPrice, weiToUsdc, computeManowarDnaHash, deriveManowarWalletAddress } from "@/lib/contracts";
 import { readContract } from "thirdweb";
 import { uploadManowarBanner, uploadManowarMetadata, getIpfsUri, getIpfsUrl, fileToDataUrl, isPinataConfigured, fetchFromIpfs, type ManowarMetadata, type AgentCard } from "@/lib/pinata";
-import { CHAIN_IDS, CHAIN_CONFIG, thirdwebClient, INFERENCE_PRICE_WEI, getPaymentTokenContract } from "@/lib/thirdweb";
+import { CHAIN_IDS, CHAIN_CONFIG, thirdwebClient, inferencePriceWei, getPaymentTokenContract } from "@/lib/thirdweb";
 import { createNormalizedFetch } from "@/lib/payment";
 // Models are fetched via useModels hook - no static imports needed
 import { coordinatorModels } from "@/hooks/use-coordinator";

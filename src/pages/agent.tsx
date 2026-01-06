@@ -12,7 +12,7 @@ import { useParams } from "wouter";
 import { Link } from "wouter";
 import { useActiveWallet } from "thirdweb/react";
 import { wrapFetchWithPayment } from "thirdweb/x402";
-import { thirdwebClient, INFERENCE_PRICE_WEI } from "@/lib/thirdweb";
+import { thirdwebClient, inferencePriceWei } from "@/lib/thirdweb";
 import { createNormalizedFetch } from "@/lib/payment";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -24,11 +24,9 @@ import { useToast } from "@/hooks/use-toast";
 import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
 import { useOnchainAgentByIdentifier } from "@/hooks/use-onchain";
-import { MultimodalCanvas } from "@/components/canvas";
-import { type ChatMessage } from "@/components/chat";
-import { useChat } from "@/hooks/use-chat";
-import { useFileAttachment, type AttachedFile } from "@/hooks/use-attachment";
-import { useAudioRecording } from "@/hooks/use-recording";
+import { MultimodalCanvas, type ChatMessage } from "@/components/chat";
+import { useChat, type AttachedFile } from "@/hooks/use-chat";
+import { parseSSEStream } from "@/lib/api";
 import { AgentCard, AgentCardSkeleton } from "@/components/agent-card";
 import {
   Dialog,
@@ -63,7 +61,7 @@ const MANOWAR_URL = (import.meta.env.VITE_MANOWAR_URL || "https://manowar.compos
 
 export default function AgentDetailPage() {
   const params = useParams<{ id: string }>();
-  // id can be either numeric agent ID (legacy) or wallet address (preferred)
+  // id is always the wallet address (preferred)
   const identifier = params.id || null;
   const { data: agent, isLoading, error } = useOnchainAgentByIdentifier(identifier);
   const { toast } = useToast();
@@ -73,36 +71,23 @@ export default function AgentDetailPage() {
   // Build the A2A-compatible endpoint URL using wallet address (canonical identifier)
   const agentWallet = agent?.walletAddress;
 
-  // Chat state from shared hook
-  const chat = useChat();
+  // Chat state from shared hook (includes messages, attachments, and recording)
+  const chat = useChat({
+    conversationId: `agent-${agentWallet || 'unknown'}`,
+    onError: (err) => setChatError(err),
+  });
   const { messages, setMessages, scrollContainerRef, messagesEndRef, isNearBottom,
-    streamedTextRef, currentAssistantIdRef, scheduleStreamUpdate, flushStreamContent } = chat;
+    streamedTextRef, currentAssistantIdRef, updateAssistantMessage, handleJsonResponse,
+    scheduleStreamUpdate, flushStreamContent,
+    // Attachments
+    attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, isUploading, clearFiles,
+    // Recording
+    isRecording, recordingSupported, startRecording, stopRecording,
+  } = chat;
   const [inputValue, setInputValue] = useState("");
   const [sending, setSending] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const [chatStatus, setChatStatus] = useState<"idle" | "paying" | "waiting" | "streaming">("idle");
-
-  // File attachment from shared hook
-  const fileAttachment = useFileAttachment({
-    conversationId: `agent-${agentWallet || 'unknown'}`,
-    onError: (err) => setChatError(err),
-  });
-  const { attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, isUploading } = fileAttachment;
-
-  // Audio recording from shared hook
-  const recording = useAudioRecording({
-    conversationId: `agent-${agentWallet || 'unknown'}`,
-    onRecordingComplete: (file) => {
-      // When recording completes, add to attached files
-      fileAttachment.attachedFiles.length === 0 &&
-        fileAttachment.handleFileSelect({ target: { files: [file.file] } } as unknown as React.ChangeEvent<HTMLInputElement>);
-    },
-    onError: (err) => setChatError(err),
-  });
-  const { isRecording, recordingSupported, startRecording, stopRecording } = recording;
-
-  // Local RAF ref for streaming updates (used within handleSendMessage)
-  const rafRef = useRef<number | null>(null);
 
   // Knowledge upload state (agent-specific)
   const [showKnowledgeDialog, setShowKnowledgeDialog] = useState(false);
@@ -197,7 +182,7 @@ export default function AgentDetailPage() {
 
     setMessages(prev => [...prev, userMessage]);
     setInputValue("");
-    fileAttachment.clearFiles(); // Clear attachment from input after sending
+    clearFiles(); // Clear attachment from input after sending
     setSending(true);
     setChatError(null);
     setChatStatus("paying");
@@ -218,12 +203,12 @@ export default function AgentDetailPage() {
         normalizedFetch,
         thirdwebClient,
         wallet,
-        { maxValue: BigInt(INFERENCE_PRICE_WEI) } // $0.005
+        { maxValue: BigInt(inferencePriceWei) } // $0.005
       );
 
       // Use Pinata URL for attachments (not base64)
       let attachmentUrl: string | undefined;
-      let attachmentType: "image" | "audio" | undefined;
+      let attachmentType: "image" | "audio" | "video" | undefined;
       if (attached && attached.url) {
         attachmentUrl = attached.url;
         attachmentType = attached.type;
@@ -297,7 +282,7 @@ export default function AgentDetailPage() {
         throw new Error(errorData.error || `Chat failed: ${response.status}`);
       }
 
-      // Handle streaming response - same pattern of playground.tsx
+      // Handle streaming response - same pattern as playground.tsx
       const contentType = response.headers.get("content-type") || "";
 
       if (contentType.includes("text/event-stream") || contentType.includes("text/plain")) {
@@ -306,131 +291,87 @@ export default function AgentDetailPage() {
         if (!reader) throw new Error("No response body");
 
         setChatStatus("streaming");
-        const decoder = new TextDecoder();
         let fullResponse = "";
 
         // Store assistant ID for RAF flush callback
         currentAssistantIdRef.current = assistantId;
         streamedTextRef.current = "";
 
-        // O(1) message update helper
-        const updateAssistantMessage = (content: string) => {
-          setMessages(prev => {
-            const next = [...prev];
-            const last = next[next.length - 1];
-            if (last?.id === assistantId) {
-              next[next.length - 1] = { ...last, content };
-              return next;
-            }
-            // Fallback if ordering changed
-            const idx = next.findIndex(m => m.id === assistantId);
-            if (idx >= 0) next[idx] = { ...next[idx], content };
-            return next;
-          });
-        };
-
-        // RAF flush function for 60fps max updates
-        const flushStreamedContent = () => {
-          rafRef.current = null;
-          updateAssistantMessage(streamedTextRef.current);
-        };
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          const chunk = decoder.decode(value, { stream: true });
+        // Use centralized SSE parser that handles `data: {...}` format
+        for await (const chunk of parseSSEStream(reader)) {
           fullResponse += chunk;
-          streamedTextRef.current = fullResponse;
-
-          // Schedule RAF update (batches multiple chunks to single frame)
-          if (rafRef.current === null) {
-            rafRef.current = requestAnimationFrame(flushStreamedContent);
-          }
+          // Use hook's RAF-batched streaming update
+          scheduleStreamUpdate(fullResponse);
         }
 
         // Final flush to ensure all content is displayed
-        if (rafRef.current !== null) {
-          cancelAnimationFrame(rafRef.current);
-          rafRef.current = null;
-        }
-        updateAssistantMessage(fullResponse);
+        flushStreamContent();
+        updateAssistantMessage(assistantId, { content: fullResponse });
 
         if (!fullResponse) {
-          setMessages(prev =>
-            prev.map(m => m.id === assistantId ? { ...m, content: "No response received" } : m)
-          );
+          updateAssistantMessage(assistantId, { content: "No response received" });
         }
         // Record successful usage
         recordUsage();
-      } else if (contentType.includes("image")) {
-        // Image response
-        const blob = await response.blob();
-        const imageUrl = URL.createObjectURL(blob);
-        setMessages(prev =>
-          prev.map(m => m.id === assistantId ? { ...m, content: "Generated image:", imageUrl, type: "image" } : m)
-        );
-        recordUsage();
-      } else if (contentType.includes("audio")) {
-        // Audio response
-        const blob = await response.blob();
-        const audioUrl = URL.createObjectURL(blob);
-        setMessages(prev =>
-          prev.map(m => m.id === assistantId ? { ...m, content: "Generated audio:", audioUrl, type: "audio" } : m)
-        );
-        recordUsage();
-      } else if (contentType.includes("video")) {
-        // Video response
-        const blob = await response.blob();
-        const videoUrl = URL.createObjectURL(blob);
-        setMessages(prev =>
-          prev.map(m => m.id === assistantId ? { ...m, content: "Generated video:", videoUrl, type: "video" } : m)
-        );
-        recordUsage();
       } else {
-        // JSON response - handle multimodal results with base64 data
-        const data = await response.json();
+        // Non-streaming response (image/audio/video/json) - use unified handler
+        const { parseMultimodalResponse } = await import("@/lib/multimodal");
+        const result = await parseMultimodalResponse(response, {
+          uploadToPinata: true,
+          conversationId: `agent-${agentWallet}`,
+          // Handle async video polling
+          onVideoPolling: {
+            onProgress: (status, progress) => {
+              setMessages(prev =>
+                prev.map(m => m.id === assistantId ? {
+                  ...m,
+                  content: `Video generating... (${status}${progress ? ` - ${progress}%` : ""})`,
+                } : m)
+              );
+            },
+            onComplete: (url) => {
+              setMessages(prev =>
+                prev.map(m => m.id === assistantId ? {
+                  ...m,
+                  content: "Video generated:",
+                  type: "video",
+                  videoUrl: url,
+                } : m)
+              );
+              recordUsage();
+            },
+            onError: (error) => {
+              setMessages(prev =>
+                prev.map(m => m.id === assistantId ? {
+                  ...m,
+                  content: `Error: ${error}`,
+                } : m)
+              );
+            },
+          },
+        });
 
-        // Check if this is a multimodal result with base64 data
-        if (data.success && data.data && data.type) {
-          const base64Data = data.data;
-          const mimeType = data.mimeType || (data.type === "image" ? "image/png" : data.type === "audio" ? "audio/wav" : "video/mp4");
-
-          // Convert base64 to blob URL
-          const byteArray = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-          const blob = new Blob([byteArray], { type: mimeType });
-          const blobUrl = URL.createObjectURL(blob);
-
-          if (data.type === "image") {
-            setMessages(prev =>
-              prev.map(m => m.id === assistantId ? { ...m, content: "Generated image:", imageUrl: blobUrl, type: "image" } : m)
-            );
-          } else if (data.type === "audio") {
-            setMessages(prev =>
-              prev.map(m => m.id === assistantId ? { ...m, content: "Generated audio:", audioUrl: blobUrl, type: "audio" } : m)
-            );
-          } else if (data.type === "video") {
-            setMessages(prev =>
-              prev.map(m => m.id === assistantId ? { ...m, content: "Generated video:", videoUrl: blobUrl, type: "video" } : m)
-            );
-          } else {
-            // Text or other content
-            const content = data.content || data.output || data.message || JSON.stringify(data);
-            setMessages(prev =>
-              prev.map(m => m.id === assistantId ? { ...m, content } : m)
-            );
-          }
-        } else if (!data.success && data.error) {
-          // Multimodal error response
-          throw new Error(data.error);
-        } else {
-          // Regular JSON response (text output, etc.)
-          const content = data.output || data.message || data.content || JSON.stringify(data);
-          setMessages(prev =>
-            prev.map(m => m.id === assistantId ? { ...m, content } : m)
-          );
+        // Handle polling - don't update if polling in progress
+        if (result.polling) {
+          console.log(`[agent] Video job submitted, polling: ${result.jobId}`);
+          return;
         }
-        recordUsage();
+
+        if (result.success) {
+          setMessages(prev =>
+            prev.map(m => m.id === assistantId ? {
+              ...m,
+              content: result.content || `Generated ${result.type}:`,
+              type: result.type,
+              imageUrl: result.type === "image" ? result.url : undefined,
+              audioUrl: result.type === "audio" ? result.url : undefined,
+              videoUrl: result.type === "video" ? result.url : undefined,
+            } : m)
+          );
+          recordUsage();
+        } else {
+          throw new Error(result.error || "Request failed");
+        }
       }
     } catch (err) {
       let errorMsg = err instanceof Error ? err.message : "Unknown error";

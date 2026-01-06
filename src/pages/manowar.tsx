@@ -12,7 +12,7 @@ import { useParams } from "wouter";
 import { Link } from "wouter";
 import { useActiveWallet } from "thirdweb/react";
 import { wrapFetchWithPayment } from "thirdweb/x402";
-import { thirdwebClient, INFERENCE_PRICE_WEI } from "@/lib/thirdweb";
+import { thirdwebClient, inferencePriceWei } from "@/lib/thirdweb";
 import { createNormalizedFetch } from "@/lib/payment";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -21,11 +21,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
 import { useOnchainManowarByIdentifier, fetchAgentByWalletAddress } from "@/hooks/use-onchain";
-import { MultimodalCanvas } from "@/components/canvas";
-import { type ChatMessage } from "@/components/chat";
+import { MultimodalCanvas, type ChatMessage } from "@/components/chat";
 import { useChat } from "@/hooks/use-chat";
-import { useFileAttachment } from "@/hooks/use-attachment";
-import { useAudioRecording } from "@/hooks/use-recording";
 import { ManowarCard, ManowarCardSkeleton } from "@/components/manowar-card";
 import {
     Sheet,
@@ -56,10 +53,20 @@ export default function ManowarPage() {
     const wallet = useActiveWallet();
     const { sessionActive, budgetRemaining, recordUsage } = useSession();
 
-    // Chat state from shared hook
-    const chat = useChat();
+    // Chat state from shared hook (includes messages, attachments, and recording)
+    const manowarWallet = manowar?.walletAddress;
+    const chat = useChat({
+        conversationId: `manowar-${manowarWallet || 'unknown'}`,
+        onError: (err) => setChatError(err),
+    });
     const { messages, setMessages, scrollContainerRef, messagesEndRef,
-        streamedTextRef, currentAssistantIdRef } = chat;
+        streamedTextRef, currentAssistantIdRef, handleJsonResponse,
+        updateAssistantMessage, scheduleStreamUpdate, flushStreamContent,
+        // Attachments
+        attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, clearFiles,
+        // Recording
+        isRecording, recordingSupported, startRecording, stopRecording,
+    } = chat;
     const [inputValue, setInputValue] = useState("");
     const [sending, setSending] = useState(false);
     const [chatError, setChatError] = useState<string | null>(null);
@@ -70,28 +77,6 @@ export default function ManowarPage() {
 
     // Mobile card sheet
     const [mobileCardOpen, setMobileCardOpen] = useState(false);
-
-    // Local RAF ref for streaming updates
-    const rafRef = useRef<number | null>(null);
-
-    // File attachment from shared hook
-    const manowarWallet = manowar?.walletAddress;
-    const fileAttachment = useFileAttachment({
-        conversationId: `manowar-${manowarWallet || 'unknown'}`,
-        onError: (err) => setChatError(err),
-    });
-    const { attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile } = fileAttachment;
-
-    // Audio recording from shared hook
-    const recording = useAudioRecording({
-        conversationId: `manowar-${manowarWallet || 'unknown'}`,
-        onRecordingComplete: (file) => {
-            fileAttachment.attachedFiles.length === 0 &&
-                fileAttachment.handleFileSelect({ target: { files: [file.file] } } as unknown as React.ChangeEvent<HTMLInputElement>);
-        },
-        onError: (err) => setChatError(err),
-    });
-    const { isRecording, recordingSupported, startRecording, stopRecording } = recording;
 
     // Auto-register manowar with backend if not registered
     const autoRegisterManowar = useCallback(async (): Promise<boolean> => {
@@ -203,7 +188,7 @@ export default function ManowarPage() {
 
         setMessages(prev => [...prev, userMessage]);
         setInputValue("");
-        fileAttachment.clearFiles();
+        clearFiles();
         setSending(true);
         setChatError(null);
         setChatStatus("paying");
@@ -226,7 +211,7 @@ export default function ManowarPage() {
             // Use Pinata URL for attachments (not base64)
             // The file is already uploaded by useFileAttachment hook
             let attachmentUrl: string | undefined;
-            let attachmentType: "image" | "audio" | undefined;
+            let attachmentType: "image" | "audio" | "video" | undefined;
             if (attached && attached.url) {
                 attachmentUrl = attached.url;
                 attachmentType = attached.type;
@@ -305,26 +290,7 @@ export default function ManowarPage() {
                 currentAssistantIdRef.current = assistantId;
                 streamedTextRef.current = "";
 
-                const updateAssistantMessage = (content: string) => {
-                    setMessages(prev => {
-                        const next = [...prev];
-                        const last = next[next.length - 1];
-                        if (last?.id === assistantId) {
-                            next[next.length - 1] = { ...last, content };
-                            return next;
-                        }
-                        const idx = next.findIndex(m => m.id === assistantId);
-                        if (idx >= 0) next[idx] = { ...next[idx], content };
-                        return next;
-                    });
-                };
-
-                const flushStreamedContent = () => {
-                    rafRef.current = null;
-                    updateAssistantMessage(streamedTextRef.current);
-                };
-
-                // Parse SSE events
+                // Parse SSE events and use hook's streaming update
                 const processSSEBuffer = (rawBuffer: string) => {
                     const lines = rawBuffer.split("\n");
                     let currentEvent = "";
@@ -355,9 +321,8 @@ export default function ManowarPage() {
                                         streamedTextRef.current = `Error: ${data.error || "Unknown error"}`;
                                     }
 
-                                    if (rafRef.current === null) {
-                                        rafRef.current = requestAnimationFrame(flushStreamedContent);
-                                    }
+                                    // Use hook's RAF-batched streaming update
+                                    scheduleStreamUpdate(streamedTextRef.current);
                                 } catch {
                                     // Invalid JSON, ignore
                                 }
@@ -375,94 +340,73 @@ export default function ManowarPage() {
                     processSSEBuffer(buffer);
                 }
 
-                if (rafRef.current !== null) {
-                    cancelAnimationFrame(rafRef.current);
-                    rafRef.current = null;
-                }
-
-                // Use final output from result event, or fallback to last streamed content
-                updateAssistantMessage(finalOutput || streamedTextRef.current || "Workflow completed");
+                // Final flush and update
+                flushStreamContent();
+                updateAssistantMessage(assistantId, { content: finalOutput || streamedTextRef.current || "Workflow completed" });
 
                 if (!finalOutput && !streamedTextRef.current) {
-                    setMessages(prev =>
-                        prev.map(m => m.id === assistantId ? { ...m, content: "No response received" } : m)
-                    );
+                    updateAssistantMessage(assistantId, { content: "No response received" });
                 }
-                recordUsage();
-            } else if (contentType.includes("image")) {
-                const blob = await response.blob();
-                const imageUrl = URL.createObjectURL(blob);
-                setMessages(prev =>
-                    prev.map(m => m.id === assistantId ? { ...m, content: "Generated image:", imageUrl, type: "image" } : m)
-                );
-                recordUsage();
-            } else if (contentType.includes("audio")) {
-                const blob = await response.blob();
-                const audioUrl = URL.createObjectURL(blob);
-                setMessages(prev =>
-                    prev.map(m => m.id === assistantId ? { ...m, content: "Generated audio:", audioUrl, type: "audio" } : m)
-                );
-                recordUsage();
-            } else if (contentType.includes("video")) {
-                const blob = await response.blob();
-                const videoUrl = URL.createObjectURL(blob);
-                setMessages(prev =>
-                    prev.map(m => m.id === assistantId ? { ...m, content: "Generated video:", videoUrl, type: "video" } : m)
-                );
                 recordUsage();
             } else {
-                // JSON response - handle multimodal results
-                const data = await response.json();
+                // Non-streaming response (image/audio/video/json) - use unified handler
+                const { parseMultimodalResponse } = await import("@/lib/multimodal");
+                const result = await parseMultimodalResponse(response, {
+                    uploadToPinata: true,
+                    conversationId: `manowar-${manowar.walletAddress}`,
+                    // Handle async video polling
+                    onVideoPolling: {
+                        onProgress: (status, progress) => {
+                            setMessages(prev =>
+                                prev.map(m => m.id === assistantId ? {
+                                    ...m,
+                                    content: `Video generating... (${status}${progress ? ` - ${progress}%` : ""})`,
+                                } : m)
+                            );
+                        },
+                        onComplete: (url) => {
+                            setMessages(prev =>
+                                prev.map(m => m.id === assistantId ? {
+                                    ...m,
+                                    content: "Video generated:",
+                                    type: "video",
+                                    videoUrl: url,
+                                } : m)
+                            );
+                            recordUsage();
+                        },
+                        onError: (error) => {
+                            setMessages(prev =>
+                                prev.map(m => m.id === assistantId ? {
+                                    ...m,
+                                    content: `Error: ${error}`,
+                                } : m)
+                            );
+                        },
+                    },
+                });
 
-                if (data.success && data.type && data.type !== "text") {
-                    // Prefer Pinata URL if available (new pattern)
-                    if (data.pinataUrl || data.url) {
-                        const mediaUrl = data.pinataUrl || data.url;
-                        if (data.type === "image") {
-                            setMessages(prev =>
-                                prev.map(m => m.id === assistantId ? { ...m, content: `Generated image:`, imageUrl: mediaUrl, type: "image" } : m)
-                            );
-                        } else if (data.type === "audio") {
-                            setMessages(prev =>
-                                prev.map(m => m.id === assistantId ? { ...m, content: `Generated audio:`, audioUrl: mediaUrl, type: "audio" } : m)
-                            );
-                        } else if (data.type === "video") {
-                            setMessages(prev =>
-                                prev.map(m => m.id === assistantId ? { ...m, content: `Generated video:`, videoUrl: mediaUrl, type: "video" } : m)
-                            );
-                        }
-                    } else if (data.data) {
-                        // Fallback: convert base64 data to blob URL
-                        const base64Data = data.data;
-                        const mimeType = data.mimeType || (data.type === "image" ? "image/png" : data.type === "audio" ? "audio/wav" : "video/mp4");
-
-                        const byteArray = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-                        const blob = new Blob([byteArray], { type: mimeType });
-                        const blobUrl = URL.createObjectURL(blob);
-
-                        if (data.type === "image") {
-                            setMessages(prev =>
-                                prev.map(m => m.id === assistantId ? { ...m, content: `Generated image:`, imageUrl: blobUrl, type: "image" } : m)
-                            );
-                        } else if (data.type === "audio") {
-                            setMessages(prev =>
-                                prev.map(m => m.id === assistantId ? { ...m, content: `Generated audio:`, audioUrl: blobUrl, type: "audio" } : m)
-                            );
-                        } else if (data.type === "video") {
-                            setMessages(prev =>
-                                prev.map(m => m.id === assistantId ? { ...m, content: `Generated video:`, videoUrl: blobUrl, type: "video" } : m)
-                            );
-                        }
-                    }
-                } else if (!data.success && data.error) {
-                    throw new Error(data.error);
-                } else {
-                    const content = data.output || data.message || data.content || JSON.stringify(data);
-                    setMessages(prev =>
-                        prev.map(m => m.id === assistantId ? { ...m, content } : m)
-                    );
+                // Handle polling - don't update if polling in progress
+                if (result.polling) {
+                    console.log(`[manowar] Video job submitted, polling: ${result.jobId}`);
+                    return;
                 }
-                recordUsage();
+
+                if (result.success) {
+                    setMessages(prev =>
+                        prev.map(m => m.id === assistantId ? {
+                            ...m,
+                            content: result.content || `Generated ${result.type}:`,
+                            type: result.type,
+                            imageUrl: result.type === "image" ? result.url : undefined,
+                            audioUrl: result.type === "audio" ? result.url : undefined,
+                            videoUrl: result.type === "video" ? result.url : undefined,
+                        } : m)
+                    );
+                    recordUsage();
+                } else {
+                    throw new Error(result.error || "Request failed");
+                }
             }
         } catch (err) {
             const errorMsg = err instanceof Error ? err.message : "Unknown error";

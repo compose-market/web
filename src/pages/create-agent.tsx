@@ -52,7 +52,7 @@ import {
   usdcToWei,
   getContractAddress
 } from "@/lib/contracts";
-import { CHAIN_IDS, CHAIN_CONFIG, INFERENCE_PRICE_WEI } from "@/lib/thirdweb";
+import { CHAIN_IDS, CHAIN_CONFIG, inferencePriceWei } from "@/lib/thirdweb";
 import { useActiveAccount } from "thirdweb/react";
 import { useSendTransaction } from "thirdweb/react";
 import { prepareContractCall } from "thirdweb";
@@ -779,7 +779,7 @@ export default function CreateAgent() {
                                   <div>
                                     <p className="font-mono font-bold text-cyan-400 text-sm">{selectedHFModel.name}</p>
                                     <p className="text-xs text-muted-foreground font-mono">
-                                      via {selectedHFModel.provider} · ${(INFERENCE_PRICE_WEI / 1_000_000).toFixed(3)}/call (x402)
+                                      via {selectedHFModel.provider} · ${(inferencePriceWei / 1_000_000).toFixed(3)}/call (x402)
                                     </p>
                                   </div>
                                   <Sparkles className="w-4 h-4 text-cyan-400" />
@@ -806,7 +806,7 @@ export default function CreateAgent() {
                                 showTaskFilter={true}
                               />
                               <p className="text-[10px] text-muted-foreground">
-                                x402 pricing: ${(INFERENCE_PRICE_WEI / 1_000_000).toFixed(3)}/call
+                                x402 pricing: ${(inferencePriceWei / 1_000_000).toFixed(3)}/call
                               </p>
                             </div>
                           )}

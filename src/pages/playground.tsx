@@ -13,7 +13,7 @@ import { useActiveWallet } from "thirdweb/react";
 import { wrapFetchWithPayment } from "thirdweb/x402";
 import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
-import { thirdwebClient, INFERENCE_PRICE_WEI } from "@/lib/thirdweb";
+import { thirdwebClient, inferencePriceWei } from "@/lib/thirdweb";
 import { createNormalizedFetch } from "@/lib/payment";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -56,50 +56,17 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { MultimodalCanvas } from "@/components/canvas";
+import { MultimodalCanvas } from "@/components/chat";
 import { MirrorPane } from "@/components/mirror-pane";
 import { PluginTester } from "@/components/plugin-tester";
 import { useChat } from "@/hooks/use-chat";
-import { useFileAttachment } from "@/hooks/use-attachment";
-import { useAudioRecording } from "@/hooks/use-recording";
 import { useModels } from "@/hooks/use-model";
 import { fileToDataUrl } from "@/lib/pinata";
+import type { AIModel } from "@/lib/models";
 
 // =============================================================================
-// Types
+// Types - Use AIModel from @/lib/models for model data
 // =============================================================================
-
-interface Model {
-  id: string;
-  name: string;
-  source: string;
-  ownedBy: string;
-  available: boolean;
-  task?: string;
-  description?: string;
-  contextLength?: number;
-  pricing?: {
-    provider: string;
-    input: number;    // USD per million tokens
-    output: number;   // USD per million tokens
-  };
-  architecture?: {
-    inputModalities: string[];
-    outputModalities: string[];
-  };
-  // Model capabilities from backend - used for dynamic UI rendering
-  capabilities?: {
-    tools?: boolean;
-    reasoning?: boolean;
-    structuredOutputs?: boolean;
-    vision?: boolean;
-    codeExecution?: boolean;
-    searchGrounding?: boolean;
-    thinking?: boolean;
-    streaming?: boolean;
-    liveApi?: boolean;
-  };
-}
 
 // Task type color mapping for visual badges
 const TASK_COLORS: Record<string, { bg: string; text: string; border: string }> = {
@@ -165,7 +132,7 @@ export default function PlaygroundPage() {
     taskCategories,
     forceRefresh: forceRefreshModels
   } = useModels();
-  const models = rawModels as unknown as Model[];
+  const models: AIModel[] = rawModels;
   const modelsError = modelsErrorObj?.message ?? null;
 
   // Model filtering
@@ -193,7 +160,7 @@ export default function PlaygroundPage() {
 
   // Model Test State
   const [selectedModel, setSelectedModel] = useState<string>("");
-  const [systemPrompt, setSystemPrompt] = useState("You are a helpful AI assistant.");
+  const [systemPrompt, setSystemPrompt] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [showSessionDialog, setShowSessionDialog] = useState(false);
   const [streaming, setStreaming] = useState(false);
@@ -226,32 +193,20 @@ export default function PlaygroundPage() {
   // Stable conversationId for file hooks
   const conversationId = useRef(`playground-${Date.now()}`).current;
 
-  // Chat state from shared hook
-  const chat = useChat();
+  // Chat state from shared hook (includes messages, attachments, and recording)
+  const chat = useChat({
+    conversationId,
+    onError: (err) => setInferenceError(err),
+  });
   const { messages, setMessages, scrollContainerRef, messagesEndRef,
-    streamedTextRef, currentAssistantIdRef } = chat;
+    streamedTextRef, currentAssistantIdRef, updateAssistantMessage, handleJsonResponse,
+    scheduleStreamUpdate, flushStreamContent,
+    // Attachments
+    attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, uploadedCids, cleanupFiles, clearFiles,
+    // Recording
+    isRecording, recordingSupported, startRecording, stopRecording,
+  } = chat;
   const [inputValue, setInputValue] = useState("");
-
-  // File Attachment from shared hook
-  const fileAttachment = useFileAttachment({
-    conversationId,
-    onError: (err) => setInferenceError(err),
-  });
-  const { attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, uploadedCids, cleanupFiles } = fileAttachment;
-
-  // Audio recording from shared hook
-  const recording = useAudioRecording({
-    conversationId,
-    onRecordingComplete: (file) => {
-      fileAttachment.attachedFiles.length === 0 &&
-        fileAttachment.handleFileSelect({ target: { files: [file.file] } } as unknown as React.ChangeEvent<HTMLInputElement>);
-    },
-    onError: (err) => setInferenceError(err),
-  });
-  const { isRecording, recordingSupported, startRecording, stopRecording } = recording;
-
-  // Local RAF ref for streaming updates
-  const rafRef = useRef<number | null>(null);
 
   // Auto-select first model when models load
   useEffect(() => {
@@ -259,6 +214,18 @@ export default function PlaygroundPage() {
       setSelectedModel(models[0].id);
     }
   }, [models, selectedModel]);
+
+  // Clear chat when model is switched to prevent identity persistence
+  const prevModelRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (prevModelRef.current !== null && prevModelRef.current !== selectedModel && messages.length > 0) {
+      console.log(`[playground] Model switched from ${prevModelRef.current} to ${selectedModel}, clearing chat`);
+      setMessages([]);
+      streamedTextRef.current = "";
+      currentAssistantIdRef.current = null;
+    }
+    prevModelRef.current = selectedModel;
+  }, [selectedModel, setMessages, messages.length]);
 
   // Debounce search query for performance (150ms delay)
   useEffect(() => {
@@ -309,11 +276,12 @@ export default function PlaygroundPage() {
   }, [selectedModelInfo]);
 
   // Check if model supports specific capabilities from the backend registry
-  const modelSupportsTools = useMemo(() => selectedModelInfo?.capabilities?.tools ?? false, [selectedModelInfo]);
-  const modelSupportsVision = useMemo(() => selectedModelInfo?.capabilities?.vision ?? false, [selectedModelInfo]);
-  const modelSupportsCodeExecution = useMemo(() => selectedModelInfo?.capabilities?.codeExecution ?? isGoogleModel, [selectedModelInfo, isGoogleModel]);
-  const modelSupportsSearchGrounding = useMemo(() => selectedModelInfo?.capabilities?.searchGrounding ?? isGoogleModel, [selectedModelInfo, isGoogleModel]);
-  const modelSupportsReasoning = useMemo(() => selectedModelInfo?.capabilities?.reasoning ?? false, [selectedModelInfo]);
+  // capabilities is a string array of positive capabilities, e.g., ["tools", "vision"]
+  const modelSupportsTools = useMemo(() => selectedModelInfo?.capabilities?.includes("tools") ?? false, [selectedModelInfo]);
+  const modelSupportsVision = useMemo(() => selectedModelInfo?.capabilities?.includes("vision") ?? false, [selectedModelInfo]);
+  const modelSupportsCodeExecution = useMemo(() => selectedModelInfo?.capabilities?.includes("code-execution") ?? isGoogleModel, [selectedModelInfo, isGoogleModel]);
+  const modelSupportsSearchGrounding = useMemo(() => selectedModelInfo?.capabilities?.includes("search-grounding") ?? isGoogleModel, [selectedModelInfo, isGoogleModel]);
+  const modelSupportsReasoning = useMemo(() => selectedModelInfo?.capabilities?.includes("reasoning") ?? false, [selectedModelInfo]);
 
   // Build tools object for API request - only include enabled tools
   const activeTools = useMemo(() => {
@@ -340,7 +308,7 @@ export default function PlaygroundPage() {
 
     // Pre-compute attachment base64 data BEFORE clearing files
     let attachmentBase64: string | undefined;
-    let attachmentType: "image" | "audio" | undefined;
+    let attachmentType: "image" | "audio" | "video" | undefined;
     if (attached && attached.file) {
       const base64Data = await fileToDataUrl(attached.file);
       attachmentBase64 = base64Data.split(",")[1];
@@ -359,12 +327,15 @@ export default function PlaygroundPage() {
 
     setMessages((prev) => [...prev, userMessage]);
     setInputValue("");
-    fileAttachment.clearFiles();
+    clearFiles();
     setStreaming(true);
     setInferenceError(null);
 
-    // Create assistant placeholder
+    // Create assistant placeholder - MUST reset refs to prevent stale content
     const assistantId = crypto.randomUUID();
+    streamedTextRef.current = "";  // Reset streaming content before new request
+    currentAssistantIdRef.current = assistantId;  // Set current assistant ID
+
     setMessages((prev) => [
       ...prev,
       { id: assistantId, role: "assistant", content: "", timestamp: Date.now(), type: outputType },
@@ -380,7 +351,7 @@ export default function PlaygroundPage() {
         normalizedFetch,
         thirdwebClient,
         wallet,
-        { maxValue: BigInt(INFERENCE_PRICE_WEI) }
+        { maxValue: BigInt(inferencePriceWei) }
       );
 
       const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -389,21 +360,46 @@ export default function PlaygroundPage() {
         headers["x-session-budget-remaining"] = budgetRemaining.toString();
       }
 
-      // Build request body based on output type
+      // Build request body and select endpoint based on output type
       let requestBody: Record<string, unknown>;
+      let endpoint: string;
 
       if (outputType === "image") {
-        requestBody = { prompt: userMessage.content };
-        if (attachmentBase64) requestBody.image = attachmentBase64;
-      } else if (outputType === "audio") {
-        requestBody = { text: userMessage.content };
-      } else if (outputType === "embedding") {
-        requestBody = { text: userMessage.content };
-      } else {
+        endpoint = `${API_BASE}/v1/images/generations`;
         requestBody = {
-          messages: [...messages, userMessage].map(({ role, content }) => ({ role, content })),
-          systemPrompt,
+          model: selectedModel,
+          prompt: userMessage.content,
         };
+        if (attachmentBase64) requestBody.image = attachmentBase64;
+      } else if (outputType === "video") {
+        endpoint = `${API_BASE}/v1/videos/generations`;
+        requestBody = {
+          model: selectedModel,
+          prompt: userMessage.content,
+        };
+      } else if (outputType === "audio") {
+        endpoint = `${API_BASE}/v1/audio/speech`;
+        requestBody = {
+          model: selectedModel,
+          input: userMessage.content,
+        };
+      } else if (outputType === "embedding") {
+        endpoint = `${API_BASE}/v1/embeddings`;
+        requestBody = {
+          model: selectedModel,
+          input: userMessage.content,
+        };
+      } else {
+        // Text/chat generation
+        endpoint = `${API_BASE}/v1/chat/completions`;
+        requestBody = {
+          model: selectedModel,
+          messages: [...messages, userMessage].map(({ role, content }) => ({ role, content })),
+          stream: true,
+        };
+        if (systemPrompt) {
+          (requestBody.messages as unknown[]).unshift({ role: "system", content: systemPrompt });
+        }
         if (attachmentBase64 && attachmentType === "image") {
           requestBody.image = attachmentBase64;
         } else if (attachmentBase64 && attachmentType === "audio") {
@@ -415,7 +411,7 @@ export default function PlaygroundPage() {
         }
       }
 
-      const response = await fetchWithPayment(`${API_BASE}/api/inference/${encodeURIComponent(selectedModel)}`, {
+      const response = await fetchWithPayment(endpoint, {
         method: "POST",
         headers,
         body: JSON.stringify(requestBody),
@@ -423,79 +419,79 @@ export default function PlaygroundPage() {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || errorData.error || `Inference failed: ${response.status}`);
+        // Handle OpenAI error format: {error: {message: "...", type: "..."}}
+        const errField = errorData.error;
+        const errMsg = typeof errField === "string"
+          ? errField
+          : (errField?.message || errorData.message || JSON.stringify(errField) || `Inference failed: ${response.status}`);
+        throw new Error(errMsg);
       }
 
-      const contentType = response.headers.get("content-type") || "";
+      // Parse response using unified multimodal handler
+      console.log(`[playground] Starting stream for model: ${selectedModel}`);
+      const { parseMultimodalResponse } = await import("@/lib/multimodal");
+      const result = await parseMultimodalResponse(response, {
+        onStreamChunk: (chunk) => {
+          console.log(`[playground] Chunk received:`, chunk.substring(0, 50));
+          streamedTextRef.current += chunk;
+          scheduleStreamUpdate(streamedTextRef.current);
+        },
+        uploadToPinata: true,
+        conversationId,
+        // Handle async video polling
+        onVideoPolling: {
+          onProgress: (status, progress) => {
+            console.log(`[playground] Video progress: ${status} (${progress ?? 0}%)`);
+            updateAssistantMessage(assistantId, {
+              content: `Video generating... (${status}${progress ? ` - ${progress}%` : ""})`,
+              type: "video",
+            });
+          },
+          onComplete: (url) => {
+            console.log(`[playground] Video complete:`, url);
+            updateAssistantMessage(assistantId, {
+              content: "Video generated:",
+              type: "video",
+              videoUrl: url,
+            });
+            recordUsage();
+          },
+          onError: (error) => {
+            console.error(`[playground] Video error:`, error);
+            updateAssistantMessage(assistantId, {
+              content: `Error: ${error}`,
+              type: "video",
+            });
+          },
+        },
+      });
+      console.log(`[playground] Stream complete. Total content length: ${streamedTextRef.current.length}`);
 
-      // O(1) message update helper
-      const updateAssistantMessage = (content: string, extra?: Record<string, unknown>) => {
-        setMessages(prev => {
-          const next = [...prev];
-          const last = next[next.length - 1];
-          if (last?.id === assistantId) {
-            next[next.length - 1] = { ...last, content, ...extra };
-            return next;
-          }
-          const idx = next.findIndex(m => m.id === assistantId);
-          if (idx >= 0) next[idx] = { ...next[idx], content, ...extra };
-          return next;
+      // Final flush for streaming
+      flushStreamContent();
+
+      // Handle polling result - don't update if polling is in progress
+      if (result.polling) {
+        console.log(`[playground] Video job submitted, polling in background: ${result.jobId}`);
+        updateAssistantMessage(assistantId, {
+          content: `Video generating... (${result.type === "video" ? "queued" : "processing"})`,
+          type: "video",
         });
-      };
+        // Polling callbacks will handle the rest
+        return;
+      }
 
-      if (contentType.includes("text/event-stream") || contentType.includes("text/plain")) {
-        const reader = response.body?.getReader();
-        if (!reader) throw new Error("No response body");
-
-        const decoder = new TextDecoder();
-        let fullResponse = "";
-
-        currentAssistantIdRef.current = assistantId;
-        streamedTextRef.current = "";
-
-        const flushStreamedContent = () => {
-          rafRef.current = null;
-          updateAssistantMessage(streamedTextRef.current);
-        };
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          const chunk = decoder.decode(value, { stream: true });
-          fullResponse += chunk;
-          streamedTextRef.current = fullResponse;
-
-          if (rafRef.current === null) {
-            rafRef.current = requestAnimationFrame(flushStreamedContent);
-          }
-        }
-
-        if (rafRef.current !== null) {
-          cancelAnimationFrame(rafRef.current);
-          rafRef.current = null;
-        }
-        updateAssistantMessage(fullResponse);
-        recordUsage();
-      } else if (contentType.includes("image")) {
-        const blob = await response.blob();
-        const imageUrl = URL.createObjectURL(blob);
-        updateAssistantMessage("Generated image:", { imageUrl, type: "image" });
-        recordUsage();
-      } else if (contentType.includes("audio")) {
-        const blob = await response.blob();
-        const audioUrl = URL.createObjectURL(blob);
-        updateAssistantMessage("Generated audio:", { audioUrl, type: "audio" });
-        recordUsage();
-      } else if (contentType.includes("video")) {
-        const blob = await response.blob();
-        const videoUrl = URL.createObjectURL(blob);
-        updateAssistantMessage("Generated video:", { videoUrl, type: "video" });
+      if (result.success) {
+        updateAssistantMessage(assistantId, {
+          content: result.content || `Generated ${result.type}:`,
+          type: result.type,
+          imageUrl: result.type === "image" ? result.url : undefined,
+          audioUrl: result.type === "audio" ? result.url : undefined,
+          videoUrl: result.type === "video" ? result.url : undefined,
+        });
         recordUsage();
       } else {
-        const data = await response.json();
-        updateAssistantMessage(JSON.stringify(data, null, 2), { type: "embedding" });
-        recordUsage();
+        throw new Error(result.error || "Request failed");
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Unknown error";
@@ -506,14 +502,14 @@ export default function PlaygroundPage() {
     } finally {
       setStreaming(false);
     }
-  }, [inputValue, streaming, selectedModel, messages, systemPrompt, wallet, budgetRemaining, recordUsage, outputType, attachedFiles, fileAttachment, sessionActive]);
+  }, [inputValue, streaming, selectedModel, messages, systemPrompt, wallet, budgetRemaining, recordUsage, outputType, attachedFiles, clearFiles, sessionActive, activeTools, isGoogleModel, modelSupportsSearchGrounding, modelSupportsCodeExecution]);
 
   const handleClearChat = useCallback(() => {
     setMessages([]);
     setInferenceError(null);
-    fileAttachment.clearFiles();
+    clearFiles();
     if (uploadedCids.length > 0) cleanupFiles();
-  }, [uploadedCids, cleanupFiles, fileAttachment, setMessages]);
+  }, [uploadedCids, cleanupFiles, clearFiles, setMessages]);
 
   // ==========================================================================
   // Render

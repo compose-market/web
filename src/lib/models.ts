@@ -133,6 +133,111 @@ export async function fetchModelRegistry(): Promise<ModelRegistry | null> {
   }
 }
 
+// =============================================================================
+// OpenAI-Compatible /v1/models Endpoints
+// =============================================================================
+
+/**
+ * OpenAI-format model response
+ */
+export interface OpenAIModel {
+  id: string;
+  object: "model";
+  created: number;
+  owned_by: string;
+  name?: string;
+  description?: string;
+  context_window?: number;
+  max_output_tokens?: number;
+  capabilities?: string[];
+  pricing?: {
+    input: number;
+    output: number;
+  };
+  task_type?: string;
+  input_modalities?: string[];
+  output_modalities?: string[];
+}
+
+export interface OpenAIModelsResponse {
+  object: "list";
+  data: OpenAIModel[];
+}
+
+/**
+ * Fetch models from OpenAI-compatible /v1/models endpoint
+ * Returns optimized set (~810 models) for fast app loading
+ */
+export async function fetchOpenAIModels(): Promise<OpenAIModel[]> {
+  try {
+    const res = await fetch(`${API_BASE}/v1/models`);
+    if (!res.ok) throw new Error(`Failed to fetch /v1/models: ${res.status}`);
+
+    const data: OpenAIModelsResponse = await res.json();
+    console.log(`[models] Loaded ${data.data.length} models from /v1/models`);
+    return data.data;
+  } catch (error) {
+    console.error("[models] Failed to fetch /v1/models:", error);
+    return [];
+  }
+}
+
+/**
+ * Fetch extended models from /v1/models/all endpoint
+ * Returns full catalog (~43k+ models)
+ */
+export async function fetchOpenAIModelsExtended(): Promise<OpenAIModel[]> {
+  try {
+    const res = await fetch(`${API_BASE}/v1/models/all`);
+    if (!res.ok) throw new Error(`Failed to fetch /v1/models/all: ${res.status}`);
+
+    const data: OpenAIModelsResponse = await res.json();
+    console.log(`[models] Loaded ${data.data.length} extended models from /v1/models/all`);
+    return data.data;
+  } catch (error) {
+    console.error("[models] Failed to fetch /v1/models/all:", error);
+    return [];
+  }
+}
+
+/**
+ * Fetch a specific model by ID from /v1/models/:model
+ */
+export async function fetchOpenAIModel(modelId: string): Promise<OpenAIModel | null> {
+  try {
+    const res = await fetch(`${API_BASE}/v1/models/${encodeURIComponent(modelId)}`);
+    if (!res.ok) {
+      if (res.status === 404) return null;
+      throw new Error(`Failed to fetch model: ${res.status}`);
+    }
+    return await res.json();
+  } catch (error) {
+    console.error(`[models] Failed to fetch model ${modelId}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Convert OpenAI model format to AIModel format
+ */
+export function openAIModelToAIModel(model: OpenAIModel): AIModel {
+  return {
+    id: model.id,
+    name: model.name || model.id,
+    ownedBy: model.owned_by,
+    source: (model.owned_by || "unknown") as ModelProvider,
+    task: model.task_type,
+    description: model.description,
+    available: true,
+    contextLength: model.context_window,
+    maxOutputTokens: model.max_output_tokens,
+    pricing: model.pricing,
+    capabilities: model.capabilities,
+    inputModalities: model.input_modalities,
+    outputModalities: model.output_modalities,
+  };
+}
+
 /**
  * Get the API key environment variable name for a provider
  * Useful for UI hints on what keys are needed
