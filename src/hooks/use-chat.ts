@@ -1,38 +1,39 @@
 /**
- * Shared chat state management hook
+ * Unified Chat Hook
+ * 
+ * Consolidates:
+ * - Chat state management (messages, streaming, scroll)
+ * - File attachment handling (upload to Pinata)
+ * - Audio recording (MediaRecorder + Pinata upload)
  * 
  * Provides O(1) message updates, RAF-batched streaming, and stick-to-bottom scroll.
  */
 import { useState, useRef, useCallback, useEffect } from "react";
+import { uploadConversationFile, fileToDataUrl, cleanupConversationFiles } from "@/lib/pinata";
+import { type ChatMessage, type AttachedFile } from "@/lib/api";
 
-export interface ChatMessage {
-    id: string;
-    role: "user" | "assistant";
-    content: string;
-    timestamp: number;
-    type?: "text" | "image" | "audio" | "video" | "embedding";
-    imageUrl?: string;
-    audioUrl?: string;
-    videoUrl?: string;
-}
+// Re-export types for convenience
+export type { ChatMessage, AttachedFile } from "@/lib/api";
 
-export interface AttachedFile {
-    file: File;
-    cid?: string;
-    url?: string;
-    preview?: string;
-    uploading: boolean;
-    type: "image" | "audio";
-}
+// =============================================================================
+// Types
+// =============================================================================
 
 export interface UseChatOptions {
+    /** Conversation ID for Pinata grouping */
+    conversationId?: string;
     /** Called when a full response is received */
     onResponse?: (message: ChatMessage) => void;
+    /** Called when an error occurs */
+    onError?: (error: string) => void;
     /** Enable 60fps max streaming updates via requestAnimationFrame */
     rafBatching?: boolean;
+    /** Max files allowed (default: 1) */
+    maxFiles?: number;
 }
 
 export interface UseChatReturn {
+    // === Messages ===
     messages: ChatMessage[];
     setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
     /** Add a user message, returns the message ID */
@@ -45,40 +46,99 @@ export interface UseChatReturn {
     createAssistantPlaceholder: (type?: ChatMessage["type"]) => string;
     /** Update assistant message by ID (O(1) for last message) */
     updateAssistantMessage: (id: string, update: Partial<ChatMessage>) => void;
+    /** Parse OpenAI-format JSON response and update assistant message */
+    handleJsonResponse: (id: string, data: unknown) => void;
     /** Clear all messages */
     clearMessages: () => void;
-    // RAF batching for streaming
+
+    // === Streaming ===
     streamedTextRef: React.MutableRefObject<string>;
     currentAssistantIdRef: React.MutableRefObject<string | null>;
     /** Schedule a streaming update (batched to RAF) */
     scheduleStreamUpdate: (content: string) => void;
     /** Flush any pending stream content immediately */
     flushStreamContent: () => void;
-    // Scroll management
+
+    // === Scroll ===
     scrollContainerRef: React.RefObject<HTMLDivElement | null>;
     messagesEndRef: React.RefObject<HTMLDivElement | null>;
     /** Check if user is near bottom of scroll */
     isNearBottom: () => boolean;
+
+    // === File Attachment ===
+    attachedFiles: AttachedFile[];
+    fileInputRef: React.RefObject<HTMLInputElement | null>;
+    /** Handle file input change event */
+    handleFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => Promise<void>;
+    /** Remove a specific file */
+    handleRemoveFile: (file: File) => void;
+    /** Clear all attached files */
+    clearFiles: () => void;
+    /** Cleanup uploaded files from Pinata */
+    cleanupFiles: () => Promise<void>;
+    /** Whether any file is currently uploading */
+    isUploading: boolean;
+    /** List of uploaded CIDs for cleanup */
+    uploadedCids: string[];
+
+    // === Audio Recording ===
+    isRecording: boolean;
+    recordingSupported: boolean;
+    /** Start recording audio from microphone */
+    startRecording: () => Promise<void>;
+    /** Stop recording and upload to Pinata */
+    stopRecording: () => void;
 }
 
 export function useChat(options: UseChatOptions = {}): UseChatReturn {
-    const { rafBatching = true } = options;
+    const {
+        conversationId: providedId,
+        onError,
+        rafBatching = true,
+        maxFiles = 1,
+    } = options;
 
+    // Stable conversationId - capture on first render only
+    const conversationIdRef = useRef(providedId ?? `conv-${Date.now()}`);
+
+    // === Message State ===
     const [messages, setMessages] = useState<ChatMessage[]>([]);
 
-    // RAF batching refs
+    // === File Attachment State ===
+    const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+    const [uploadedCids, setUploadedCids] = useState<string[]>([]);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // === Recording State ===
+    const [isRecording, setIsRecording] = useState(false);
+    const [recordingSupported, setRecordingSupported] = useState(true);
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const audioChunksRef = useRef<Blob[]>([]);
+    const mediaStreamRef = useRef<MediaStream | null>(null);
+
+    // === RAF Batching Refs ===
     const streamedTextRef = useRef<string>("");
     const rafRef = useRef<number | null>(null);
     const currentAssistantIdRef = useRef<string | null>(null);
 
-    // Scroll refs
+    // === Scroll Refs ===
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
-    // Add user message
+    // Check if recording is supported on mount
+    useEffect(() => {
+        if (!navigator.mediaDevices?.getUserMedia) {
+            setRecordingSupported(false);
+        }
+    }, []);
+
+    // ==========================================================================
+    // Message Functions
+    // ==========================================================================
+
     const addUserMessage = useCallback((
         content: string,
-        options?: {
+        msgOptions?: {
             type?: ChatMessage["type"];
             imageUrl?: string;
             audioUrl?: string;
@@ -90,15 +150,14 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
             role: "user",
             content,
             timestamp: Date.now(),
-            type: options?.type || "text",
-            imageUrl: options?.imageUrl,
-            audioUrl: options?.audioUrl,
+            type: msgOptions?.type || "text",
+            imageUrl: msgOptions?.imageUrl,
+            audioUrl: msgOptions?.audioUrl,
         };
         setMessages(prev => [...prev, message]);
         return id;
     }, []);
 
-    // Create assistant placeholder
     const createAssistantPlaceholder = useCallback((type?: ChatMessage["type"]): string => {
         const id = crypto.randomUUID();
         currentAssistantIdRef.current = id;
@@ -115,7 +174,6 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         return id;
     }, []);
 
-    // O(1) update for assistant message (optimized for last message)
     const updateAssistantMessage = useCallback((id: string, update: Partial<ChatMessage>) => {
         setMessages(prev => {
             const next = [...prev];
@@ -136,14 +194,16 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         });
     }, []);
 
-    // Clear all messages
     const clearMessages = useCallback(() => {
         setMessages([]);
         streamedTextRef.current = "";
         currentAssistantIdRef.current = null;
     }, []);
 
-    // RAF-batched stream update
+    // ==========================================================================
+    // Streaming Functions
+    // ==========================================================================
+
     const flushStreamContent = useCallback(() => {
         if (rafRef.current !== null) {
             cancelAnimationFrame(rafRef.current);
@@ -162,7 +222,6 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         streamedTextRef.current = content;
 
         if (!rafBatching) {
-            // Direct update without batching
             const assistantId = currentAssistantIdRef.current;
             if (assistantId) {
                 updateAssistantMessage(assistantId, { content });
@@ -170,7 +229,6 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
             return;
         }
 
-        // Schedule RAF if not already scheduled
         if (rafRef.current === null) {
             rafRef.current = requestAnimationFrame(() => {
                 rafRef.current = null;
@@ -182,41 +240,252 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         }
     }, [rafBatching, updateAssistantMessage]);
 
-    // Stick-to-bottom: check if user is near bottom
+    // ==========================================================================
+    // JSON Response Handler (delegates to centralized parseJsonResponse)
+    // ==========================================================================
+
+    const handleJsonResponse = useCallback((id: string, data: unknown) => {
+        // Import dynamically to avoid circular dependencies
+        Promise.all([
+            import("@/lib/api"),
+            import("@/lib/multimodal"),
+        ]).then(async ([{ parseJsonResponse }, { uploadBase64ToPinata }]) => {
+            const result = parseJsonResponse(data);
+
+            if (!result.success) {
+                updateAssistantMessage(id, { content: `Error: ${result.error || "Unknown error"}` });
+                return;
+            }
+
+            // Upload base64 to Pinata if present and no URL
+            let url = result.url;
+            if (!url && result.base64 && (result.type === "image" || result.type === "audio" || result.type === "video")) {
+                try {
+                    url = await uploadBase64ToPinata(result.base64, result.type, conversationIdRef.current);
+                } catch (err) {
+                    console.error("[use-chat] Pinata upload failed:", err);
+                }
+            }
+
+            updateAssistantMessage(id, {
+                content: result.content || `Generated ${result.type}:`,
+                type: result.type,
+                imageUrl: result.type === "image" ? url : undefined,
+                audioUrl: result.type === "audio" ? url : undefined,
+                videoUrl: result.type === "video" ? url : undefined,
+            });
+        });
+    }, [updateAssistantMessage]);
+
+    // ==========================================================================
+    // Scroll Functions
+    // ==========================================================================
+
     const isNearBottom = useCallback(() => {
         const el = scrollContainerRef.current;
         if (!el) return true;
         return el.scrollHeight - el.scrollTop - el.clientHeight < 120;
     }, []);
 
-    // Auto-scroll when messages change (only if near bottom)
     useEffect(() => {
         if (!isNearBottom()) return;
         messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
     }, [messages, isNearBottom]);
 
-    // Cleanup RAF on unmount
+    // ==========================================================================
+    // File Attachment Functions
+    // ==========================================================================
+
+    const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (!e.target.files || e.target.files.length === 0) return;
+
+        const file = e.target.files[0];
+        const type: AttachedFile["type"] = file.type.startsWith("image/")
+            ? "image"
+            : file.type.startsWith("video/")
+                ? "video"
+                : "audio";
+
+        try {
+            const preview = await fileToDataUrl(file);
+
+            const newFile: AttachedFile = {
+                file,
+                preview,
+                uploading: true,
+                type,
+            };
+
+            if (maxFiles === 1) {
+                setAttachedFiles([newFile]);
+            } else {
+                setAttachedFiles(prev =>
+                    prev.length >= maxFiles
+                        ? [...prev.slice(1), newFile]
+                        : [...prev, newFile]
+                );
+            }
+
+            const { cid, url } = await uploadConversationFile(file, conversationIdRef.current);
+
+            setAttachedFiles(prev =>
+                prev.map(f => f.file === file ? { ...f, cid, url, uploading: false } : f)
+            );
+            setUploadedCids(prev => [...prev, cid]);
+
+        } catch (err) {
+            console.error("File upload failed:", err);
+            setAttachedFiles(prev => prev.filter(f => f.file !== file));
+            onError?.("Failed to upload file");
+        }
+
+        e.target.value = "";
+    }, [maxFiles, onError]);
+
+    const handleRemoveFile = useCallback((file: File) => {
+        setAttachedFiles(prev => prev.filter(f => f.file !== file));
+    }, []);
+
+    const clearFiles = useCallback(() => {
+        setAttachedFiles([]);
+        if (fileInputRef.current) {
+            fileInputRef.current.value = "";
+        }
+    }, []);
+
+    const cleanupFiles = useCallback(async () => {
+        if (uploadedCids.length > 0) {
+            await cleanupConversationFiles(uploadedCids);
+            setUploadedCids([]);
+        }
+    }, [uploadedCids]);
+
+    const isUploading = attachedFiles.some(f => f.uploading);
+
+    // ==========================================================================
+    // Audio Recording Functions
+    // ==========================================================================
+
+    const startRecording = useCallback(async () => {
+        if (!recordingSupported) {
+            onError?.("Audio recording not supported in this browser");
+            return;
+        }
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaStreamRef.current = stream;
+
+            const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+            mediaRecorderRef.current = recorder;
+            audioChunksRef.current = [];
+
+            recorder.ondataavailable = (e) => {
+                if (e.data.size > 0) {
+                    audioChunksRef.current.push(e.data);
+                }
+            };
+
+            recorder.onstop = async () => {
+                mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+                mediaStreamRef.current = null;
+
+                const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+                const audioFile = new File([audioBlob], `recording-${Date.now()}.webm`, { type: "audio/webm" });
+
+                try {
+                    const preview = await fileToDataUrl(audioFile);
+
+                    const attachedFile: AttachedFile = {
+                        file: audioFile,
+                        preview,
+                        uploading: true,
+                        type: "audio",
+                    };
+
+                    // Add to attached files
+                    if (maxFiles === 1) {
+                        setAttachedFiles([attachedFile]);
+                    } else {
+                        setAttachedFiles(prev => [...prev, attachedFile]);
+                    }
+
+                    // Upload to Pinata
+                    const { cid, url } = await uploadConversationFile(audioFile, conversationIdRef.current);
+
+                    setAttachedFiles(prev =>
+                        prev.map(f => f.file === audioFile ? { ...f, cid, url, uploading: false } : f)
+                    );
+                    setUploadedCids(prev => [...prev, cid]);
+
+                } catch (err) {
+                    console.error("Recording upload failed:", err);
+                    onError?.("Failed to upload recording");
+                }
+            };
+
+            recorder.start();
+            setIsRecording(true);
+
+        } catch (err) {
+            console.error("Failed to start recording:", err);
+            onError?.("Failed to access microphone. Please check permissions.");
+        }
+    }, [recordingSupported, maxFiles, onError]);
+
+    const stopRecording = useCallback(() => {
+        if (mediaRecorderRef.current && isRecording) {
+            mediaRecorderRef.current.stop();
+            setIsRecording(false);
+        }
+    }, [isRecording]);
+
+    // ==========================================================================
+    // Cleanup
+    // ==========================================================================
+
     useEffect(() => {
         return () => {
             if (rafRef.current !== null) {
                 cancelAnimationFrame(rafRef.current);
             }
+            if (mediaStreamRef.current) {
+                mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+            }
         };
     }, []);
 
     return {
+        // Messages
         messages,
         setMessages,
         addUserMessage,
         createAssistantPlaceholder,
         updateAssistantMessage,
+        handleJsonResponse,
         clearMessages,
+        // Streaming
         streamedTextRef,
         currentAssistantIdRef,
         scheduleStreamUpdate,
         flushStreamContent,
+        // Scroll
         scrollContainerRef,
         messagesEndRef,
         isNearBottom,
+        // Files
+        attachedFiles,
+        fileInputRef,
+        handleFileSelect,
+        handleRemoveFile,
+        clearFiles,
+        cleanupFiles,
+        isUploading,
+        uploadedCids,
+        // Recording
+        isRecording,
+        recordingSupported,
+        startRecording,
+        stopRecording,
     };
 }
