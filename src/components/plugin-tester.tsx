@@ -7,7 +7,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useActiveWallet } from "thirdweb/react";
 import { wrapFetchWithPayment } from "thirdweb/x402";
-import { thirdwebClient, INFERENCE_PRICE_WEI } from "@/lib/thirdweb";
+import { thirdwebClient, inferencePriceWei } from "@/lib/thirdweb";
 import { createNormalizedFetch } from "@/lib/payment";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -350,7 +350,7 @@ export function PluginTester({
                 normalizedFetch,
                 thirdwebClient,
                 wallet,
-                { maxValue: BigInt(INFERENCE_PRICE_WEI) }
+                { maxValue: BigInt(inferencePriceWei) }
             );
 
             const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -462,7 +462,7 @@ export function PluginTester({
                 normalizedFetch,
                 thirdwebClient,
                 wallet,
-                { maxValue: BigInt(INFERENCE_PRICE_WEI) }
+                { maxValue: BigInt(inferencePriceWei) }
             );
 
             const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -611,7 +611,7 @@ export function PluginTester({
                 normalizedFetch,
                 thirdwebClient,
                 wallet,
-                { maxValue: BigInt(INFERENCE_PRICE_WEI) }
+                { maxValue: BigInt(inferencePriceWei) }
             );
 
             const headers: Record<string, string> = { "Content-Type": "application/json" };

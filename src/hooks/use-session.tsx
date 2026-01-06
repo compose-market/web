@@ -1,23 +1,23 @@
-import { 
-  useState, 
-  useCallback, 
-  useEffect, 
-  createContext, 
-  useContext, 
-  ReactNode 
+import {
+  useState,
+  useCallback,
+  useEffect,
+  createContext,
+  useContext,
+  ReactNode
 } from "react";
 import { useActiveAccount } from "thirdweb/react";
 import { getContract } from "thirdweb";
 import { addSessionKey, getAllActiveSigners } from "thirdweb/extensions/erc4337";
 import { approve, allowance, balanceOf } from "thirdweb/extensions/erc20";
 import { sendTransaction } from "thirdweb";
-import { 
-  thirdwebClient, 
-  paymentChain, 
-  paymentToken, 
+import {
+  thirdwebClient,
+  paymentChain,
+  paymentToken,
   TREASURY_WALLET,
   SESSION_BUDGET_PRESETS,
-  INFERENCE_PRICE_WEI,
+  inferencePriceWei,
 } from "@/lib/thirdweb";
 
 // Session storage key
@@ -76,7 +76,7 @@ function loadStoredSession(userAddress: string): SessionState | null {
 
   try {
     const data: StoredSession = JSON.parse(stored);
-    
+
     // Validate session belongs to current user and hasn't expired
     if (data.userAddress === userAddress && data.expiresAt > Date.now()) {
       return {
@@ -88,7 +88,7 @@ function loadStoredSession(userAddress: string): SessionState | null {
         sessionKeyAddress: data.sessionKeyAddress,
       };
     }
-    
+
     // Session expired or different user - clear it
     localStorage.removeItem(SESSION_KEY);
     return null;
@@ -261,7 +261,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
         // Save to localStorage first
         saveSession(newSession, account.address);
-        
+
         // Then update React state
         setSession(newSession);
 
@@ -279,9 +279,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   /**
    * Record usage against the session budget
    * Called after each successful inference
-   * @param amountWei - Amount in USDC wei (6 decimals). Defaults to INFERENCE_PRICE_WEI ($0.005)
+   * @param amountWei - Amount in USDC wei (6 decimals). Defaults to inferencePriceWei ($0.005)
    */
-  const recordUsage = useCallback((amountWei: number = INFERENCE_PRICE_WEI) => {
+  const recordUsage = useCallback((amountWei: number = inferencePriceWei) => {
     if (!account?.address) return;
 
     setSession((prev) => {
@@ -315,10 +315,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   /**
    * Check if session has enough budget for an operation
-   * @param requiredWei - Required amount. Defaults to INFERENCE_PRICE_WEI
+   * @param requiredWei - Required amount. Defaults to inferencePriceWei
    */
   const hasBudget = useCallback(
-    (requiredWei: number = INFERENCE_PRICE_WEI) => {
+    (requiredWei: number = inferencePriceWei) => {
       return session.isActive && session.budgetRemaining >= requiredWei;
     },
     [session]
