@@ -34,17 +34,21 @@ export interface ModelInfo {
     id: string;
     name: string;
     source: string;
-    ownedBy: string;
+    ownedBy?: string;
     task?: string;
     description?: string;
     contextLength?: number;
+    maxOutputTokens?: number;
     pricing?: {
         input: number;    // USD per million tokens
         output: number;   // USD per million tokens
         provider?: string;
     };
     // Model capabilities from backend - array of capability names (e.g., ["tools", "vision"])
+    // Only positive/affirmative capabilities are included
     capabilities?: string[];
+    inputModalities?: string[];
+    outputModalities?: string[];
 }
 
 export interface GoogleToolsState {
@@ -107,7 +111,7 @@ export function MirrorPane({
                         </div>
                     </div>
 
-                    {/* Badges - Dynamic capabilities from backend */}
+                    {/* Badges - Dynamic capabilities from backend (only show positive/affirmative) */}
                     <div className="flex flex-wrap gap-1.5">
                         {modelInfo?.task && (
                             <Badge className="bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30 text-xs">
@@ -149,6 +153,51 @@ export function MirrorPane({
                         {modelInfo?.capabilities?.includes("streaming") && (
                             <Badge className="bg-sky-500/20 text-sky-400 border-sky-500/30 text-xs">
                                 Stream
+                            </Badge>
+                        )}
+                        {modelInfo?.capabilities?.includes("code-execution") && (
+                            <Badge className="bg-lime-500/20 text-lime-400 border-lime-500/30 text-xs">
+                                Code Exec
+                            </Badge>
+                        )}
+                        {modelInfo?.capabilities?.includes("search-grounding") && (
+                            <Badge className="bg-teal-500/20 text-teal-400 border-teal-500/30 text-xs">
+                                Search
+                            </Badge>
+                        )}
+                        {modelInfo?.capabilities?.includes("live-api") && (
+                            <Badge className="bg-rose-500/20 text-rose-400 border-rose-500/30 text-xs">
+                                Live API
+                            </Badge>
+                        )}
+                        {modelInfo?.capabilities?.includes("embeddings") && (
+                            <Badge className="bg-indigo-500/20 text-indigo-400 border-indigo-500/30 text-xs">
+                                Embeddings
+                            </Badge>
+                        )}
+                        {modelInfo?.capabilities?.includes("image-generation") && (
+                            <Badge className="bg-pink-500/20 text-pink-400 border-pink-500/30 text-xs">
+                                Image Gen
+                            </Badge>
+                        )}
+                        {modelInfo?.capabilities?.includes("audio-generation") && (
+                            <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-xs">
+                                Audio Gen
+                            </Badge>
+                        )}
+                        {modelInfo?.capabilities?.includes("audio-understanding") && (
+                            <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-xs">
+                                Audio In
+                            </Badge>
+                        )}
+                        {modelInfo?.capabilities?.includes("video-understanding") && (
+                            <Badge className="bg-red-500/20 text-red-400 border-red-500/30 text-xs">
+                                Video In
+                            </Badge>
+                        )}
+                        {modelInfo?.capabilities?.includes("agentic") && (
+                            <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-xs">
+                                Agentic
                             </Badge>
                         )}
                     </div>
