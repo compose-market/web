@@ -256,7 +256,7 @@ export function ManowarCard({ manowar, onCopyEndpoint }: ManowarCardProps) {
                                 <Tooltip>
                                     <TooltipTrigger asChild>
                                         <button
-                                            onClick={() => window.open(`https://testnet.snowtrace.io/token/${import.meta.env.VITE_MANOWAR_CONTRACT}?a=${manowar.id}`, "_blank")}
+                                            onClick={() => window.open(`https://testnet.snowtrace.io/token/${import.meta.env.VITE_FUJI_MANOWAR_CONTRACT}?a=${manowar.id}`, "_blank")}
                                             className="text-muted-foreground hover:text-fuchsia-400 transition-colors shrink-0"
                                         >
                                             <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4" />

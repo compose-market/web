@@ -14,17 +14,17 @@ import { keccak256, encodePacked, type Address } from "viem";
 
 export const CONTRACT_ADDRESSES = {
   [CHAIN_IDS.avalancheFuji]: {
-    AgentFactory: (import.meta.env.VITE_AGENT_FACTORY_CONTRACT || "0xd136D89C05C521269Ba02D83dE26A75374e5d29B") as Address,
-    Clone: (import.meta.env.VITE_CLONE_CONTRACT || "0x750eF994FcEe4C1BEC61499A3eF65ECad1900468") as Address,
-    Warp: (import.meta.env.VITE_WARP_CONTRACT || "0xA01aD87A344381F1449c12a3c7575d9828e87128") as Address,
-    Manowar: (import.meta.env.VITE_MANOWAR_CONTRACT || "0xf2E37f4d33d9Bfba13f092097FeDC695413F00f4") as Address,
-    RFA: (import.meta.env.VITE_RFA_CONTRACT || "0xB79D30Dfcad93c4316d1996aEcA5da1fB218bCa7") as Address,
-    Lease: (import.meta.env.VITE_LEASE_CONTRACT || "0x6d0CC378F93D972D00CbC4e4DDBBD3Cb4E9B8354") as Address,
-    Royalties: (import.meta.env.VITE_ROYALTIES_CONTRACT || "0x1A67e2af24a28C26B8E760d6e7B21f41D7D23a5d") as Address,
-    Distributor: (import.meta.env.VITE_DISTRIBUTOR_CONTRACT || "0x0FAFe6E2925646a53Cd9F1bFF1C8a4259f41B5D5") as Address,
-    Delegation: (import.meta.env.VITE_DELEGATION_CONTRACT || "0xdbe73962269aF392B098159406ba786de4619e0E") as Address,
-    AgentManager: (import.meta.env.VITE_AGENT_MANAGER_CONTRACT || "0x7A20DBF6A2F7f7146eD7C6564404Ca8596A1282C") as Address,
-    Utils: (import.meta.env.VITE_UTILS_CONTRACT || "0x344FAa6a0B1E945aE423892C80490052EaF9dADb") as Address,
+    AgentFactory: (import.meta.env.VITE_FUJI_AGENT_FACTORY_CONTRACT || "0xd136D89C05C521269Ba02D83dE26A75374e5d29B") as Address,
+    Clone: (import.meta.env.VITE_FUJI_CLONE_CONTRACT || "0x750eF994FcEe4C1BEC61499A3eF65ECad1900468") as Address,
+    Warp: (import.meta.env.VITE_FUJI_WARP_CONTRACT || "0xA01aD87A344381F1449c12a3c7575d9828e87128") as Address,
+    Manowar: (import.meta.env.VITE_FUJI_MANOWAR_CONTRACT || "0xf2E37f4d33d9Bfba13f092097FeDC695413F00f4") as Address,
+    RFA: (import.meta.env.VITE_FUJI_RFA_CONTRACT || "0xB79D30Dfcad93c4316d1996aEcA5da1fB218bCa7") as Address,
+    Lease: (import.meta.env.VITE_FUJI_LEASE_CONTRACT || "0x6d0CC378F93D972D00CbC4e4DDBBD3Cb4E9B8354") as Address,
+    Royalties: (import.meta.env.VITE_FUJI_ROYALTIES_CONTRACT || "0x1A67e2af24a28C26B8E760d6e7B21f41D7D23a5d") as Address,
+    Distributor: (import.meta.env.VITE_FUJI_DISTRIBUTOR_CONTRACT || "0x0FAFe6E2925646a53Cd9F1bFF1C8a4259f41B5D5") as Address,
+    Delegation: (import.meta.env.VITE_FUJI_DELEGATION_CONTRACT || "0xdbe73962269aF392B098159406ba786de4619e0E") as Address,
+    AgentManager: (import.meta.env.VITE_FUJI_AGENT_MANAGER_CONTRACT || "0x7A20DBF6A2F7f7146eD7C6564404Ca8596A1282C") as Address,
+    Utils: (import.meta.env.VITE_FUJI_UTILS_CONTRACT || "0x344FAa6a0B1E945aE423892C80490052EaF9dADb") as Address,
   },
 } as const;
 

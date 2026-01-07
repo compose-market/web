@@ -377,7 +377,7 @@ const ManowarCard = React.memo(function ManowarCard({ manowar }: { manowar: Onch
         <Button
           variant="outline"
           className="border-sidebar-border hover:border-cyan-500/50 h-8 sm:h-9 w-8 sm:w-9"
-          onClick={(e) => { e.stopPropagation(); window.open(`https://testnet.snowtrace.io/token/${import.meta.env.VITE_MANOWAR_CONTRACT}?a=${manowar.id}`, "_blank"); }}
+          onClick={(e) => { e.stopPropagation(); window.open(`https://testnet.snowtrace.io/token/${import.meta.env.VITE_FUJI_MANOWAR_CONTRACT}?a=${manowar.id}`, "_blank"); }}
         >
           <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
         </Button>
@@ -860,7 +860,7 @@ const AgentCard = React.memo(function AgentCard({ agent }: { agent: OnchainAgent
         <Button
           variant="outline"
           className="border-sidebar-border hover:border-cyan-500/50 h-8 sm:h-9 w-8 sm:w-9 shrink-0 p-0"
-          onClick={(e) => { e.stopPropagation(); window.open(`https://testnet.snowtrace.io/token/${import.meta.env.VITE_AGENT_FACTORY_CONTRACT}?a=${agent.id}`, "_blank"); }}
+          onClick={(e) => { e.stopPropagation(); window.open(`https://testnet.snowtrace.io/token/${import.meta.env.VITE_FUJI_AGENT_FACTORY_CONTRACT}?a=${agent.id}`, "_blank"); }}
         >
           <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
         </Button>

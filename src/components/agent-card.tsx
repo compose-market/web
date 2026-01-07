@@ -87,7 +87,7 @@ export function AgentCard({ agent, onCopyEndpoint }: AgentCardProps) {
                                 <Tooltip>
                                     <TooltipTrigger asChild>
                                         <button
-                                            onClick={() => window.open(`https://testnet.snowtrace.io/token/${import.meta.env.VITE_AGENT_FACTORY_CONTRACT}?a=${agent.id}`, "_blank")}
+                                            onClick={() => window.open(`https://testnet.snowtrace.io/token/${import.meta.env.VITE_FUJI_AGENT_FACTORY_CONTRACT}?a=${agent.id}`, "_blank")}
                                             className="text-muted-foreground hover:text-cyan-400 transition-colors shrink-0"
                                         >
                                             <ExternalLink className="w-4 h-4" />
