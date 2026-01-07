@@ -77,6 +77,73 @@ export interface AttachedFile {
 }
 
 // =============================================================================
+// Tag Parsing
+// =============================================================================
+
+export interface ParsedInvoke {
+  toolName: string;
+  params: Record<string, string>;
+  raw: string;
+}
+
+export interface ParsedContent {
+  think: string | null;
+  invokes: ParsedInvoke[];
+  reply: string;
+}
+
+/**
+ * Parses <think> and <invoke> tags from content
+ * Used by UI components and hooks to understand agent state
+ */
+export function parseContentTags(content: string): ParsedContent {
+  if (!content) return { think: null, invokes: [], reply: "" };
+
+  // 1. Extract Think Block
+  const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/i);
+  const think = thinkMatch?.[1]?.trim() || null;
+
+  // 2. Extract Invoke Blocks
+  const invokes: ParsedInvoke[] = [];
+  const invokeRegex = /<invoke>([\s\S]*?)<\/invoke>/gi;
+  let invokeMatch;
+  while ((invokeMatch = invokeRegex.exec(content)) !== null) {
+    const raw = invokeMatch[1];
+    const lines = raw.trim().split('\n');
+    const toolName = lines[0]?.trim() || 'Unknown Tool';
+
+    const params: Record<string, string> = {};
+    const paramRegex = /<(\w+)>([\s\S]*?)<\/\1>/gi;
+    let paramMatch;
+    while ((paramMatch = paramRegex.exec(raw)) !== null) {
+      params[paramMatch[1]] = paramMatch[2].trim();
+    }
+
+    invokes.push({ toolName, params, raw });
+  }
+
+  // 3. Clean Content (Reply)
+  let cleanContent = content
+    .replace(/<think>([\s\S]*?)<\/think>/gi, '')
+    .replace(/<invoke>([\s\S]*?)<\/invoke>/gi, '')
+    .replace(/<reply>|<\/reply>/gi, '') // Legacy tags
+    .trim();
+
+  // Handle partial tags (cleaning up incomplete tags at the end of stream)
+  cleanContent = cleanContent
+    .replace(/<think>([\s\S]*)$/gi, '')
+    .replace(/<invoke>([\s\S]*)$/gi, '')
+    .replace(/<\/invoke>|<\/think>/gi, '')
+    .trim();
+
+  return {
+    think,
+    invokes,
+    reply: cleanContent
+  };
+}
+
+// =============================================================================
 // OpenAI Response Types
 // =============================================================================
 
@@ -224,8 +291,14 @@ export async function* parseSSEStream(
             yield delta.content;
           }
         } catch {
-          // Plain text SSE (not JSON)
-          if (data) yield data;
+          // Attempt to handle custom events wrapped in data objects
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.content) yield parsed.content;
+            // Falls back to yielding raw data if complex object structure
+          } catch {
+            if (data) yield data;
+          }
         }
       } else if (line.trim() && !line.startsWith(":")) {
         // Plain text streaming (no SSE format)
