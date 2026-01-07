@@ -267,8 +267,19 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
                 }
             }
 
+            // Determine content
+            // Fix: Only apply fallback if non-text media
+            let finalContent = result.content;
+            if (!finalContent) {
+                if (result.type !== "text") {
+                    finalContent = `Generated ${result.type}`;
+                } else {
+                    finalContent = ""; // Empty string for text (e.g. tool-only)
+                }
+            }
+
             updateAssistantMessage(id, {
-                content: result.content || `Generated ${result.type}:`,
+                content: finalContent,
                 type: result.type,
                 imageUrl: result.type === "image" ? url : undefined,
                 audioUrl: result.type === "audio" ? url : undefined,
