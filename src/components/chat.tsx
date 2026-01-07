@@ -47,6 +47,8 @@ import {
     ChevronDown,
     ChevronUp,
     Image as ImageIcon,
+    Wrench,
+    Terminal,
 } from "lucide-react";
 import mermaid from "mermaid";
 import "katex/dist/katex.min.css";
@@ -78,26 +80,81 @@ import { type ChatMessage, type AttachedFile } from "@/lib/api";
 export type { ChatMessage, AttachedFile };
 
 // =============================================================================
-// Think Tag Parsing
+// Tag Parsing (Think & Invoke)
 // =============================================================================
 
-interface ParsedThink {
-    think: string | null;
-    reply: string;
+type BlockType = 'text' | 'think' | 'invoke';
+
+interface ContentBlock {
+    type: BlockType;
+    content: string;
+    toolName?: string;
+    params?: Record<string, any>;
 }
 
-function parseThinkTags(content: string): ParsedThink {
-    const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/i);
-    const cleanContent = content
-        .replace(/<think>[\s\S]*?<\/think>/gi, '')
-        .replace(/<reply>|<\/reply>/gi, '')
-        .trim();
+function parseBlocks(raw: string): ContentBlock[] {
+    if (!raw) return [];
 
-    return {
-        think: thinkMatch?.[1]?.trim() || null,
-        reply: cleanContent || content
-    };
+    const blocks: ContentBlock[] = [];
+    // Regex matches <think>...</think> OR <invoke>...</invoke>
+    // Capture groups: 1=think content, 2=invoke content
+    const regex = /(?:<think>([\s\S]*?)<\/think>)|(?:<invoke>([\s\S]*?)<\/invoke>)/gi;
+
+    let lastIndex = 0;
+    let match;
+
+    while ((match = regex.exec(raw)) !== null) {
+        // Add preceding text if any
+        if (match.index > lastIndex) {
+            const text = raw.substring(lastIndex, match.index).trim();
+            if (text) blocks.push({ type: 'text', content: text });
+        }
+
+        if (match[1]) { // <think>
+            blocks.push({ type: 'think', content: match[1].trim() });
+        } else if (match[2]) { // <invoke>
+            const invokeContent = match[2].trim();
+            const lines = invokeContent.split('\n');
+            const toolName = lines[0]?.trim() || "Unknown Tool";
+
+            // Extract params
+            const params: Record<string, any> = {};
+            // Simple XML-like param extraction: <key>value</key>
+            const paramRegex = /<(\w+)>([\s\S]*?)<\/\1>/gi;
+            let paramMatch;
+            while ((paramMatch = paramRegex.exec(invokeContent)) !== null) {
+                try {
+                    // Try parsing as JSON first (for complex objects)
+                    params[paramMatch[1]] = JSON.parse(paramMatch[2]);
+                } catch {
+                    // Fallback to string
+                    params[paramMatch[1]] = paramMatch[2].trim();
+                }
+            }
+
+            blocks.push({
+                type: 'invoke',
+                content: invokeContent,
+                toolName,
+                params
+            });
+        }
+
+        lastIndex = regex.lastIndex;
+    }
+
+    // Add remaining text
+    if (lastIndex < raw.length) {
+        const text = raw.substring(lastIndex).trim();
+        if (text) blocks.push({ type: 'text', content: text });
+    }
+
+    return blocks;
 }
+
+// =============================================================================
+// Block Components
+// =============================================================================
 
 function ThinkBlock({ content }: { content: string }) {
     const [isOpen, setIsOpen] = useState(false);
@@ -107,6 +164,7 @@ function ThinkBlock({ content }: { content: string }) {
             <button
                 onClick={() => setIsOpen(!isOpen)}
                 className="w-full flex items-center justify-between px-3 py-2 text-xs text-zinc-400 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors"
+                title="Toggle Chain of Thought"
             >
                 <span className="flex items-center gap-2 font-medium">
                     <span className="text-cyan-500">💭</span>
@@ -115,8 +173,43 @@ function ThinkBlock({ content }: { content: string }) {
                 {isOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             </button>
             {isOpen && (
-                <div className="px-3 py-2 border-t border-zinc-700/50 text-xs text-zinc-500 italic whitespace-pre-wrap leading-relaxed">
+                <div className="px-3 py-2 border-t border-zinc-700/50 text-xs text-zinc-500 italic whitespace-pre-wrap leading-relaxed animate-in fade-in slide-in-from-top-1 duration-200">
                     {content}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function InvokeBlock({ toolName, params }: { toolName: string; params?: Record<string, any> }) {
+    const [isOpen, setIsOpen] = useState(false);
+
+    // Clean tool name (remove Mcp: prefix for display)
+    const displayName = toolName.replace(/^Mcp:/i, '');
+
+    return (
+        <div className="mb-3 border border-fuchsia-500/20 rounded-lg overflow-hidden bg-fuchsia-500/5">
+            <button
+                onClick={() => setIsOpen(!isOpen)}
+                className="w-full flex items-center justify-between px-3 py-2 text-xs text-fuchsia-300 hover:text-fuchsia-200 hover:bg-fuchsia-500/10 transition-colors"
+                title="Toggle Tool Usage"
+            >
+                <span className="flex items-center gap-2 font-medium">
+                    <Wrench className="w-3.5 h-3.5" />
+                    Used <span className="font-mono bg-fuchsia-500/20 px-1 py-0.5 rounded text-[10px]">{displayName}</span>
+                </span>
+                {isOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </button>
+            {isOpen && params && Object.keys(params).length > 0 && (
+                <div className="px-3 py-2 border-t border-fuchsia-500/20 bg-black/20 text-xs font-mono text-zinc-400 overflow-x-auto animate-in fade-in slide-in-from-top-1 duration-200">
+                    {Object.entries(params).map(([key, value]) => (
+                        <div key={key} className="mb-1 last:mb-0">
+                            <span className="text-fuchsia-500/70">{key}:</span>{' '}
+                            <span className="text-zinc-300 whitespace-pre-wrap">
+                                {typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)}
+                            </span>
+                        </div>
+                    ))}
                 </div>
             )}
         </div>
@@ -326,43 +419,54 @@ function MarkdownRendererInner({ content, className }: RendererProps) {
         return <span className="text-zinc-500">...</span>;
     }
 
-    const { think, reply } = parseThinkTags(content);
+    const blocks = parseBlocks(content);
 
     return (
         <div className={cn("renderer-content text-sm", className)}>
-            {think && <ThinkBlock content={think} />}
-            <ReactMarkdown
-                remarkPlugins={[remarkGfm, remarkMath]}
-                rehypePlugins={[rehypeKatex]}
-                components={{
-                    code: CodeBlock as any,
-                    h1: ({ children }) => <h1 className="text-xl font-bold mt-4 mb-2 text-white">{children}</h1>,
-                    h2: ({ children }) => <h2 className="text-lg font-semibold mt-3 mb-2 text-white">{children}</h2>,
-                    h3: ({ children }) => <h3 className="text-base font-semibold mt-2 mb-1 text-white">{children}</h3>,
-                    p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
-                    ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1 pl-2">{children}</ul>,
-                    ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1 pl-2">{children}</ol>,
-                    li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-                    a: ({ href, children }) => href ? <LinkPreview url={href}>{children}</LinkPreview> : <span>{children}</span>,
-                    img: ({ src, alt }) => <img src={src} alt={alt || "Image"} className="max-w-full rounded-lg my-2" loading="lazy" />,
-                    table: ({ children }) => (
-                        <div className="overflow-x-auto my-3">
-                            <table className="w-full border-collapse border border-zinc-700 text-sm">{children}</table>
-                        </div>
-                    ),
-                    thead: ({ children }) => <thead className="bg-zinc-800">{children}</thead>,
-                    th: ({ children }) => <th className="border border-zinc-700 px-3 py-2 text-left font-semibold text-white">{children}</th>,
-                    td: ({ children }) => <td className="border border-zinc-700 px-3 py-2">{children}</td>,
-                    tr: ({ children }) => <tr className="even:bg-zinc-800/50">{children}</tr>,
-                    blockquote: ({ children }) => <blockquote className="border-l-4 border-cyan-500 pl-4 my-2 italic text-zinc-400">{children}</blockquote>,
-                    hr: () => <hr className="border-zinc-700 my-4" />,
-                    strong: ({ children }) => <strong className="font-semibold text-white">{children}</strong>,
-                    em: ({ children }) => <em className="italic">{children}</em>,
-                    del: ({ children }) => <del className="line-through text-zinc-500">{children}</del>,
-                }}
-            >
-                {reply}
-            </ReactMarkdown>
+            {blocks.map((block, index) => (
+                <React.Fragment key={index}>
+                    {block.type === 'think' && <ThinkBlock content={block.content} />}
+
+                    {block.type === 'invoke' && block.toolName && (
+                        <InvokeBlock toolName={block.toolName} params={block.params} />
+                    )}
+
+                    {block.type === 'text' && (
+                        <ReactMarkdown
+                            remarkPlugins={[remarkGfm, remarkMath]}
+                            rehypePlugins={[rehypeKatex]}
+                            components={{
+                                code: CodeBlock as any,
+                                h1: ({ children }) => <h1 className="text-xl font-bold mt-4 mb-2 text-white">{children}</h1>,
+                                h2: ({ children }) => <h2 className="text-lg font-semibold mt-3 mb-2 text-white">{children}</h2>,
+                                h3: ({ children }) => <h3 className="text-base font-semibold mt-2 mb-1 text-white">{children}</h3>,
+                                p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
+                                ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1 pl-2">{children}</ul>,
+                                ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1 pl-2">{children}</ol>,
+                                li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+                                a: ({ href, children }) => href ? <LinkPreview url={href}>{children}</LinkPreview> : <span>{children}</span>,
+                                img: ({ src, alt }) => <img src={src} alt={alt || "Image"} className="max-w-full rounded-lg my-2" loading="lazy" />,
+                                table: ({ children }) => (
+                                    <div className="overflow-x-auto my-3">
+                                        <table className="w-full border-collapse border border-zinc-700 text-sm">{children}</table>
+                                    </div>
+                                ),
+                                thead: ({ children }) => <thead className="bg-zinc-800">{children}</thead>,
+                                th: ({ children }) => <th className="border border-zinc-700 px-3 py-2 text-left font-semibold text-white">{children}</th>,
+                                td: ({ children }) => <td className="border border-zinc-700 px-3 py-2">{children}</td>,
+                                tr: ({ children }) => <tr className="even:bg-zinc-800/50">{children}</tr>,
+                                blockquote: ({ children }) => <blockquote className="border-l-4 border-cyan-500 pl-4 my-2 italic text-zinc-400">{children}</blockquote>,
+                                hr: () => <hr className="border-zinc-700 my-4" />,
+                                strong: ({ children }) => <strong className="font-semibold text-white">{children}</strong>,
+                                em: ({ children }) => <em className="italic">{children}</em>,
+                                del: ({ children }) => <del className="line-through text-zinc-500">{children}</del>,
+                            }}
+                        >
+                            {block.content}
+                        </ReactMarkdown>
+                    )}
+                </React.Fragment>
+            ))}
         </div>
     );
 }
