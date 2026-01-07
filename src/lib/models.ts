@@ -264,25 +264,4 @@ export function getApiKeyEnvName(provider: string): string {
     default:
       return "ASI_INFERENCE_API_KEY";
   }
-}
-
-// Check if a model uses ASI infrastructure
-export function isAsiModel(model: AIModel): boolean {
-  return model.source === "asi-one" || model.source === "asi-cloud";
-}
-
-// Default model ID to use if selection is missing
-export const DEFAULT_MODEL_ID = "asi1-mini";
-
-export const AVAILABLE_MODELS: AIModel[] = [
-  {
-    id: "asi1-mini",
-    name: "ASI-1 Mini",
-    ownedBy: "asi-cloud",
-    source: "asi-cloud",
-    available: true,
-    task: "text-generation",
-    capabilities: ["streaming", "structured-outputs"],
-    pricing: { provider: "asi-cloud", input: 0, output: 0 }
-  }
-];
+};
