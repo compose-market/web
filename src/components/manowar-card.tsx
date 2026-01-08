@@ -68,7 +68,7 @@ export function ManowarCard({ manowar, onCopyEndpoint }: ManowarCardProps) {
 
     // API endpoint URL - direct path without double /api/
     const apiEndpoint = manowar.walletAddress
-        ? `https://api.compose.market/manowar/${manowar.walletAddress}`
+        ? `https://manowar.compose.market/manowar/${manowar.walletAddress}`
         : null;
 
     // Format price with max 4 decimal places, trim trailing zeros

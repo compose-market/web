@@ -349,12 +349,12 @@ export function parseJsonResponse(data: unknown): MultimodalResult {
     return { type: "text", success: true, content: data.output };
   }
 
-  // Manowar multimodal response: { success, type, data (base64 string), mimeType }
+  // Manowar multimodal response: { success, type, url, mimeType }
   if (isManowarMultimodalResponse(data)) {
     return {
       type: data.type,
       success: data.success,
-      base64: data.data,
+      url: data.url,          // IPFS URL from backend Pinata upload
       content: data.content,
       mimeType: data.mimeType,
       error: data.error,
@@ -508,7 +508,8 @@ function isAgentChatResponse(data: unknown): data is { output: string; messages?
 function isManowarMultimodalResponse(data: unknown): data is {
   success: boolean;
   type: MultimodalType;
-  data?: string;  // base64 encoded
+  url?: string;   // IPFS URL from Pinata upload
+  data?: string;  // base64 encoded (fallback)
   content?: string;
   mimeType?: string;
   error?: string;

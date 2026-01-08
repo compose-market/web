@@ -216,6 +216,71 @@ function InvokeBlock({ toolName, params }: { toolName: string; params?: Record<s
     );
 }
 
+function EmbeddingBlock({ content }: { content: string }) {
+    const [isOpen, setIsOpen] = useState(false);
+    const [copied, setCopied] = useState(false);
+
+    // Parse embedding content - try to prettify it
+    let formattedContent = content;
+    let dimensions = 0;
+    try {
+        const parsed = JSON.parse(content);
+        if (Array.isArray(parsed)) {
+            // Handle nested arrays (multiple embeddings)
+            if (Array.isArray(parsed[0])) {
+                dimensions = parsed[0].length;
+                formattedContent = parsed.map((emb: number[], idx: number) =>
+                    `[${idx}]:\n  ` + emb.map((v, i) => `[${i}]: ${v.toFixed(8)}`).join('\n  ')
+                ).join('\n\n');
+            } else {
+                // Single embedding array
+                dimensions = parsed.length;
+                formattedContent = parsed.map((v: number, i: number) => `[${i}]: ${v.toFixed(8)}`).join('\n');
+            }
+        }
+    } catch {
+        // Keep original content if not valid JSON
+    }
+
+    const handleCopy = async () => {
+        await navigator.clipboard.writeText(content);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    };
+
+    return (
+        <div className="border border-emerald-500/30 rounded-lg overflow-hidden bg-emerald-500/5">
+            <button
+                onClick={() => setIsOpen(!isOpen)}
+                className="w-full flex items-center justify-between px-3 py-2 text-xs text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 transition-colors"
+                title="Toggle Embedding Vector"
+            >
+                <span className="flex items-center gap-2 font-medium">
+                    <span className="text-emerald-500">📊</span>
+                    Embedding Vector {dimensions > 0 && <span className="text-emerald-600">({dimensions} dimensions)</span>}
+                </span>
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={(e) => { e.stopPropagation(); handleCopy(); }}
+                        className="p-1 rounded hover:bg-emerald-500/20 transition-colors"
+                        title="Copy raw embedding"
+                    >
+                        {copied ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
+                    </button>
+                    {isOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                </div>
+            </button>
+            {isOpen && (
+                <div className="px-3 py-2 border-t border-emerald-500/20 bg-black/30 animate-in fade-in slide-in-from-top-1 duration-200">
+                    <pre className="text-xs font-mono text-emerald-300/80 overflow-auto max-h-80 whitespace-pre leading-relaxed">
+                        {formattedContent}
+                    </pre>
+                </div>
+            )}
+        </div>
+    );
+}
+
 // =============================================================================
 // Mermaid Diagram
 // =============================================================================
@@ -577,7 +642,7 @@ function ChatMessageItemInner({
                 {message.videoUrl && <video controls className="rounded-lg max-w-full mb-2"><source src={message.videoUrl} /></video>}
 
                 {message.type === "embedding" ? (
-                    <pre className="text-xs overflow-auto max-h-64 font-mono">{message.content || "..."}</pre>
+                    <EmbeddingBlock content={message.content || "..."} />
                 ) : isLoading ? (
                     <div className="flex items-center gap-2 text-sm text-zinc-400">
                         <Loader2 className="w-4 h-4 animate-spin" />
