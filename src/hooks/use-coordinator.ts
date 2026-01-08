@@ -68,22 +68,13 @@ export const coordinatorModels: AgenticModel[] = [
         description: "Post-trained for agent autonomy, tool use, and real-world productivity.",
     },
     {
-        id: "allenai/olmo-3.1-32b-think:free",
+        id: "allenai/olmo-3.1-32b-think",
         name: "OLMo 3.1 Think 32B",
         provider: "allenai",
         contextLength: 128000,
         activeParams: "32B",
         keyStrength: "Fully open, long chain-of-thought reasoning",
         description: "Ai2's strongest fully open reasoning model with tool use support.",
-    },
-    {
-        id: "arcee-ai/trinity-mini:free",
-        name: "Arcee Trinity Mini",
-        provider: "arcee-ai",
-        contextLength: 128000,
-        activeParams: "~7B",
-        keyStrength: "Fast, cost-effective",
-        description: "Compact but capable model for quick agent coordination tasks.",
     },
 ];
 
