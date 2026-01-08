@@ -57,7 +57,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MultimodalCanvas } from "@/components/chat";
-import { MirrorPane } from "@/components/mirror-pane";
+import { MirrorPane, type ModelParamsSchema } from "@/components/mirror-pane";
 import { PluginTester } from "@/components/plugin-tester";
 import { useChat } from "@/hooks/use-chat";
 import { useModels } from "@/hooks/use-model";
@@ -190,6 +190,10 @@ export default function PlaygroundPage() {
   const [enableDeepResearch, setEnableDeepResearch] = useState(false);
   const [urlContextUrls, setUrlContextUrls] = useState<string>("");
 
+  // Model Parameters State (for image/video models)
+  const [modelParams, setModelParams] = useState<ModelParamsSchema | null>(null);
+  const [paramValues, setParamValues] = useState<Record<string, unknown>>({});
+
   // Stable conversationId for file hooks
   const conversationId = useRef(`playground-${Date.now()}`).current;
 
@@ -226,6 +230,34 @@ export default function PlaygroundPage() {
     }
     prevModelRef.current = selectedModel;
   }, [selectedModel, setMessages, messages.length]);
+
+  // Fetch model params when selectedModel changes
+  useEffect(() => {
+    if (!selectedModel) {
+      setModelParams(null);
+      setParamValues({});
+      return;
+    }
+
+    const fetchParams = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/v1/models/${encodeURIComponent(selectedModel)}/params`);
+        if (response.ok) {
+          const data = await response.json();
+          setModelParams(data);
+          // Reset param values when model changes
+          setParamValues({});
+        } else {
+          setModelParams(null);
+        }
+      } catch (err) {
+        console.error("[playground] Failed to fetch model params:", err);
+        setModelParams(null);
+      }
+    };
+
+    fetchParams();
+  }, [selectedModel]);
 
   // Debounce search query for performance (150ms delay)
   useEffect(() => {
@@ -816,6 +848,9 @@ export default function PlaygroundPage() {
                   urlContextUrls,
                   setUrlContextUrls,
                 } : undefined}
+                modelParams={modelParams}
+                paramValues={paramValues}
+                onParamValuesChange={setParamValues}
               />
             </div>
           )}
@@ -880,6 +915,9 @@ export default function PlaygroundPage() {
                 urlContextUrls,
                 setUrlContextUrls,
               } : undefined}
+              modelParams={modelParams}
+              paramValues={paramValues}
+              onParamValuesChange={setParamValues}
             />
           </div>
         </SheetContent>
