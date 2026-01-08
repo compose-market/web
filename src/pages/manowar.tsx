@@ -314,9 +314,27 @@ export default function ManowarPage() {
                                     } else if (currentEvent === "complete") {
                                         streamedTextRef.current = data.message || "Workflow complete!";
                                     } else if (currentEvent === "result") {
-                                        // Final result - use this as the output
+                                        // Final result - check if it's a multimodal JSON response
                                         finalOutput = data.output || "";
-                                        streamedTextRef.current = finalOutput;
+
+                                        // Try to parse output as JSON to check for multimodal data
+                                        try {
+                                            const parsed = typeof finalOutput === "string" ? JSON.parse(finalOutput) : finalOutput;
+                                            // If it has type + url/data/base64, it's a multimodal response
+                                            if (parsed && (parsed.url || parsed.data || parsed.base64) && parsed.type) {
+                                                // Use handleJsonResponse to display properly (handles URL or uploads base64)
+                                                handleJsonResponse(assistantId, parsed);
+                                                streamedTextRef.current = `Generated ${parsed.type}...`;
+                                            } else if (parsed && parsed.success === false && parsed.error) {
+                                                streamedTextRef.current = `Error: ${parsed.error}`;
+                                            } else {
+                                                // Regular text output
+                                                streamedTextRef.current = finalOutput;
+                                            }
+                                        } catch {
+                                            // Not JSON, treat as regular text
+                                            streamedTextRef.current = finalOutput;
+                                        }
                                     } else if (currentEvent === "error") {
                                         streamedTextRef.current = `Error: ${data.error || "Unknown error"}`;
                                     }
@@ -342,7 +360,13 @@ export default function ManowarPage() {
 
                 // Final flush and update
                 flushStreamContent();
-                updateAssistantMessage(assistantId, { content: finalOutput || streamedTextRef.current || "Workflow completed" });
+
+                // Only update content if handleJsonResponse hasn't already handled it
+                // (handleJsonResponse will set imageUrl/audioUrl/videoUrl)
+                const lastMessage = messages.find(m => m.id === assistantId);
+                if (!lastMessage?.imageUrl && !lastMessage?.audioUrl && !lastMessage?.videoUrl) {
+                    updateAssistantMessage(assistantId, { content: finalOutput || streamedTextRef.current || "Workflow completed" });
+                }
 
                 if (!finalOutput && !streamedTextRef.current) {
                     updateAssistantMessage(assistantId, { content: "No response received" });
