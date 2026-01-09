@@ -239,7 +239,7 @@ export default function CreateAgent() {
     defaultValues: {
       name: "",
       description: "",
-      framework: "eliza",
+      framework: "langchain",
       model: "asi1-mini",
       licensePrice: "0.01",
       endpoint: "",
