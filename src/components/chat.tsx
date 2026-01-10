@@ -52,6 +52,7 @@ import {
 } from "lucide-react";
 import mermaid from "mermaid";
 import "katex/dist/katex.min.css";
+import { GenerationCanvas } from "@/components/canvas";
 
 // Initialize Mermaid with dark theme
 mermaid.initialize({
@@ -644,10 +645,18 @@ function ChatMessageItemInner({
                 {message.type === "embedding" ? (
                     <EmbeddingBlock content={message.content || "..."} />
                 ) : isLoading ? (
-                    <div className="flex items-center gap-2 text-sm text-zinc-400">
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>Thinking...</span>
-                    </div>
+                    // Show GenerationCanvas for media types, spinner for text
+                    message.type === "image" || message.type === "audio" || message.type === "video" ? (
+                        <GenerationCanvas
+                            type={message.type}
+                            status={message.content || undefined}
+                        />
+                    ) : (
+                        <div className="flex items-center gap-2 text-sm text-zinc-400">
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <span>Thinking...</span>
+                        </div>
+                    )
                 ) : isUser ? (
                     <p className="whitespace-pre-wrap text-sm">{message.content || "..."}</p>
                 ) : (
