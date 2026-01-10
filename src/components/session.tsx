@@ -15,7 +15,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Zap, Clock, Wallet, Shield, X } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { toast } from "sonner";
+import { Zap, Clock, Wallet, Shield, X, Key, Copy, Check, ChevronDown } from "lucide-react";
+import { API_BASE_URL } from "@/lib/api";
 
 /**
  * Session Budget Setup Dialog
@@ -242,6 +251,8 @@ export function SessionStatusCard() {
  */
 export function SessionIndicator() {
   const { session } = useSession();
+  const [keyDialogOpen, setKeyDialogOpen] = useState(false);
+  const [budgetDialogOpen, setBudgetDialogOpen] = useState(false);
 
   if (!session.isActive) {
     return <SessionBudgetDialog />;
@@ -258,7 +269,233 @@ export function SessionIndicator() {
         <Zap className="w-3 h-3 mr-1" />
         ${remainingUSDC.toFixed(2)}
       </Badge>
-      <SessionBudgetDialog />
+
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-cyan-500/30 bg-cyan-500/5 text-cyan-400 hover:bg-cyan-500/10 font-mono"
+          >
+            <Zap className="w-4 h-4 mr-2" />
+            Session
+            <ChevronDown className="w-3 h-3 ml-1" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-48">
+          <DropdownMenuItem onClick={() => setKeyDialogOpen(true)}>
+            <Key className="w-4 h-4 mr-2" />
+            Generate API Key
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={() => setBudgetDialogOpen(true)}>
+            <Wallet className="w-4 h-4 mr-2" />
+            Manage Session
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <ComposeKeyDialog open={keyDialogOpen} onOpenChange={setKeyDialogOpen} />
+      <SessionBudgetDialog open={budgetDialogOpen} onOpenChange={setBudgetDialogOpen} showTrigger={false} />
     </div>
+  );
+}
+
+/**
+ * Compose Key Generation Dialog
+ * Allows users to generate API keys for external tools (Cursor, VSCode)
+ */
+interface ComposeKeyDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+function ComposeKeyDialog({ open, onOpenChange }: ComposeKeyDialogProps) {
+  const { session } = useSession();
+  const { account } = useWalletAccount();
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generatedKey, setGeneratedKey] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [keyName, setKeyName] = useState("Cursor");
+
+  const handleGenerate = async () => {
+    if (!account?.address || !session.isActive) return;
+
+    setIsGenerating(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/keys`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-session-user-address": account.address,
+          "x-session-active": "true",
+          "x-session-budget-remaining": String(session.budgetRemaining),
+        },
+        body: JSON.stringify({
+          budgetLimit: session.budgetRemaining, // Use remaining session budget
+          expiresAt: session.expiresAt,
+          name: keyName,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        toast.error(error.error || "Failed to generate key");
+        return;
+      }
+
+      const data = await response.json();
+      setGeneratedKey(data.token);
+      toast.success("API Key generated!");
+    } catch (err) {
+      toast.error("Failed to generate API key");
+      console.error(err);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleCopy = async () => {
+    if (!generatedKey) return;
+    await navigator.clipboard.writeText(generatedKey);
+    setCopied(true);
+    toast.success("Copied to clipboard!");
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleClose = () => {
+    setGeneratedKey(null);
+    setCopied(false);
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent className="bg-card border-sidebar-border max-w-md">
+        <DialogHeader>
+          <DialogTitle className="font-display text-fuchsia-400 flex items-center gap-2">
+            <Key className="w-5 h-5" />
+            Generate API Key
+          </DialogTitle>
+          <DialogDescription className="text-muted-foreground">
+            Create a key for external tools like Cursor or VSCode.
+            Uses your current session budget.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-4">
+          {!generatedKey ? (
+            <>
+              {/* Key Name */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-muted-foreground font-mono">
+                  Key Name
+                </label>
+                <input
+                  type="text"
+                  value={keyName}
+                  onChange={(e) => setKeyName(e.target.value)}
+                  placeholder="e.g., Cursor, VSCode"
+                  className="w-full px-3 py-2 bg-sidebar-accent border border-sidebar-border rounded-sm font-mono text-sm focus:border-fuchsia-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Info Box */}
+              <div className="bg-sidebar-accent rounded-sm p-4 space-y-2 border border-sidebar-border">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground font-mono">Budget</span>
+                  <span className="font-mono text-fuchsia-400">
+                    ${(session.budgetRemaining / 1_000_000).toFixed(2)} USDC
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground font-mono">Expires</span>
+                  <span className="font-mono text-foreground">
+                    {session.expiresAt ? new Date(session.expiresAt).toLocaleString() : "Never"}
+                  </span>
+                </div>
+              </div>
+
+              <Button
+                onClick={handleGenerate}
+                disabled={isGenerating}
+                className="w-full bg-fuchsia-500 text-white hover:bg-fuchsia-400 font-mono font-bold"
+              >
+                {isGenerating ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <Key className="w-4 h-4 mr-2" />
+                    Generate Key
+                  </>
+                )}
+              </Button>
+            </>
+          ) : (
+            <>
+              {/* Generated Key Display */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-muted-foreground font-mono">
+                  Your API Key
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    readOnly
+                    value={generatedKey}
+                    className="w-full px-3 py-2 pr-10 bg-sidebar-accent border border-fuchsia-500/50 rounded-sm font-mono text-xs focus:outline-none"
+                  />
+                  <button
+                    onClick={handleCopy}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-fuchsia-400 transition-colors"
+                  >
+                    {copied ? (
+                      <Check className="w-4 h-4 text-green-400" />
+                    ) : (
+                      <Copy className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Warning */}
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-sm p-3 text-sm text-amber-400">
+                ⚠️ Save this key now. You won't be able to see it again!
+              </div>
+
+              {/* Usage Instructions */}
+              <div className="bg-sidebar-accent rounded-sm p-4 space-y-2 border border-sidebar-border">
+                <p className="text-sm text-muted-foreground font-mono">
+                  Use in Cursor/VSCode settings:
+                </p>
+                <code className="block text-xs bg-black/50 p-2 rounded font-mono text-fuchsia-400 break-all">
+                  Authorization: Bearer {generatedKey.slice(0, 20)}...
+                </code>
+              </div>
+
+              <Button
+                onClick={handleCopy}
+                className="w-full bg-fuchsia-500 text-white hover:bg-fuchsia-400 font-mono font-bold"
+              >
+                {copied ? (
+                  <>
+                    <Check className="w-4 h-4 mr-2" />
+                    Copied!
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-4 h-4 mr-2" />
+                    Copy to Clipboard
+                  </>
+                )}
+              </Button>
+            </>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
