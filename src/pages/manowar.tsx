@@ -182,8 +182,11 @@ export default function ManowarPage() {
             content: inputValue.trim(),
             timestamp: Date.now(),
             type: attached?.type || "text",
-            imageUrl: attached?.type === "image" ? attached.preview : undefined,
-            audioUrl: attached?.type === "audio" ? attached.preview : undefined,
+            // Use IPFS URL (attached.url) instead of local preview (attached.preview)
+            // This ensures the displayed attachment matches what's sent to the model
+            imageUrl: attached?.type === "image" ? attached.url : undefined,
+            audioUrl: attached?.type === "audio" ? attached.url : undefined,
+            videoUrl: attached?.type === "video" ? attached.url : undefined,
         };
 
         setMessages(prev => [...prev, userMessage]);

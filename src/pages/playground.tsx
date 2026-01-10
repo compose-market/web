@@ -338,14 +338,10 @@ export default function PlaygroundPage() {
 
     const attached = attachedFiles[0];
 
-    // Pre-compute attachment base64 data BEFORE clearing files
-    let attachmentBase64: string | undefined;
-    let attachmentType: "image" | "audio" | "video" | undefined;
-    if (attached && attached.file) {
-      const base64Data = await fileToDataUrl(attached.file);
-      attachmentBase64 = base64Data.split(",")[1];
-      attachmentType = attached.type;
-    }
+    // Use Pinata URL (already uploaded by useChat hook) instead of re-converting to base64
+    // Lambda backend will fetch from URL when needed
+    const attachmentUrl = attached?.url;
+    const attachmentType = attached?.type;
 
     const userMessage = {
       id: crypto.randomUUID(),
@@ -353,8 +349,10 @@ export default function PlaygroundPage() {
       content: inputValue.trim(),
       timestamp: Date.now(),
       type: outputType,
+      // Use IPFS URL for all attachment types
       imageUrl: attached?.type === "image" ? attached.url : undefined,
       audioUrl: attached?.type === "audio" ? attached.url : undefined,
+      videoUrl: attached?.type === "video" ? attached.url : undefined,
     };
 
     setMessages((prev) => [...prev, userMessage]);
@@ -402,7 +400,8 @@ export default function PlaygroundPage() {
           model: selectedModel,
           prompt: userMessage.content,
         };
-        if (attachmentBase64) requestBody.image = attachmentBase64;
+        // Send URL for image-to-image instead of base64
+        if (attachmentUrl && attachmentType === "image") requestBody.image_url = attachmentUrl;
       } else if (outputType === "video") {
         endpoint = `${API_BASE}/v1/videos/generations`;
         requestBody = {
@@ -432,10 +431,11 @@ export default function PlaygroundPage() {
         if (systemPrompt) {
           (requestBody.messages as unknown[]).unshift({ role: "system", content: systemPrompt });
         }
-        if (attachmentBase64 && attachmentType === "image") {
-          requestBody.image = attachmentBase64;
-        } else if (attachmentBase64 && attachmentType === "audio") {
-          requestBody.audio = attachmentBase64;
+        // Send URLs for vision/audio models instead of base64
+        if (attachmentUrl && attachmentType === "image") {
+          requestBody.image_url = attachmentUrl;
+        } else if (attachmentUrl && attachmentType === "audio") {
+          requestBody.audio_url = attachmentUrl;
         }
         // Add Google tools if any are enabled
         if (activeTools) {

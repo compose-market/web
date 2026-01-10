@@ -175,9 +175,11 @@ export default function AgentDetailPage() {
       role: "user",
       content: inputValue.trim(),
       timestamp: Date.now(),
-      type: attached?.type === "image" ? "image" : attached?.type === "audio" ? "audio" : "text",
+      type: attached?.type || "text",
+      // Use IPFS URL for all attachment types
       imageUrl: attached?.type === "image" ? attached.url : undefined,
       audioUrl: attached?.type === "audio" ? attached.url : undefined,
+      videoUrl: attached?.type === "video" ? attached.url : undefined,
     };
 
     setMessages(prev => [...prev, userMessage]);
