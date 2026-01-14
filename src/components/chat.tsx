@@ -52,7 +52,7 @@ import {
 } from "lucide-react";
 import mermaid from "mermaid";
 import "katex/dist/katex.min.css";
-import { GenerationCanvas } from "@/components/canvas";
+import { GenerationCanvas } from "@/components/blur";
 
 // Initialize Mermaid with dark theme
 mermaid.initialize({

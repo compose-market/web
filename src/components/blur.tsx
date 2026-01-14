@@ -96,6 +96,3 @@ export function GenerationCanvas({
         </div>
     );
 }
-
-// Add shimmer keyframe to tailwind (or use inline style)
-// This is a placeholder - the shimmer animation works with the translate-x-full animation
