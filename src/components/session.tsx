@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useSession } from "@/hooks/use-session.tsx";
 import { useWalletAccount } from "@/components/connector";
 import { Button } from "@/components/ui/button";
@@ -23,8 +23,41 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
-import { Zap, Clock, Wallet, Shield, X, Key, Copy, Check, ChevronDown } from "lucide-react";
+import { Zap, Clock, Wallet, Shield, X, Key, Copy, Check, ChevronDown, Plus, Trash2 } from "lucide-react";
 import { API_BASE_URL } from "@/lib/api";
+
+/**
+ * Compose Key Record from backend API
+ */
+interface ComposeKeyRecord {
+  keyId: string;
+  budgetLimit: number;
+  budgetUsed: number;
+  budgetRemaining: number;
+  createdAt: number;
+  expiresAt: number;
+  revokedAt?: number;
+  name?: string;
+  lastUsedAt?: number;
+}
+
+/**
+ * Format remaining time as human-readable string
+ */
+function formatTimeRemaining(expiresAt: number): string {
+  const remaining = expiresAt - Date.now();
+  if (remaining <= 0) return "Expired";
+
+  const hours = Math.floor(remaining / (1000 * 60 * 60));
+  const minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
+
+  if (hours > 24) {
+    const days = Math.floor(hours / 24);
+    return `${days}d ${hours % 24}h`;
+  }
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
 
 /**
  * Session Budget Setup Dialog
@@ -252,52 +285,277 @@ export function SessionStatusCard() {
 export function SessionIndicator() {
   const { session } = useSession();
   const [keyDialogOpen, setKeyDialogOpen] = useState(false);
-  const [budgetDialogOpen, setBudgetDialogOpen] = useState(false);
+  const [manageDialogOpen, setManageDialogOpen] = useState(false);
 
   if (!session.isActive) {
     return <SessionBudgetDialog />;
   }
 
   const remainingUSDC = session.budgetRemaining / 1_000_000;
+  const timeRemaining = session.expiresAt ? formatTimeRemaining(session.expiresAt) : "";
 
   return (
-    <div className="flex items-center gap-2">
-      <Badge
-        variant="outline"
-        className="border-cyan-500/50 bg-cyan-500/10 text-cyan-400 font-mono text-xs"
-      >
-        <Zap className="w-3 h-3 mr-1" />
-        ${remainingUSDC.toFixed(2)}
-      </Badge>
-
+    <div className="flex items-center gap-1 md:gap-2">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
             variant="outline"
             size="sm"
-            className="border-cyan-500/30 bg-cyan-500/5 text-cyan-400 hover:bg-cyan-500/10 font-mono"
+            className="border-cyan-500/30 bg-cyan-500/5 text-cyan-400 hover:bg-cyan-500/10 font-mono h-8 px-2 md:px-3"
           >
-            <Zap className="w-4 h-4 mr-2" />
-            Session
+            <Zap className="w-4 h-4 md:mr-2" />
+            {/* Desktop: show "Session" text, Mobile: show budget */}
+            <span className="hidden md:inline">Session</span>
+            <span className="md:hidden text-xs">${remainingUSDC.toFixed(0)}</span>
             <ChevronDown className="w-3 h-3 ml-1" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuContent align="end" className="w-56">
+          {/* Session status header - always visible */}
+          <div className="px-2 py-2 border-b border-sidebar-border mb-1">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground font-mono">Budget</span>
+              <span className="text-cyan-400 font-mono font-medium">${remainingUSDC.toFixed(2)}</span>
+            </div>
+            <div className="flex items-center justify-between text-xs mt-1">
+              <span className="text-muted-foreground font-mono">Expires</span>
+              <span className="text-foreground font-mono">{timeRemaining}</span>
+            </div>
+          </div>
           <DropdownMenuItem onClick={() => setKeyDialogOpen(true)}>
             <Key className="w-4 h-4 mr-2" />
             Generate API Key
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => setBudgetDialogOpen(true)}>
+          <DropdownMenuItem onClick={() => setManageDialogOpen(true)}>
             <Wallet className="w-4 h-4 mr-2" />
-            Manage Session
+            Manage Sessions
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
       <ComposeKeyDialog open={keyDialogOpen} onOpenChange={setKeyDialogOpen} />
-      <SessionBudgetDialog open={budgetDialogOpen} onOpenChange={setBudgetDialogOpen} showTrigger={false} />
+      <SessionManageDialog open={manageDialogOpen} onOpenChange={setManageDialogOpen} />
     </div>
+  );
+}
+
+/**
+ * Session Management Dialog
+ * Shows all active sessions/keys with ability to create new or revoke
+ */
+interface SessionManageDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+function SessionManageDialog({ open, onOpenChange }: SessionManageDialogProps) {
+  const { account } = useWalletAccount();
+  const { session } = useSession();
+  const [sessions, setSessions] = useState<ComposeKeyRecord[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
+
+  // Fetch sessions when dialog opens
+  const fetchSessions = useCallback(async () => {
+    if (!account?.address) return;
+
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/keys`, {
+        headers: {
+          "x-session-user-address": account.address,
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        // Filter out expired and revoked sessions
+        const activeSessions = (data.keys || []).filter(
+          (k: ComposeKeyRecord) => !k.revokedAt && k.expiresAt > Date.now()
+        );
+        setSessions(activeSessions);
+      }
+    } catch (err) {
+      console.error("Failed to fetch sessions:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, [account?.address]);
+
+  useEffect(() => {
+    if (open) {
+      fetchSessions();
+    }
+  }, [open, fetchSessions]);
+
+  const handleRevoke = async (keyId: string) => {
+    if (!account?.address) return;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/keys/${keyId}`, {
+        method: "DELETE",
+        headers: {
+          "x-session-user-address": account.address,
+        },
+      });
+
+      if (response.ok) {
+        toast.success("Session revoked");
+        fetchSessions();
+      } else {
+        toast.error("Failed to revoke session");
+      }
+    } catch (err) {
+      toast.error("Failed to revoke session");
+      console.error(err);
+    }
+  };
+
+  const handleCopyKey = async (keyId: string) => {
+    // We can only show masked key since we don't store the actual token
+    const maskedKey = `compose-${keyId.slice(0, 8)}***`;
+    await navigator.clipboard.writeText(maskedKey);
+    setCopiedKeyId(keyId);
+    toast.success("Key ID copied to clipboard");
+    setTimeout(() => setCopiedKeyId(null), 2000);
+  };
+
+  const handleCreateClose = (open: boolean) => {
+    setCreateDialogOpen(open);
+    if (!open) {
+      // Refresh sessions after creating a new one
+      fetchSessions();
+    }
+  };
+
+  return (
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="bg-card border-sidebar-border max-w-md max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-display text-cyan-400 flex items-center gap-2">
+              <Wallet className="w-5 h-5" />
+              Manage Sessions
+            </DialogTitle>
+            <DialogDescription className="text-muted-foreground">
+              View and manage your active API sessions and keys.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            {/* Current Session Info */}
+            {session.isActive && (
+              <div className="bg-cyan-500/10 border border-cyan-500/30 rounded-sm p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <Zap className="w-4 h-4 text-cyan-400" />
+                  <span className="text-sm font-medium text-cyan-400 font-mono">Current Session</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <span className="text-muted-foreground">Remaining</span>
+                    <p className="font-mono text-foreground">${(session.budgetRemaining / 1_000_000).toFixed(2)}</p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Expires</span>
+                    <p className="font-mono text-foreground">
+                      {session.expiresAt ? formatTimeRemaining(session.expiresAt) : "Never"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Sessions/Keys List */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-muted-foreground font-mono">API Keys</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setCreateDialogOpen(true)}
+                  className="h-7 text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10"
+                >
+                  <Plus className="w-4 h-4 mr-1" />
+                  New Key
+                </Button>
+              </div>
+
+              {loading ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="w-6 h-6 border-2 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin" />
+                </div>
+              ) : sessions.length === 0 ? (
+                <div className="text-center py-6 text-muted-foreground text-sm">
+                  No API keys created yet.
+                  <br />
+                  <button
+                    onClick={() => setCreateDialogOpen(true)}
+                    className="text-cyan-400 hover:underline mt-1"
+                  >
+                    Generate your first key
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {sessions.map((s) => (
+                    <div
+                      key={s.keyId}
+                      className="bg-sidebar-accent border border-sidebar-border rounded-sm p-3"
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-mono text-sm text-foreground truncate">
+                          {s.name || "Unnamed Key"}
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleCopyKey(s.keyId)}
+                            className="p-1 text-muted-foreground hover:text-cyan-400 transition-colors"
+                            title="Copy key ID"
+                          >
+                            {copiedKeyId === s.keyId ? (
+                              <Check className="w-3.5 h-3.5 text-green-400" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                          <button
+                            onClick={() => handleRevoke(s.keyId)}
+                            className="p-1 text-muted-foreground hover:text-destructive transition-colors"
+                            title="Revoke key"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                        <span className="font-mono">compose-{s.keyId.slice(0, 8)}***</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 mt-2 text-xs">
+                        <div>
+                          <span className="text-muted-foreground">Budget</span>
+                          <p className="font-mono text-cyan-400">
+                            ${(s.budgetRemaining / 1_000_000).toFixed(2)} / ${(s.budgetLimit / 1_000_000).toFixed(2)}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Expires</span>
+                          <p className="font-mono text-foreground">{formatTimeRemaining(s.expiresAt)}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create Key Dialog (reusing existing) */}
+      <ComposeKeyDialog open={createDialogOpen} onOpenChange={handleCreateClose} />
+    </>
   );
 }
 
