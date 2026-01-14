@@ -28,8 +28,14 @@ import {
   Play, Save, Download, Info, Loader2, CheckCircle2, XCircle,
   Plug, Trash2, Settings, ChevronRight, Bot, ExternalLink, Filter, Star, Shield,
   Wrench, Github, Zap, Server, Copy, FlaskConical, Sparkles, Upload, DollarSign, Clock, AlertCircle,
-  ArrowRightLeft, Globe, Maximize2, Minimize2
+  ArrowRightLeft, Globe, Maximize2, Minimize2, RefreshCw, Check
 } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
 import { useActiveAccount, useActiveWallet, TransactionButton, useSendTransaction } from "thirdweb/react";
 import { wrapFetchWithPayment } from "thirdweb/x402";
@@ -1396,6 +1402,12 @@ function MintManowarDialog({
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const bannerInputRef = useRef<HTMLInputElement>(null);
 
+  // Banner generation state
+  const [isGeneratingBanner, setIsGeneratingBanner] = useState(false);
+  const [generatedBannerUrl, setGeneratedBannerUrl] = useState<string | null>(null);
+  const [bannerGenerationCount, setBannerGenerationCount] = useState(0);
+  const MAX_BANNER_GENERATIONS = 3;
+
   // Calculate total agent price
   const totalAgentPrice = useMemo(() => {
     let total = BigInt(0);
@@ -1427,6 +1439,100 @@ function MintManowarDialog({
     setBannerFile(file);
     const dataUrl = await fileToDataUrl(file);
     setBannerPreview(dataUrl);
+    // Clear generated banner state when user uploads their own
+    setGeneratedBannerUrl(null);
+  };
+
+  // Handle AI banner generation
+  const API_URL = (import.meta.env.VITE_API_URL || "https://api.compose.market").replace(/\/+$/, "");
+
+  const handleGenerateBanner = async () => {
+    // Check generation limit
+    if (bannerGenerationCount >= MAX_BANNER_GENERATIONS) {
+      toast({
+        title: "Generation limit reached",
+        description: `You can generate up to ${MAX_BANNER_GENERATIONS} banners per session. Upload your own image instead.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    console.log("[generate-banner] Form values:", { title, description });
+
+    if (!title?.trim()) {
+      toast({
+        title: "Title required",
+        description: "You should add Title + Description before generating a banner",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!description?.trim()) {
+      toast({
+        title: "Description required",
+        description: "You should add Title + Description before generating a banner",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsGeneratingBanner(true);
+    try {
+      const response = await fetch(`${API_URL}/api/generate-banner`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, description }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Generation failed");
+      }
+
+      const { imageUrl } = await response.json();
+
+      // Convert base64 data URL to File object for IPFS upload
+      const dataUrlToFile = async (dataUrl: string, filename: string): Promise<File> => {
+        const res = await fetch(dataUrl);
+        const blob = await res.blob();
+        return new File([blob], filename, { type: blob.type });
+      };
+
+      const bannerFileName = `${title.replace(/\s+/g, "_")}_banner.png`;
+      const generatedFile = await dataUrlToFile(imageUrl, bannerFileName);
+
+      setGeneratedBannerUrl(imageUrl);
+      setBannerPreview(imageUrl);
+      setBannerFile(generatedFile); // SET the file for IPFS upload on mint!
+      setBannerGenerationCount(prev => prev + 1);
+
+      toast({
+        title: "Banner generated!",
+        description: `Generation ${bannerGenerationCount + 1}/${MAX_BANNER_GENERATIONS}`,
+      });
+    } catch (error) {
+      console.error("[generate-banner] Error:", error);
+      toast({
+        title: "Generation failed",
+        description: error instanceof Error ? error.message : "Unknown error occurred",
+        variant: "destructive",
+      });
+    } finally {
+      setIsGeneratingBanner(false);
+    }
+  };
+
+  const handleAcceptBanner = () => {
+    setGeneratedBannerUrl(null);
+    toast({
+      title: "Banner accepted",
+      description: "Your AI-generated banner is ready to use",
+    });
+  };
+
+  const handleRegenerateBanner = () => {
+    handleGenerateBanner();
   };
 
   // Validate and show price confirmation popup
@@ -1606,7 +1712,7 @@ function MintManowarDialog({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-4">
             {/* Left Column */}
             <div className="space-y-4">
-              {/* Banner Upload */}
+              {/* Banner Upload with AI Generation */}
               <div>
                 <Label className="text-[10px] sm:text-xs font-mono text-muted-foreground mb-2 block">BANNER IMAGE</Label>
                 <input
@@ -1616,20 +1722,103 @@ function MintManowarDialog({
                   onChange={handleBannerSelect}
                   className="hidden"
                 />
-                <button
-                  type="button"
-                  onClick={() => bannerInputRef.current?.click()}
-                  className="w-full h-20 rounded-sm bg-background/50 border border-sidebar-border border-dashed flex items-center justify-center text-muted-foreground hover:border-fuchsia-500 hover:text-fuchsia-400 transition-colors overflow-hidden touch-manipulation"
-                >
-                  {bannerPreview ? (
-                    <img src={bannerPreview} alt="Banner" className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <Upload className="w-4 h-4" />
-                      <span className="text-xs font-mono">Upload banner</span>
-                    </div>
+                {/* Banner canvas with generate button overlay */}
+                <div className="relative w-full">
+                  <button
+                    type="button"
+                    onClick={() => bannerInputRef.current?.click()}
+                    className="w-full h-20 rounded-sm bg-background/50 border border-sidebar-border border-dashed flex items-center justify-center text-muted-foreground hover:border-fuchsia-500 hover:text-fuchsia-400 transition-colors overflow-hidden touch-manipulation"
+                  >
+                    {isGeneratingBanner ? (
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin text-fuchsia-400" />
+                        <span className="text-xs font-mono text-fuchsia-400">GENERATING...</span>
+                      </div>
+                    ) : bannerPreview ? (
+                      <img src={bannerPreview} alt="Banner" className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <Upload className="w-4 h-4" />
+                        <span className="text-xs font-mono">Upload banner</span>
+                      </div>
+                    )}
+                  </button>
+
+                  {/* Generate button overlay (bottom-right corner) */}
+                  {!isGeneratingBanner && (
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleGenerateBanner();
+                            }}
+                            disabled={bannerGenerationCount >= MAX_BANNER_GENERATIONS}
+                            className={`absolute bottom-1 right-1 w-8 h-8 rounded-full flex items-center justify-center transition-all ${bannerGenerationCount >= MAX_BANNER_GENERATIONS
+                              ? "bg-muted/50 text-muted-foreground cursor-not-allowed"
+                              : "bg-fuchsia-500/80 hover:bg-fuchsia-500 text-white shadow-lg hover:shadow-fuchsia-500/30"
+                              }`}
+                          >
+                            <Sparkles className="w-4 h-4" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          {bannerGenerationCount >= MAX_BANNER_GENERATIONS
+                            ? `Limit reached (${MAX_BANNER_GENERATIONS}/${MAX_BANNER_GENERATIONS})`
+                            : `Generate Banner (${bannerGenerationCount}/${MAX_BANNER_GENERATIONS})`}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                   )}
-                </button>
+                </div>
+
+                {/* Accept/Regenerate controls for generated banners */}
+                {generatedBannerUrl && !isGeneratingBanner && (
+                  <div className="flex gap-2 justify-center mt-2">
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={handleAcceptBanner}
+                            className="border-green-500/50 text-green-400 hover:bg-green-500/10 hover:text-green-300 h-7"
+                          >
+                            <Check className="w-3 h-3" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Accept Banner</TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={handleRegenerateBanner}
+                            disabled={bannerGenerationCount >= MAX_BANNER_GENERATIONS}
+                            className={`h-7 ${bannerGenerationCount >= MAX_BANNER_GENERATIONS
+                              ? "border-muted text-muted-foreground cursor-not-allowed"
+                              : "border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/10 hover:text-cyan-300"
+                              }`}
+                          >
+                            <RefreshCw className="w-3 h-3" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          {bannerGenerationCount >= MAX_BANNER_GENERATIONS
+                            ? `Limit reached (${MAX_BANNER_GENERATIONS}/${MAX_BANNER_GENERATIONS})`
+                            : `Regenerate (${bannerGenerationCount}/${MAX_BANNER_GENERATIONS})`}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
+                )}
               </div>
 
               {/* Title */}
@@ -1947,6 +2136,8 @@ interface FloatingToolboxProps {
   onAddAgentStep: (agent: Agent) => void;
   onRun: () => void;
   onRequest: () => void;
+  onMint: () => void;
+  onSettings: () => void;
   isRunning: boolean;
   nodeCount: number;
 }
@@ -1957,6 +2148,8 @@ function FloatingToolbox({
   onAddAgentStep,
   onRun,
   onRequest,
+  onMint,
+  onSettings,
   isRunning,
   nodeCount,
 }: FloatingToolboxProps) {
@@ -1988,6 +2181,17 @@ function FloatingToolbox({
     e.preventDefault();
   };
 
+  // Touch event handlers for mobile drag support
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (!(e.target as HTMLElement).closest('[data-drag-handle]')) return;
+    const touch = e.touches[0];
+    setIsDragging(true);
+    setDragOffset({
+      x: touch.clientX - position.x,
+      y: touch.clientY - position.y,
+    });
+  };
+
   useEffect(() => {
     if (!isDragging) return;
 
@@ -2001,15 +2205,33 @@ function FloatingToolbox({
       setPosition({ x: newX, y: newY });
     };
 
+    const handleTouchMove = (e: TouchEvent) => {
+      const touch = e.touches[0];
+      const toolboxWidth = 288;
+      const toolboxMinHeight = 100;
+      const padding = 16;
+      const newX = Math.max(padding, Math.min(window.innerWidth - toolboxWidth - padding, touch.clientX - dragOffset.x));
+      const newY = Math.max(padding, Math.min(window.innerHeight - toolboxMinHeight - padding, touch.clientY - dragOffset.y));
+      setPosition({ x: newX, y: newY });
+    };
+
     const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    const handleTouchEnd = () => {
       setIsDragging(false);
     };
 
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('touchmove', handleTouchMove);
+    window.addEventListener('touchend', handleTouchEnd);
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleTouchEnd);
     };
   }, [isDragging, dragOffset]);
 
@@ -2023,6 +2245,7 @@ function FloatingToolbox({
         cursor: isDragging ? 'grabbing' : 'auto',
       }}
       onMouseDown={handleMouseDown}
+      onTouchStart={handleTouchStart}
     >
       {/* Draggable Header */}
       <div
@@ -2041,6 +2264,15 @@ function FloatingToolbox({
           </Badge>
         </div>
         <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onSettings}
+            className="h-6 w-6 text-muted-foreground hover:text-cyan-400"
+            title="Workflow Settings"
+          >
+            <Settings className="w-3.5 h-3.5" />
+          </Button>
           <Button
             variant="ghost"
             size="icon"
@@ -2063,7 +2295,7 @@ function FloatingToolbox({
 
       {/* Collapsible Body */}
       {!isMinimized && (
-        <div className="p-3 space-y-3">
+        <div className="flex flex-col p-3 gap-3">
           {/* Action Buttons */}
           <div className="flex flex-wrap gap-2">
             <Button
@@ -2088,7 +2320,7 @@ function FloatingToolbox({
             </Button>
           </div>
 
-          {/* Compact Pickers */}
+          {/* Compact Pickers - no outer scroll, only internal content scrolls */}
           <div className="border-t border-sidebar-border pt-3">
             <Tabs defaultValue="connectors" className="w-full">
               <TabsList className="w-full h-8 rounded-sm bg-sidebar-accent border border-sidebar-border">
@@ -2114,13 +2346,13 @@ function FloatingToolbox({
                   TRIGGERS
                 </TabsTrigger>
               </TabsList>
-              <TabsContent value="connectors" className="mt-2 max-h-48 overflow-y-auto">
+              <TabsContent value="connectors" className="mt-2 h-40 overflow-y-auto">
                 <ConnectorPicker onSelect={onAddStep} />
               </TabsContent>
-              <TabsContent value="agents" className="mt-2 max-h-48 overflow-y-auto">
+              <TabsContent value="agents" className="mt-2 h-40 overflow-y-auto">
                 <AgentsPicker onSelect={onAddAgentStep} />
               </TabsContent>
-              <TabsContent value="triggers" className="mt-2 max-h-48 overflow-y-auto">
+              <TabsContent value="triggers" className="mt-2 h-40 overflow-y-auto">
                 <TriggerPicker onAdd={(trigger) => {
                   // Add trigger node to the workflow
                   console.log("[compose] Add trigger:", trigger);
@@ -2129,6 +2361,16 @@ function FloatingToolbox({
               </TabsContent>
             </Tabs>
           </div>
+
+          {/* MINT Button - at the bottom */}
+          <Button
+            onClick={onMint}
+            disabled={nodeCount === 0}
+            className="w-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white hover:from-cyan-400 hover:to-fuchsia-400 font-bold font-mono text-xs h-9 disabled:opacity-50"
+          >
+            <Sparkles className="w-3.5 h-3.5 mr-1.5" />
+            MINT AS NFT
+          </Button>
         </div>
       )}
     </div>
@@ -2148,6 +2390,8 @@ interface FullscreenOverlayProps {
   onAddAgentStep: (agent: Agent) => void;
   onRun: () => void;
   onRequest: () => void;
+  onMint: () => void;
+  onSettings: () => void;
   isRunning: boolean;
   nodeCount: number;
 }
@@ -2160,6 +2404,8 @@ function FullscreenOverlay({
   onAddAgentStep,
   onRun,
   onRequest,
+  onMint,
+  onSettings,
   isRunning,
   nodeCount,
 }: FullscreenOverlayProps) {
@@ -2207,6 +2453,8 @@ function FullscreenOverlay({
           onAddAgentStep={onAddAgentStep}
           onRun={onRun}
           onRequest={onRequest}
+          onMint={onMint}
+          onSettings={onSettings}
           isRunning={isRunning}
           nodeCount={nodeCount}
         />
@@ -2248,6 +2496,9 @@ function ComposeFlow() {
   // Fullscreen canvas state
   // Start in expanded/fullscreen mode by default for better UX
   const [isFullscreen, setIsFullscreen] = useState(true);
+
+  // Settings sheet state (controlled to work from fullscreen)
+  const [showSettingsSheet, setShowSettingsSheet] = useState(false);
 
   // Run workflow dialog state
   const [showRunDialog, setShowRunDialog] = useState(false);
@@ -2839,14 +3090,18 @@ function ComposeFlow() {
               <Maximize2 className="w-3.5 h-3.5 lg:w-4 lg:h-4" />
             </Button>
 
-            {/* Settings Dialog */}
-            <Sheet>
+            {/* Settings Dialog - controlled via state for fullscreen access */}
+            <Sheet open={showSettingsSheet} onOpenChange={setShowSettingsSheet}>
               <SheetTrigger asChild>
-                <Button variant="outline" className="border-sidebar-border h-8 lg:h-9 w-8 lg:w-9">
+                <Button
+                  variant="outline"
+                  className="border-sidebar-border h-8 lg:h-9 w-8 lg:w-9"
+                  onClick={() => setShowSettingsSheet(true)}
+                >
                   <Settings className="w-3.5 h-3.5 lg:w-4 lg:h-4" />
                 </Button>
               </SheetTrigger>
-              <SheetContent className="bg-card border-sidebar-border">
+              <SheetContent className="bg-card border-sidebar-border z-[60]">
                 <SheetHeader>
                   <SheetTitle className="font-display text-cyan-400">Workflow Settings</SheetTitle>
                   <SheetDescription>Configure workflow metadata and input</SheetDescription>
@@ -2984,6 +3239,8 @@ function ComposeFlow() {
         onAddAgentStep={handleAddAgentStep}
         onRun={() => setShowRunDialog(true)}
         onRequest={() => setShowRFADialog(true)}
+        onMint={() => setShowMintDialog(true)}
+        onSettings={() => setShowSettingsSheet(true)}
         isRunning={isRunning}
         nodeCount={nodes.length}
       >
