@@ -45,8 +45,16 @@ import {
   Globe,
   User,
   ArrowLeft,
+  RefreshCw,
+  Check,
 } from "lucide-react";
-import { useActiveAccount, TransactionButton } from "thirdweb/react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { useActiveAccount, useSendTransaction } from "thirdweb/react";
 import { prepareContractCall } from "thirdweb";
 import {
   getWarpContract,
@@ -108,6 +116,7 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const account = useActiveAccount();
+  const { mutateAsync: sendTransaction, isPending: isSending } = useSendTransaction();
 
   // Avatar upload state
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
@@ -115,18 +124,15 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
   const [mintStep, setMintStep] = useState<"idle" | "uploading" | "minting" | "done">("idle");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Avatar generation state
+  const [isGeneratingAvatar, setIsGeneratingAvatar] = useState(false);
+  const [generationCount, setGenerationCount] = useState(0);
+  const [generatedAvatarUrl, setGeneratedAvatarUrl] = useState<string | null>(null);
+  const MAX_GENERATIONS = 3;
+
   // Confirmation dialog state
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [pendingValues, setPendingValues] = useState<WarpFormValues | null>(null);
-
-  // Prepared transaction data
-  const [preparedTx, setPreparedTx] = useState<{
-    originalAgentHash: `0x${string}`;
-    originalCreator: `0x${string}`;
-    licenses: bigint;
-    licensePrice: bigint;
-    agentCardUri: string;
-  } | null>(null);
 
   const registryInfo = AGENT_REGISTRIES[agent.registry];
   const initials = agent.name
@@ -174,19 +180,123 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
       setAvatarFile(file);
       const dataUrl = await fileToDataUrl(file);
       setAvatarPreview(dataUrl);
+      // Clear generated avatar state when user uploads their own
+      setGeneratedAvatarUrl(null);
     },
     [toast]
   );
 
-  // Prepare transaction data for warping
-  const prepareForWarp = async (values: WarpFormValues): Promise<boolean> => {
+  // Handle AI avatar generation
+  const API_URL = (import.meta.env.VITE_API_URL || "https://api.compose.market").replace(/\/+$/, "");
+
+  const handleGenerateAvatar = useCallback(async () => {
+    // Check generation limit
+    if (generationCount >= MAX_GENERATIONS) {
+      toast({
+        title: "Generation limit reached",
+        description: `You can generate up to ${MAX_GENERATIONS} avatars per session. Upload your own image instead.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Validate name and description
+    const title = form.getValues("name");
+    const description = form.getValues("description");
+
+    console.log("[generate-avatar] Form values:", { title, description });
+
+    if (!title?.trim()) {
+      toast({
+        title: "Name required",
+        description: "You should add Name + Description before generating an avatar",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!description?.trim()) {
+      toast({
+        title: "Description required",
+        description: "You should add Name + Description before generating an avatar",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsGeneratingAvatar(true);
+    try {
+      const response = await fetch(`${API_URL}/api/generate-avatar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, description }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Generation failed");
+      }
+
+      const { imageUrl } = await response.json();
+
+      // Convert base64 data URL to File object for IPFS upload
+      const dataUrlToFile = async (dataUrl: string, filename: string): Promise<File> => {
+        const res = await fetch(dataUrl);
+        const blob = await res.blob();
+        return new File([blob], filename, { type: blob.type });
+      };
+
+      const avatarFileName = `${title.replace(/\s+/g, "_")}_avatar.png`;
+      const generatedFile = await dataUrlToFile(imageUrl, avatarFileName);
+
+      setGeneratedAvatarUrl(imageUrl);
+      setAvatarPreview(imageUrl);
+      setAvatarFile(generatedFile); // SET the file for IPFS upload on warp!
+      setGenerationCount(prev => prev + 1);
+
+      toast({
+        title: "Avatar generated!",
+        description: `Generation ${generationCount + 1}/${MAX_GENERATIONS}`,
+      });
+    } catch (error) {
+      console.error("[generate-avatar] Error:", error);
+      toast({
+        title: "Generation failed",
+        description: error instanceof Error ? error.message : "Unknown error occurred",
+        variant: "destructive",
+      });
+    } finally {
+      setIsGeneratingAvatar(false);
+    }
+  }, [form, generationCount, toast, API_URL]);
+
+  const handleAcceptAvatar = useCallback(() => {
+    setGeneratedAvatarUrl(null);
+    toast({
+      title: "Avatar accepted",
+      description: "Your AI-generated avatar is ready to use",
+    });
+  }, [toast]);
+
+  const handleRegenerateAvatar = useCallback(() => {
+    handleGenerateAvatar();
+  }, [handleGenerateAvatar]);
+
+  // Prepare transaction data for warping - returns tx data instead of setting state
+  const prepareForWarp = async (values: WarpFormValues): Promise<{
+    originalAgentHash: `0x${string}`;
+    originalCreator: `0x${string}`;
+    licenses: bigint;
+    licensePrice: bigint;
+    agentCardUri: string;
+  } | null> => {
     if (!isPinataConfigured()) {
       toast({
         title: "IPFS not configured",
         description: "Pinata JWT is missing. Check environment variables.",
         variant: "destructive",
       });
-      return false;
+      return null;
     }
 
     try {
@@ -235,21 +345,18 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
       const cardCid = await uploadAgentCard(agentCard);
       const agentCardUri = getIpfsUri(cardCid);
 
-      // 4. Prepare transaction params
+      // 5. Prepare transaction params
       const licensePrice = usdcToWei(parseFloat(values.licensePrice));
       const licenses = values.licenses ? BigInt(values.licenses) : BigInt(0);
       const originalCreator = (values.originalCreator?.trim() || "0x0000000000000000000000000000000000000000") as `0x${string}`;
 
-      setPreparedTx({
+      return {
         originalAgentHash,
         originalCreator,
         licenses,
         licensePrice,
         agentCardUri,
-      });
-
-      setMintStep("minting");
-      return true;
+      };
     } catch (error) {
       console.error("Prepare error:", error);
       setMintStep("idle");
@@ -258,7 +365,7 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
         description: error instanceof Error ? error.message : "Failed to upload to IPFS",
         variant: "destructive",
       });
-      return false;
+      return null;
     }
   };
 
@@ -296,7 +403,6 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
   const handleWarpError = (error: Error) => {
     console.error("Warp error:", error);
     setMintStep("idle");
-    setPreparedTx(null);
     toast({
       title: "Warping Failed",
       description: error.message || "Unknown error occurred",
@@ -310,11 +416,40 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
     setShowConfirmDialog(true);
   };
 
-  // Handle confirmed warp
+  // Handle confirmed warp - single confirmation triggers both IPFS upload and on-chain tx
   const handleConfirmedWarp = async () => {
     if (!pendingValues) return;
     setShowConfirmDialog(false);
-    await prepareForWarp(pendingValues);
+
+    // Step 1: Upload to IPFS and prepare transaction data
+    const txData = await prepareForWarp(pendingValues);
+    if (!txData) return; // Upload failed
+
+    // Step 2: Immediately trigger on-chain transaction (no second click needed)
+    try {
+      setMintStep("minting");
+      const contract = getWarpContract();
+      const transaction = prepareContractCall({
+        contract,
+        method:
+          "function warpAgent(bytes32 originalAgentHash, address originalCreator, uint256 licenses, uint256 licensePrice, string agentCardUri) returns (uint256 warpedAgentId)",
+        params: [
+          txData.originalAgentHash,
+          txData.originalCreator,
+          txData.licenses,
+          txData.licensePrice,
+          txData.agentCardUri,
+        ],
+      });
+
+      // Send transaction (gasless sponsorship configured on ThirdWeb)
+      const result = await sendTransaction(transaction);
+
+      // Handle success
+      await handleWarpSuccess({ transactionHash: result.transactionHash });
+    } catch (error) {
+      handleWarpError(error instanceof Error ? error : new Error(String(error)));
+    }
   };
 
   const isProcessing = mintStep !== "idle" && mintStep !== "done";
@@ -558,52 +693,31 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
               )}
 
               {/* Submit Button */}
-              {!preparedTx ? (
-                <Button
-                  type="submit"
-                  size="lg"
-                  disabled={!account || mintStep === "uploading"}
-                  className="w-full bg-gradient-to-r from-fuchsia-500 to-cyan-500 text-white font-bold font-mono hover:from-fuchsia-400 hover:to-cyan-400 h-14 text-lg shadow-[0_0_20px_-5px_hsl(var(--primary))] tracking-wider disabled:opacity-50"
-                >
-                  {mintStep === "uploading" ? (
-                    <>
-                      <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                      UPLOADING...
-                    </>
-                  ) : !account ? (
-                    "SIGN IN TO WARP"
-                  ) : (
-                    <>
-                      <ArrowRightLeft className="w-5 h-5 mr-2" />
-                      PREPARE WARP
-                    </>
-                  )}
-                </Button>
-              ) : (
-                <TransactionButton
-                  transaction={() => {
-                    const contract = getWarpContract();
-                    return prepareContractCall({
-                      contract,
-                      method:
-                        "function warpAgent(bytes32 originalAgentHash, address originalCreator, uint256 licenses, uint256 licensePrice, string agentCardUri) returns (uint256 warpedAgentId)",
-                      params: [
-                        preparedTx.originalAgentHash,
-                        preparedTx.originalCreator,
-                        preparedTx.licenses,
-                        preparedTx.licensePrice,
-                        preparedTx.agentCardUri,
-                      ],
-                    });
-                  }}
-                  onTransactionConfirmed={handleWarpSuccess}
-                  onError={handleWarpError}
-                  className="w-full !bg-gradient-to-r !from-fuchsia-500 !to-cyan-500 !text-white !font-bold !font-mono !h-14 !text-lg !shadow-[0_0_20px_-5px_hsl(var(--primary))] !tracking-wider !rounded-sm"
-                >
-                  <ArrowRightLeft className="w-5 h-5 mr-2" />
-                  WARP INTO MANOWAR
-                </TransactionButton>
-              )}
+              <Button
+                type="submit"
+                size="lg"
+                disabled={!account || isProcessing}
+                className="w-full bg-gradient-to-r from-fuchsia-500 to-cyan-500 text-white font-bold font-mono hover:from-fuchsia-400 hover:to-cyan-400 h-14 text-lg shadow-[0_0_20px_-5px_hsl(var(--primary))] tracking-wider disabled:opacity-50"
+              >
+                {mintStep === "uploading" ? (
+                  <>
+                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                    UPLOADING...
+                  </>
+                ) : mintStep === "minting" ? (
+                  <>
+                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                    WARPING...
+                  </>
+                ) : !account ? (
+                  "SIGN IN TO WARP"
+                ) : (
+                  <>
+                    <ArrowRightLeft className="w-5 h-5 mr-2" />
+                    WARP INTO MANOWAR
+                  </>
+                )}
+              </Button>
             </form>
           </Form>
         </div>
@@ -619,28 +733,113 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
               onChange={handleAvatarSelect}
               className="hidden"
             />
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="w-full aspect-square rounded-sm bg-background/50 border border-sidebar-border border-dashed flex flex-col items-center justify-center text-muted-foreground cursor-pointer hover:border-cyan-500 hover:text-cyan-400 transition-colors overflow-hidden"
-            >
-              {avatarPreview ? (
-                <img
-                  src={avatarPreview}
-                  alt="Avatar preview"
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <>
-                  <Upload className="w-8 h-8 mb-2" />
-                  <span className="text-xs font-mono">UPLOAD AVATAR</span>
-                  <span className="text-[10px] font-mono text-muted-foreground/70 mt-1">
-                    (or use original)
-                  </span>
-                </>
+            {/* Avatar canvas with generate button overlay */}
+            <div className="relative w-full aspect-square">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full h-full rounded-sm bg-background/50 border border-sidebar-border border-dashed flex flex-col items-center justify-center text-muted-foreground cursor-pointer hover:border-cyan-500 hover:text-cyan-400 transition-colors overflow-hidden"
+              >
+                {isGeneratingAvatar ? (
+                  <div className="flex flex-col items-center gap-2">
+                    <Loader2 className="w-8 h-8 animate-spin text-cyan-400" />
+                    <span className="text-xs font-mono text-cyan-400">GENERATING...</span>
+                  </div>
+                ) : avatarPreview ? (
+                  <img
+                    src={avatarPreview}
+                    alt="Avatar preview"
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <>
+                    <Upload className="w-8 h-8 mb-2" />
+                    <span className="text-xs font-mono">UPLOAD AVATAR</span>
+                    <span className="text-[10px] font-mono text-muted-foreground/70 mt-1">
+                      (or use original)
+                    </span>
+                  </>
+                )}
+              </button>
+
+              {/* Generate button overlay (bottom-right corner) */}
+              {!isGeneratingAvatar && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleGenerateAvatar();
+                        }}
+                        disabled={generationCount >= MAX_GENERATIONS}
+                        className={`absolute bottom-2 right-2 w-10 h-10 rounded-full flex items-center justify-center transition-all ${generationCount >= MAX_GENERATIONS
+                          ? "bg-muted/50 text-muted-foreground cursor-not-allowed"
+                          : "bg-fuchsia-500/80 hover:bg-fuchsia-500 text-white shadow-lg hover:shadow-fuchsia-500/30"
+                          }`}
+                      >
+                        <Sparkles className="w-5 h-5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {generationCount >= MAX_GENERATIONS
+                        ? `Limit reached (${MAX_GENERATIONS}/${MAX_GENERATIONS})`
+                        : `Generate Avatar (${generationCount}/${MAX_GENERATIONS})`}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               )}
-            </button>
-            {avatarPreview && avatarFile && (
+            </div>
+
+            {/* Accept/Regenerate controls for generated avatars */}
+            {generatedAvatarUrl && !isGeneratingAvatar && (
+              <div className="flex gap-2 justify-center">
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleAcceptAvatar}
+                        className="border-green-500/50 text-green-400 hover:bg-green-500/10 hover:text-green-300"
+                      >
+                        <Check className="w-4 h-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Accept Avatar</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleRegenerateAvatar}
+                        disabled={generationCount >= MAX_GENERATIONS}
+                        className={`${generationCount >= MAX_GENERATIONS
+                          ? "border-muted text-muted-foreground cursor-not-allowed"
+                          : "border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/10 hover:text-cyan-300"
+                          }`}
+                      >
+                        <RefreshCw className="w-4 h-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {generationCount >= MAX_GENERATIONS
+                        ? `Limit reached (${MAX_GENERATIONS}/${MAX_GENERATIONS})`
+                        : `Regenerate (${generationCount}/${MAX_GENERATIONS})`}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+            )}
+
+            {/* Remove/Reset avatar button */}
+            {avatarPreview && avatarFile && !generatedAvatarUrl && (
               <Button
                 type="button"
                 variant="ghost"
@@ -648,6 +847,7 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
                 onClick={() => {
                   setAvatarFile(null);
                   setAvatarPreview(agent.avatarUrl || null);
+                  setGeneratedAvatarUrl(null);
                 }}
                 className="w-full text-xs text-muted-foreground"
               >
