@@ -31,7 +31,13 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
-import { Cpu, DollarSign, ShieldCheck, Upload, ExternalLink, Sparkles, Plug, Search, X, ChevronRight, Loader2, Play, AlertCircle, CheckCircle2, Boxes, Brain, ArrowRightLeft, Plus, Globe } from "lucide-react";
+import { Cpu, DollarSign, ShieldCheck, Upload, ExternalLink, Sparkles, Plug, Search, X, ChevronRight, Loader2, Play, AlertCircle, CheckCircle2, Boxes, Brain, ArrowRightLeft, Plus, Globe, RefreshCw, Check } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { WarpAgentForm, type WarpAgentData } from "@/components/warp-form";
 import { ModelSelector } from "@/components/model-selector";
 import { type AIModel } from "@/lib/models";
@@ -147,6 +153,12 @@ export default function CreateAgent() {
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [mintStep, setMintStep] = useState<"idle" | "uploading" | "minting" | "done">("idle");
+
+  // Avatar generation state
+  const [isGeneratingAvatar, setIsGeneratingAvatar] = useState(false);
+  const [generationCount, setGenerationCount] = useState(0);
+  const [generatedAvatarUrl, setGeneratedAvatarUrl] = useState<string | null>(null);
+  const MAX_GENERATIONS = 3;
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Check for warp mode from URL and sessionStorage
@@ -302,7 +314,106 @@ export default function CreateAgent() {
     setAvatarFile(file);
     const dataUrl = await fileToDataUrl(file);
     setAvatarPreview(dataUrl);
+    // Clear generated avatar state when user uploads their own
+    setGeneratedAvatarUrl(null);
   }, [toast]);
+
+  // Handle AI avatar generation
+  const API_URL = (import.meta.env.VITE_API_URL || "https://api.compose.market").replace(/\/+$/, "");
+
+  const handleGenerateAvatar = useCallback(async () => {
+    // Check generation limit
+    if (generationCount >= MAX_GENERATIONS) {
+      toast({
+        title: "Generation limit reached",
+        description: `You can generate up to ${MAX_GENERATIONS} avatars per session. Upload your own image instead.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Validate name and description
+    const title = form.getValues("name");
+    const description = form.getValues("description");
+
+    console.log("[generate-avatar] Form values:", { title, description });
+
+    if (!title?.trim()) {
+      toast({
+        title: "Name required",
+        description: "You should add Name + Description before generating an avatar",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!description?.trim()) {
+      toast({
+        title: "Description required",
+        description: "You should add Name + Description before generating an avatar",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsGeneratingAvatar(true);
+    try {
+      const response = await fetch(`${API_URL}/api/generate-avatar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, description }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Generation failed");
+      }
+
+      const { imageUrl } = await response.json();
+
+      // Convert base64 data URL to File object for IPFS upload
+      const dataUrlToFile = async (dataUrl: string, filename: string): Promise<File> => {
+        const res = await fetch(dataUrl);
+        const blob = await res.blob();
+        return new File([blob], filename, { type: blob.type });
+      };
+
+      const avatarFileName = `${title.replace(/\s+/g, "_")}_avatar.png`;
+      const generatedFile = await dataUrlToFile(imageUrl, avatarFileName);
+
+      setGeneratedAvatarUrl(imageUrl);
+      setAvatarPreview(imageUrl);
+      setAvatarFile(generatedFile); // set the file for Pinata upload on mint
+      setGenerationCount(prev => prev + 1);
+
+      toast({
+        title: "Avatar generated!",
+        description: `Generation ${generationCount + 1}/${MAX_GENERATIONS}`,
+      });
+    } catch (error) {
+      console.error("[generate-avatar] Error:", error);
+      toast({
+        title: "Generation failed",
+        description: error instanceof Error ? error.message : "Unknown error occurred",
+        variant: "destructive",
+      });
+    } finally {
+      setIsGeneratingAvatar(false);
+    }
+  }, [form, generationCount, toast, API_URL]);
+
+  const handleAcceptAvatar = useCallback(() => {
+    // Avatar is already set in preview, just clear the generated URL state
+    setGeneratedAvatarUrl(null);
+    toast({
+      title: "Avatar accepted",
+      description: "Your AI-generated avatar is ready to use",
+    });
+  }, [toast]);
+
+  const handleRegenerateAvatar = useCallback(() => {
+    handleGenerateAvatar();
+  }, [handleGenerateAvatar]);
 
   // Prepare transaction data for minting
   const [preparedTx, setPreparedTx] = useState<{
@@ -1170,21 +1281,106 @@ export default function CreateAgent() {
               onChange={handleAvatarSelect}
               className="hidden"
             />
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="w-full aspect-square max-w-[200px] lg:max-w-none mx-auto rounded-sm bg-background/50 border border-sidebar-border border-dashed flex flex-col items-center justify-center text-muted-foreground cursor-pointer hover:border-cyan-500 hover:text-cyan-400 transition-colors overflow-hidden touch-manipulation"
-            >
-              {avatarPreview ? (
-                <img src={avatarPreview} alt="Avatar preview" className="w-full h-full object-cover" />
-              ) : (
-                <>
-                  <Upload className="w-6 h-6 sm:w-8 sm:h-8 mb-2" />
-                  <span className="text-[10px] sm:text-xs font-mono">UPLOAD AVATAR</span>
-                </>
+            {/* Avatar canvas with generate button overlay */}
+            <div className="relative w-full aspect-square max-w-[200px] lg:max-w-none mx-auto">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full h-full rounded-sm bg-background/50 border border-sidebar-border border-dashed flex flex-col items-center justify-center text-muted-foreground cursor-pointer hover:border-cyan-500 hover:text-cyan-400 transition-colors overflow-hidden touch-manipulation"
+              >
+                {isGeneratingAvatar ? (
+                  <div className="flex flex-col items-center gap-2">
+                    <Loader2 className="w-8 h-8 animate-spin text-cyan-400" />
+                    <span className="text-xs font-mono text-cyan-400">GENERATING...</span>
+                  </div>
+                ) : avatarPreview ? (
+                  <img src={avatarPreview} alt="Avatar preview" className="w-full h-full object-cover" />
+                ) : (
+                  <>
+                    <Upload className="w-6 h-6 sm:w-8 sm:h-8 mb-2" />
+                    <span className="text-[10px] sm:text-xs font-mono">UPLOAD AVATAR</span>
+                  </>
+                )}
+              </button>
+
+              {/* Generate button overlay (bottom-right corner) */}
+              {!isGeneratingAvatar && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleGenerateAvatar();
+                        }}
+                        disabled={generationCount >= MAX_GENERATIONS}
+                        className={`absolute bottom-2 right-2 w-10 h-10 rounded-full flex items-center justify-center transition-all ${generationCount >= MAX_GENERATIONS
+                          ? "bg-muted/50 text-muted-foreground cursor-not-allowed"
+                          : "bg-fuchsia-500/80 hover:bg-fuchsia-500 text-white shadow-lg hover:shadow-fuchsia-500/30"
+                          }`}
+                      >
+                        <Sparkles className="w-5 h-5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {generationCount >= MAX_GENERATIONS
+                        ? `Limit reached (${MAX_GENERATIONS}/${MAX_GENERATIONS})`
+                        : `Generate Avatar (${generationCount}/${MAX_GENERATIONS})`}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               )}
-            </button>
-            {avatarPreview && (
+            </div>
+
+            {/* Accept/Regenerate controls for generated avatars */}
+            {generatedAvatarUrl && !isGeneratingAvatar && (
+              <div className="flex gap-2 justify-center">
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleAcceptAvatar}
+                        className="border-green-500/50 text-green-400 hover:bg-green-500/10 hover:text-green-300"
+                      >
+                        <Check className="w-4 h-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Accept Avatar</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleRegenerateAvatar}
+                        disabled={generationCount >= MAX_GENERATIONS}
+                        className={`${generationCount >= MAX_GENERATIONS
+                          ? "border-muted text-muted-foreground cursor-not-allowed"
+                          : "border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/10 hover:text-cyan-300"
+                          }`}
+                      >
+                        <RefreshCw className="w-4 h-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {generationCount >= MAX_GENERATIONS
+                        ? `Limit reached (${MAX_GENERATIONS}/${MAX_GENERATIONS})`
+                        : `Regenerate (${generationCount}/${MAX_GENERATIONS})`}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+            )}
+
+            {/* Remove avatar button - only show when not in generated state */}
+            {avatarPreview && !generatedAvatarUrl && (
               <Button
                 type="button"
                 variant="ghost"
@@ -1192,6 +1388,7 @@ export default function CreateAgent() {
                 onClick={() => {
                   setAvatarFile(null);
                   setAvatarPreview(null);
+                  setGeneratedAvatarUrl(null);
                 }}
                 className="w-full text-xs text-muted-foreground"
               >
