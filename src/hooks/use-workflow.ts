@@ -301,7 +301,7 @@ export function useWorkflow(options: UseWorkflowOptions = {}) {
             if ((e.target as HTMLElement).tagName === "INPUT" ||
                 (e.target as HTMLElement).tagName === "TEXTAREA") return;
 
-            // Delete/Backspace - remove selected nodes AND edges
+            // Delete/Backspace - remove selected nodes and edges
             if (e.key === "Delete" || e.key === "Backspace") {
                 const selectedNodes = nodes.filter(n => n.selected);
                 const selectedEdges = edges.filter(e => e.selected);

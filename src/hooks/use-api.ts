@@ -10,7 +10,7 @@
 import { useCallback } from "react";
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
 import { wrapFetchWithPayment } from "thirdweb/x402";
-import { thirdwebClient } from "@/lib/thirdweb";
+import { thirdwebClient } from "@/lib/facilitator";
 import { API_BASE_URL } from "@/lib/api";
 import { parseMultimodalResponse } from "@/lib/multimodal";
 import type { MultimodalResult } from "@/lib/api";

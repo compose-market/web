@@ -1,6 +1,7 @@
 /**
  * Hooks for reading on-chain Manowar protocol data
  * Fetches agents and workflows from deployed contracts
+ * Multi-chain: fetches from ALL supported chains
  */
 import { useQuery } from "@tanstack/react-query";
 import { readContract } from "thirdweb";
@@ -9,6 +10,9 @@ import {
   getManowarContract,
   getWarpContract,
   getRFAContract,
+  getAgentFactoryContractForChain,
+  getManowarContractForChain,
+  getWarpContractForChain,
   AgentFactoryABI,
   ManowarABI,
   WarpABI,
@@ -17,6 +21,7 @@ import {
   type AgentData,
   type ManowarData,
 } from "@/lib/contracts";
+import { SUPPORTED_CHAINS } from "@/lib/facilitator";
 import { getIpfsUrl } from "@/lib/pinata";
 import type { AgentCard, ManowarMetadata } from "@/lib/pinata";
 
@@ -73,9 +78,12 @@ export interface OnchainManowar {
 // Contract Read Helpers
 // =============================================================================
 
-async function fetchAgentData(agentId: number): Promise<OnchainAgent | null> {
+async function fetchAgentData(agentId: number, chainId?: number): Promise<OnchainAgent | null> {
   try {
-    const factoryContract = getAgentFactoryContract();
+    // Use chain-specific contract if chainId provided, otherwise default
+    const factoryContract = chainId
+      ? getAgentFactoryContractForChain(chainId)
+      : getAgentFactoryContract();
     const data = await readContract({
       contract: factoryContract,
       method: "function getAgentData(uint256 agentId) view returns ((bytes32 dnaHash, uint256 licenses, uint256 licensesMinted, uint256 licensePrice, address creator, bool cloneable, bool isClone, uint256 parentAgentId, string agentCardUri))",
@@ -88,7 +96,9 @@ async function fetchAgentData(agentId: number): Promise<OnchainAgent | null> {
     // Check if this agent was created via warp
     let isWarped = false;
     try {
-      const warpContract = getWarpContract();
+      const warpContract = chainId
+        ? getWarpContractForChain(chainId)
+        : getWarpContract();
       isWarped = await readContract({
         contract: warpContract,
         method: "function isWarped(uint256 agentId) view returns (bool)",
@@ -100,7 +110,7 @@ async function fetchAgentData(agentId: number): Promise<OnchainAgent | null> {
     }
 
     // walletAddress will be populated from IPFS metadata in fetchAgentMetadata
-    // NOT derived here - metadata is the single source of truth
+    // chainId comes from metadata.chain field (see AgentCard type)
     return {
       id: agentId,
       dnaHash: data.dnaHash,
@@ -118,7 +128,7 @@ async function fetchAgentData(agentId: number): Promise<OnchainAgent | null> {
       isWarped,
     };
   } catch (error) {
-    console.error(`Failed to fetch agent ${agentId}:`, error);
+    console.error(`Failed to fetch agent ${agentId} on chain ${chainId}:`, error);
     return null;
   }
 }
@@ -193,9 +203,11 @@ export async function fetchAgentByWalletAddress(walletAddress: string): Promise<
   }
 }
 
-async function fetchManowarData(manowarId: number): Promise<OnchainManowar | null> {
+async function fetchManowarData(manowarId: number, chainId?: number): Promise<OnchainManowar | null> {
   try {
-    const contract = getManowarContract();
+    const contract = chainId
+      ? getManowarContractForChain(chainId)
+      : getManowarContract();
     const data = await readContract({
       contract,
       method: "function getManowarData(uint256 manowarId) view returns ((string title, string description, string banner, string manowarCardUri, uint256 totalPrice, uint256 units, uint256 unitsMinted, address creator, bool leaseEnabled, uint256 leaseDuration, uint8 leasePercent, bool hasCoordinator, string coordinatorModel, bool hasActiveRfa, uint256 rfaId))",
@@ -221,15 +233,17 @@ async function fetchManowarData(manowarId: number): Promise<OnchainManowar | nul
       rfaId: Number(data.rfaId),
     };
   } catch (error) {
-    console.error(`Failed to fetch manowar ${manowarId}:`, error);
+    console.error(`Failed to fetch manowar ${manowarId} on chain ${chainId}:`, error);
     return null;
   }
 }
 
-async function fetchManowarMetadata(manowar: OnchainManowar): Promise<OnchainManowar> {
+async function fetchManowarMetadata(manowar: OnchainManowar, chainId?: number): Promise<OnchainManowar> {
   try {
     // Fetch metadata via tokenURI (standard ERC721)
-    const contract = getManowarContract();
+    const contract = chainId
+      ? getManowarContractForChain(chainId)
+      : getManowarContract();
     const tokenUri = await readContract({
       contract,
       method: "function tokenURI(uint256 tokenId) view returns (string)",
@@ -253,6 +267,7 @@ async function fetchManowarMetadata(manowar: OnchainManowar): Promise<OnchainMan
     const metadata = await response.json() as ManowarMetadata;
 
     // walletAddress and dnaHash come from IPFS metadata - this is the SINGLE SOURCE OF TRUTH
+    // Chain info comes from nested agents[0].chain
     return {
       ...manowar,
       metadata,
@@ -270,39 +285,52 @@ async function fetchManowarMetadata(manowar: OnchainManowar): Promise<OnchainMan
 // =============================================================================
 
 /**
- * Fetch all on-chain agents from AgentFactory
+ * Fetch all on-chain agents from ALL supported chains
+ * Each agent's chainId comes from its metadata.chain field
  */
 export function useOnchainAgents(options?: { includeMetadata?: boolean }) {
   const { includeMetadata = true } = options || {};
 
   return useQuery({
-    queryKey: ["onchain-agents", includeMetadata],
+    queryKey: ["onchain-agents", "all-chains", includeMetadata],
     queryFn: async () => {
-      const contract = getAgentFactoryContract();
+      // Fetch from all supported chains in parallel
+      const chainPromises = SUPPORTED_CHAINS.map(async ({ id: chainId }) => {
+        try {
+          const contract = getAgentFactoryContractForChain(chainId);
 
-      // Get total agents count
-      const total = await readContract({
-        contract,
-        method: "function totalAgents() view returns (uint256)",
-        params: [],
-      }) as bigint;
+          // Get total agents count for this chain
+          const total = await readContract({
+            contract,
+            method: "function totalAgents() view returns (uint256)",
+            params: [],
+          }) as bigint;
 
-      const totalNum = Number(total);
-      if (totalNum === 0) return [];
+          const totalNum = Number(total);
+          if (totalNum === 0) return [];
 
-      // Fetch all agents (IDs start at 1)
-      const agentPromises = Array.from({ length: totalNum }, (_, i) =>
-        fetchAgentData(i + 1)
-      );
+          // Fetch all agents from this chain (IDs start at 1)
+          const agentPromises = Array.from({ length: totalNum }, (_, i) =>
+            fetchAgentData(i + 1, chainId)
+          );
 
-      let agents = (await Promise.all(agentPromises)).filter((a): a is OnchainAgent => a !== null);
+          let agents = (await Promise.all(agentPromises)).filter((a): a is OnchainAgent => a !== null);
 
-      // Optionally fetch metadata
-      if (includeMetadata) {
-        agents = await Promise.all(agents.map(fetchAgentMetadata));
-      }
+          // Optionally fetch metadata (which includes the chain field)
+          if (includeMetadata) {
+            agents = await Promise.all(agents.map(fetchAgentMetadata));
+          }
 
-      return agents;
+          return agents;
+        } catch (error) {
+          console.warn(`Failed to fetch agents from chain ${chainId}:`, error);
+          return [];
+        }
+      });
+
+      // Merge all agents from all chains
+      const chainsAgents = await Promise.all(chainPromises);
+      return chainsAgents.flat();
     },
     staleTime: 30 * 1000, // 30 seconds
     retry: 2,
@@ -377,7 +405,8 @@ export function useAgentsByCreator(creator: string | undefined) {
 }
 
 /**
- * Fetch all on-chain manowars
+ * Fetch all on-chain manowars from ALL supported chains
+ * Chain info comes from nested agents[0].chain in metadata
  */
 export function useOnchainManowars(options?: {
   includeRFA?: boolean;
@@ -386,38 +415,50 @@ export function useOnchainManowars(options?: {
   const { includeRFA = false, onlyComplete = true } = options || {};
 
   return useQuery({
-    queryKey: ["onchain-manowars", includeRFA, onlyComplete],
+    queryKey: ["onchain-manowars", "all-chains", includeRFA, onlyComplete],
     queryFn: async () => {
-      const contract = getManowarContract();
+      // Fetch from all supported chains in parallel
+      const chainPromises = SUPPORTED_CHAINS.map(async ({ id: chainId }) => {
+        try {
+          const contract = getManowarContractForChain(chainId);
 
-      // Get total manowars count
-      const total = await readContract({
-        contract,
-        method: "function totalManowars() view returns (uint256)",
-        params: [],
-      }) as bigint;
+          // Get total manowars count for this chain
+          const total = await readContract({
+            contract,
+            method: "function totalManowars() view returns (uint256)",
+            params: [],
+          }) as bigint;
 
-      const totalNum = Number(total);
-      if (totalNum === 0) return [];
+          const totalNum = Number(total);
+          if (totalNum === 0) return [];
 
-      // Fetch all manowars (IDs start at 1)
-      const manowarPromises = Array.from({ length: totalNum }, (_, i) =>
-        fetchManowarData(i + 1)
-      );
+          // Fetch all manowars from this chain (IDs start at 1)
+          const manowarPromises = Array.from({ length: totalNum }, (_, i) =>
+            fetchManowarData(i + 1, chainId)
+          );
 
-      let manowars = (await Promise.all(manowarPromises)).filter((m): m is OnchainManowar => m !== null);
+          let manowars = (await Promise.all(manowarPromises)).filter((m): m is OnchainManowar => m !== null);
 
-      // Fetch metadata for each manowar (to get walletAddress from IPFS)
-      manowars = await Promise.all(manowars.map(fetchManowarMetadata));
+          // Fetch metadata for each manowar (to get walletAddress from IPFS)
+          manowars = await Promise.all(manowars.map(m => fetchManowarMetadata(m, chainId)));
 
-      // Filter based on options
-      if (onlyComplete && !includeRFA) {
-        manowars = manowars.filter(m => !m.hasActiveRfa);
-      } else if (includeRFA && !onlyComplete) {
-        manowars = manowars.filter(m => m.hasActiveRfa);
-      }
+          // Filter based on options
+          if (onlyComplete && !includeRFA) {
+            manowars = manowars.filter(m => !m.hasActiveRfa);
+          } else if (includeRFA && !onlyComplete) {
+            manowars = manowars.filter(m => m.hasActiveRfa);
+          }
 
-      return manowars;
+          return manowars;
+        } catch (error) {
+          console.warn(`Failed to fetch manowars from chain ${chainId}:`, error);
+          return [];
+        }
+      });
+
+      // Merge all manowars from all chains
+      const chainsManowars = await Promise.all(chainPromises);
+      return chainsManowars.flat();
     },
     staleTime: 30 * 1000,
     retry: 2,
