@@ -32,13 +32,15 @@ import { useActiveAccount, useSendTransaction } from "thirdweb/react";
 import { prepareContractCall } from "thirdweb";
 import { useAgentsByCreator, useManowarsByCreator, useRFAsByPublisher, type OnchainAgent, type OnchainManowar, type OnchainRFA } from "@/hooks/use-onchain";
 import { getIpfsUrl } from "@/lib/pinata";
-import { CHAIN_CONFIG, CHAIN_IDS } from "@/lib/thirdweb";
+import { CHAIN_CONFIG, CHAIN_IDS } from "@/lib/facilitator";
+import { useChain } from "@/contexts/ChainContext";
 import { getContractAddress, getRFAContract, RFA_BOUNTY_LIMITS } from "@/lib/contracts";
 import { RFADetails } from "@/components/RFADetails";
 
 export default function MyAssetsPage() {
   const { toast } = useToast();
   const account = useActiveAccount();
+  const { paymentChainId } = useChain();
   const [activeTab, setActiveTab] = useState("agents");
 
   const { data: agents, isLoading: isLoadingAgents } = useAgentsByCreator(account?.address);
@@ -118,7 +120,7 @@ export default function MyAssetsPage() {
               <p className="font-mono text-xs sm:text-sm text-foreground truncate">
                 {account.address.slice(0, 6)}...{account.address.slice(-4)}
               </p>
-              <p className="text-[10px] sm:text-xs text-muted-foreground">Avalanche Fuji</p>
+              <p className="text-[10px] sm:text-xs text-muted-foreground">{CHAIN_CONFIG[paymentChainId]?.name || 'testnet'}</p>
             </div>
             <Button
               variant="ghost"
@@ -192,7 +194,7 @@ export default function MyAssetsPage() {
           {!isLoadingAgents && agents && agents.length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               {agents.map((agent) => (
-                <AgentAssetCard key={agent.id} agent={agent} />
+                <AgentAssetCard key={agent.id} agent={agent} chainId={paymentChainId} />
               ))}
             </div>
           )}
@@ -235,7 +237,7 @@ export default function MyAssetsPage() {
           {!isLoadingManowars && manowars && manowars.length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               {manowars.map((manowar) => (
-                <ManowarAssetCard key={manowar.id} manowar={manowar} />
+                <ManowarAssetCard key={manowar.id} manowar={manowar} chainId={paymentChainId} />
               ))}
             </div>
           )}
@@ -325,7 +327,7 @@ export default function MyAssetsPage() {
   );
 }
 
-function AgentAssetCard({ agent }: { agent: OnchainAgent }) {
+function AgentAssetCard({ agent, chainId }: { agent: OnchainAgent; chainId: number }) {
   const metadata = agent.metadata;
   const name = metadata?.name || `Agent #${agent.id}`;
   const description = metadata?.description || "No description available";
@@ -341,7 +343,7 @@ function AgentAssetCard({ agent }: { agent: OnchainAgent }) {
   }
 
   const initials = name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
-  const explorerUrl = `${CHAIN_CONFIG[CHAIN_IDS.avalancheFuji].explorer}/token/${getContractAddress("AgentFactory")}?a=${agent.id}`;
+  const explorerUrl = `${CHAIN_CONFIG[chainId].explorer}/token/${getContractAddress("AgentFactory", chainId)}?a=${agent.id}`;
 
   // Agent page URL using wallet address (primary) or ID (fallback)
   const agentPageUrl = agent.walletAddress
@@ -444,13 +446,13 @@ function AgentAssetCard({ agent }: { agent: OnchainAgent }) {
   );
 }
 
-function ManowarAssetCard({ manowar }: { manowar: OnchainManowar }) {
+function ManowarAssetCard({ manowar, chainId }: { manowar: OnchainManowar; chainId: number }) {
   let bannerUrl: string | null = null;
   if (manowar.image && manowar.image.startsWith("ipfs://")) {
     bannerUrl = getIpfsUrl(manowar.image.replace("ipfs://", ""));
   }
 
-  const explorerUrl = `${CHAIN_CONFIG[CHAIN_IDS.avalancheFuji].explorer}/token/${getContractAddress("Manowar")}?a=${manowar.id}`;
+  const explorerUrl = `${CHAIN_CONFIG[chainId].explorer}/token/${getContractAddress("Manowar", chainId)}?a=${manowar.id}`;
 
   // Use wallet address for navigation (primary), fallback to numeric ID
   const manowarPageUrl = manowar.walletAddress

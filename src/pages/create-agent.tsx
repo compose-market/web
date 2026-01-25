@@ -58,11 +58,14 @@ import {
   usdcToWei,
   getContractAddress
 } from "@/lib/contracts";
-import { CHAIN_IDS, CHAIN_CONFIG, inferencePriceWei } from "@/lib/thirdweb";
+import { CHAIN_IDS, CHAIN_CONFIG, inferencePriceWei } from "@/lib/facilitator";
+import { useChain } from "@/contexts/ChainContext";
+import { NetworkSelector } from "@/components/ui/network-selector";
 import { useActiveAccount } from "thirdweb/react";
 import { useSendTransaction } from "thirdweb/react";
 import { prepareContractCall } from "thirdweb";
-import { accountAbstraction } from "@/lib/thirdweb";
+import { accountAbstraction } from "@/lib/facilitator";
+import { getAgentFactoryContractForChain } from "@/lib/contracts";
 
 const MCP_URL = (import.meta.env.VITE_MCP_URL || "https://mcp.compose.market").replace(/\/+$/, "");
 const MANOWAR_URL = (import.meta.env.VITE_MANOWAR_URL || "https://manowar.compose.market").replace(/\/+$/, "");
@@ -133,6 +136,7 @@ export default function CreateAgent() {
   const [, setLocation] = useLocation();
   const searchString = useSearch();
   const account = useActiveAccount();
+  const { selectedChainId } = useChain();
   const { mutateAsync: sendTransaction, isPending: isSending } = useSendTransaction();
 
   // Parse URL params
@@ -457,7 +461,7 @@ export default function CreateAgent() {
       }
 
       // 2. Compute DNA hash (skills, chainId, model) - matches contract expectation
-      const chainId = CHAIN_IDS.avalancheFuji;
+      const chainId = selectedChainId; // Use selected chain from context
       const modelId = selectedHFModel?.id || values.model;
       const skills = selectedPlugins.map(p => p.id);
       const timestamp = Date.now();
@@ -532,7 +536,7 @@ export default function CreateAgent() {
   };
 
   const handleMintSuccess = async (result: { transactionHash: string }) => {
-    const chainId = CHAIN_IDS.avalancheFuji;
+    const chainId = selectedChainId; // Use selected chain from context
     const values = form.getValues();
 
     // Wallet address is already computed in preparedTx from dnaHash (which includes timestamp)
@@ -544,7 +548,7 @@ export default function CreateAgent() {
       title: "Agent Minted Successfully!",
       description: (
         <div className="space-y-1">
-          <p>{values.name} deployed to Avalanche Fuji.</p>
+          <p>{values.name} deployed to {CHAIN_CONFIG[chainId]?.name}.</p>
           <a
             href={`${CHAIN_CONFIG[chainId].explorer}/tx/${result.transactionHash}`}
             target="_blank"
@@ -635,7 +639,7 @@ export default function CreateAgent() {
 
     // Step 2: Immediately trigger on-chain transaction (no second click needed)
     try {
-      const contract = getAgentFactoryContract();
+      const contract = getAgentFactoryContractForChain(selectedChainId);
       const transaction = prepareContractCall({
         contract,
         method: "function mintAgent(bytes32 dnaHash, uint256 licenses, uint256 licensePrice, bool cloneable, string agentCardUri) returns (uint256 agentId)",
@@ -1397,9 +1401,9 @@ export default function CreateAgent() {
             )}
             <div className="space-y-2">
               <h3 className="font-bold font-display text-white">Minting Info</h3>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground font-mono">Network</span>
-                <span className="font-mono text-cyan-400">Avalanche Fuji</span>
+              <div className="space-y-1">
+                <span className="text-muted-foreground font-mono text-sm">Network</span>
+                <NetworkSelector showBalance={false} compact />
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground font-mono">Contract</span>

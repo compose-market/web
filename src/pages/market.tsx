@@ -22,6 +22,7 @@ import {
 import { useOnchainManowars, useManowarsWithRFA, useOnchainAgents, useOpenRFAs, type OnchainManowar, type OnchainAgent, type OnchainRFA } from "@/hooks/use-onchain";
 import { getIpfsUrl } from "@/lib/pinata";
 import { RFA_CATEGORIES, RFA_BOUNTY_LIMITS } from "@/lib/contracts";
+import { CHAIN_CONFIG } from "@/lib/facilitator";
 import { RFADetails } from "@/components/RFADetails";
 import {
   Box,
@@ -292,6 +293,19 @@ const ManowarCard = React.memo(function ManowarCard({ manowar }: { manowar: Onch
 
         {/* Badges */}
         <div className="absolute top-2 right-2 flex gap-1">
+          {/* Chain badge */}
+          {manowar.metadata?.agents?.[0]?.chain && (() => {
+            const chainId = manowar.metadata.agents[0].chain;
+            const chainInfo = CHAIN_CONFIG[chainId];
+            const colorClass = chainInfo?.color === 'red'
+              ? 'border-red-500/30 text-red-400 bg-red-500/10'
+              : 'border-blue-500/30 text-blue-400 bg-blue-500/10';
+            return (
+              <Badge variant="outline" className={`text-[8px] sm:text-[10px] ${colorClass}`}>
+                {chainInfo?.name || `Chain ${chainId}`}
+              </Badge>
+            );
+          })()}
           <Badge className="bg-cyan-500/20 text-cyan-400 border-cyan-500/30 text-[8px] sm:text-[10px]">
             <Sparkles className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
             ERC-7401
@@ -784,6 +798,18 @@ const AgentCard = React.memo(function AgentCard({ agent }: { agent: OnchainAgent
 
         {/* Badges */}
         <div className="flex flex-wrap gap-1 mt-2">
+          {/* Chain badge */}
+          {agent.metadata?.chain && (() => {
+            const chainInfo = CHAIN_CONFIG[agent.metadata.chain];
+            const colorClass = chainInfo?.color === 'red'
+              ? 'border-red-500/30 text-red-400 bg-red-500/10'
+              : 'border-blue-500/30 text-blue-400 bg-blue-500/10';
+            return (
+              <Badge variant="outline" className={`text-[8px] sm:text-[10px] ${colorClass}`}>
+                {chainInfo?.name || `Chain ${agent.metadata.chain}`}
+              </Badge>
+            );
+          })()}
           <Badge className="bg-cyan-500/20 text-cyan-400 border-cyan-500/30 text-[8px] sm:text-[10px]">
             <Sparkles className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
             on-chain

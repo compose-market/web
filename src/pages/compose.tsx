@@ -54,7 +54,9 @@ import {
   fileToDataUrl, isPinataConfigured, fetchFromIpfs,
   type ManowarMetadata, type AgentCard
 } from "@/lib/pinata";
-import { CHAIN_IDS, CHAIN_CONFIG, thirdwebClient, getPaymentTokenContract } from "@/lib/thirdweb";
+import { CHAIN_IDS, CHAIN_CONFIG, thirdwebClient, getPaymentTokenContract } from "@/lib/facilitator";
+import { useChain } from "@/contexts/ChainContext";
+import { NetworkSelector } from "@/components/ui/network-selector";
 import { createNormalizedFetch } from "@/lib/payment";
 import { coordinatorModels } from "@/hooks/use-coordinator";
 import { useSession } from "@/hooks/use-session.tsx";
@@ -118,6 +120,7 @@ function MintManowarDialog({
   const { toast } = useToast();
   const wallet = useActiveWallet();
   const account = useActiveAccount();
+  const { selectedChainId } = useChain();
   const { mutateAsync: sendTransaction } = useSendTransaction();
 
   const [title, setTitle] = useState(workflowName);
@@ -330,14 +333,14 @@ function MintManowarDialog({
         title: "Manowar Minted!",
         description: (
           <div className="space-y-1">
-            <p>{title} deployed to Avalanche Fuji.</p>
+            <p>{title} deployed to {CHAIN_CONFIG[selectedChainId]?.name || 'testnet'}.</p>
             {totalAgentPrice > BigInt(0) && (
               <p className="text-xs text-muted-foreground">
                 ${totalAgentPriceFormatted} USDC paid to agent creators
               </p>
             )}
             <a
-              href={`${CHAIN_CONFIG[CHAIN_IDS.avalancheFuji].explorer}/tx/${result.transactionHash}`}
+              href={`${CHAIN_CONFIG[selectedChainId].explorer}/tx/${result.transactionHash}`}
               target="_blank"
               rel="noopener noreferrer"
               className="text-cyan-400 hover:underline text-xs flex items-center gap-1"
@@ -369,7 +372,7 @@ function MintManowarDialog({
               Mint as Manowar
             </DialogTitle>
             <DialogDescription className="text-xs sm:text-sm">
-              Deploy this workflow as an ERC-7401 nestable NFT on Avalanche Fuji
+              Deploy this workflow as an ERC-7401 nestable NFT on {CHAIN_CONFIG[selectedChainId]?.name || 'testnet'}
             </DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-4">
@@ -456,6 +459,13 @@ function MintManowarDialog({
               </div>
             </div>
             <div className="space-y-4">
+              {/* Network Selector */}
+              <div className="space-y-2">
+                <Label className="text-xs font-mono text-muted-foreground flex items-center gap-1">
+                  <Globe className="w-3 h-3" /> DEPLOYMENT NETWORK
+                </Label>
+                <NetworkSelector showBalance />
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
                   <Label className="text-xs font-mono text-muted-foreground flex items-center gap-1">
