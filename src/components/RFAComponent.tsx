@@ -49,7 +49,7 @@ import {
     usdcToWei,
 } from "@/lib/contracts";
 import { getContract } from "thirdweb";
-import { thirdwebClient, paymentChain } from "@/lib/thirdweb";
+import { thirdwebClient, paymentChain } from "@/lib/facilitator";
 import {
     DollarSign,
     Loader2,

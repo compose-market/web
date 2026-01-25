@@ -7,7 +7,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useActiveWallet } from "thirdweb/react";
 import { wrapFetchWithPayment } from "thirdweb/x402";
-import { thirdwebClient, inferencePriceWei } from "@/lib/thirdweb";
+import { thirdwebClient, inferencePriceWei } from "@/lib/facilitator";
 import { createNormalizedFetch } from "@/lib/payment";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";

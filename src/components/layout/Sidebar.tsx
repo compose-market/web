@@ -10,6 +10,9 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { BackpackDialog } from "@/components/backpack";
+import { NetworkSelector } from "@/components/ui/network-selector";
+import { useChain } from "@/contexts/ChainContext";
+import { CHAIN_CONFIG } from "@/lib/facilitator";
 
 const SIDEBAR_COLLAPSED_KEY = "sidebar_collapsed";
 
@@ -206,34 +209,42 @@ export function Sidebar() {
           "border-t border-sidebar-border transition-all duration-300",
           isCollapsed ? "p-2" : "p-4"
         )}>
-          {isCollapsed ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="flex justify-center">
-                  <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse cursor-default"></span>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent side="right" className="font-mono text-xs">
-                <span className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
-                  AVALANCHE FUJI
-                </span>
-              </TooltipContent>
-            </Tooltip>
-          ) : (
-            <div className="glass-panel p-3 rounded-sm border border-primary/20">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs text-muted-foreground font-mono">NETWORK</span>
-                <span className="text-xs text-cyan-400 font-bold flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
-                  AVALANCHE FUJI
-                </span>
-              </div>
-            </div>
-          )}
+          <NetworkSelectorFooter isCollapsed={isCollapsed} />
         </div>
       </div>
     </TooltipProvider>
+  );
+}
+
+// Network selector footer with collapsed/expanded states
+function NetworkSelectorFooter({ isCollapsed }: { isCollapsed: boolean }) {
+  const { selectedChainId } = useChain();
+  const chainConfig = CHAIN_CONFIG[selectedChainId];
+  const colorClass = chainConfig?.color === "red" ? "bg-red-400" : "bg-blue-400";
+
+  if (isCollapsed) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="flex justify-center">
+            <span className={cn("w-2.5 h-2.5 rounded-full animate-pulse cursor-default", colorClass)} />
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="right" className="font-mono text-xs">
+          <span className="flex items-center gap-2">
+            <span className={cn("w-2 h-2 rounded-full animate-pulse", colorClass)} />
+            {chainConfig?.name || "Unknown"}
+          </span>
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <span className="text-xs text-muted-foreground font-mono">NETWORK</span>
+      <NetworkSelector compact showBalance />
+    </div>
   );
 }
 

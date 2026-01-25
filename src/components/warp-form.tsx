@@ -70,7 +70,8 @@ import {
   isPinataConfigured,
   type AgentCard,
 } from "@/lib/pinata";
-import { CHAIN_IDS, CHAIN_CONFIG } from "@/lib/thirdweb";
+import { CHAIN_IDS, CHAIN_CONFIG } from "@/lib/facilitator";
+import { useChain } from "@/contexts/ChainContext";
 import { AGENT_REGISTRIES, type AgentRegistryId } from "@/lib/agents";
 
 // =============================================================================
@@ -116,6 +117,7 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const account = useActiveAccount();
+  const { paymentChainId } = useChain();
   const { mutateAsync: sendTransaction, isPending: isSending } = useSendTransaction();
 
   // Avatar upload state
@@ -320,7 +322,7 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
       const walletAddress = deriveAgentWalletAddress(originalAgentHash, timestamp);
 
       // 4. Build and upload Agent Card to IPFS
-      const chainId = CHAIN_IDS.avalancheFuji;
+      const chainId = paymentChainId;
 
       const agentCard: AgentCard = {
         schemaVersion: "1.0.0",
@@ -370,7 +372,7 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
   };
 
   const handleWarpSuccess = async (result: { transactionHash: string }) => {
-    const chainId = CHAIN_IDS.avalancheFuji;
+    const chainId = paymentChainId;
     const values = form.getValues();
 
     toast({
