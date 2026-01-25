@@ -1,18 +1,33 @@
 /**
  * Manowar Protocol Contract Configuration
- * Deployed on Avalanche Fuji (Chain ID: 43113)
+ * Multi-chain support with Cronos Testnet as default
  */
 
 import { getContract } from "thirdweb";
-import { thirdwebClient, paymentChain, CHAIN_IDS } from "./thirdweb";
+import { thirdwebClient, paymentChain, CHAIN_IDS, CHAIN_OBJECTS } from "./facilitator";
 import { keccak256, encodePacked, type Address } from "viem";
 
 // =============================================================================
-// Deployed Contract Addresses (Avalanche Fuji)
+// Deployed Contract Addresses (Multi-chain)
 // Sourced from environment variables (VITE_ prefix for Vite/browser access)
 // =============================================================================
 
 export const CONTRACT_ADDRESSES = {
+  // Cronos Testnet - Deployed 2026-01-17
+  [CHAIN_IDS.cronosTestnet]: {
+    AgentFactory: (import.meta.env.VITE_CRONOSTEST_AGENT_FACTORY_CONTRACT || "0x29e4b813127faAfb0e0bDdbb2359453bf6D220da") as Address,
+    Clone: (import.meta.env.VITE_CRONOSTEST_CLONE_CONTRACT || "0x3111Ae6a45c19ea110F69Ea1F1282F7d999BD6BC") as Address,
+    Warp: (import.meta.env.VITE_CRONOSTEST_WARP_CONTRACT || "0xd83474ceB2EfB70266b8f4AF0a9232734e9c0b20") as Address,
+    Manowar: (import.meta.env.VITE_CRONOSTEST_MANOWAR_CONTRACT || "0x7dC71420085B4DeE2892E4070d7594895B586B81") as Address,
+    RFA: (import.meta.env.VITE_CRONOSTEST_RFA_CONTRACT || "0x74d41A2ECAc9231D51664E3B446CE7273b3e1FA4") as Address,
+    Lease: (import.meta.env.VITE_CRONOSTEST_LEASE_CONTRACT || "0x7a314b5821BB3F014af7b5aba26ad71803765995") as Address,
+    Royalties: (import.meta.env.VITE_CRONOSTEST_ROYALTIES_CONTRACT || "0x2DF1C45Cd2E6Df8BC9cBCf009BD525ce37Ed3D30") as Address,
+    Distributor: (import.meta.env.VITE_CRONOSTEST_DISTRIBUTOR_CONTRACT || "0xA5654dBa41a7E6B4af25A156D7145F30889EA04a") as Address,
+    Delegation: (import.meta.env.VITE_CRONOSTEST_DELEGATION_CONTRACT || "0xBE49FdCfbDb05e9F4648De9B5C05279ac8c4e277") as Address,
+    AgentManager: (import.meta.env.VITE_CRONOSTEST_AGENT_MANAGER_CONTRACT || "0x25055237a0C3dcf78758ACf5175fAF23B453eb6E") as Address,
+    Utils: (import.meta.env.VITE_CRONOSTEST_UTILS_CONTRACT || "0x500108101CB09b3102b11a255E0f0f75e7AAe016") as Address,
+  },
+  // Avalanche Fuji - Deployed 2025-12-14
   [CHAIN_IDS.avalancheFuji]: {
     AgentFactory: (import.meta.env.VITE_FUJI_AGENT_FACTORY_CONTRACT || "0xd136D89C05C521269Ba02D83dE26A75374e5d29B") as Address,
     Clone: (import.meta.env.VITE_FUJI_CLONE_CONTRACT || "0x750eF994FcEe4C1BEC61499A3eF65ECad1900468") as Address,
@@ -28,10 +43,32 @@ export const CONTRACT_ADDRESSES = {
   },
 } as const;
 
-// Get addresses for active chain
-export function getContractAddress(contract: keyof typeof CONTRACT_ADDRESSES[typeof CHAIN_IDS.avalancheFuji]): Address {
-  const chainId = CHAIN_IDS.avalancheFuji; // Currently only Fuji
-  return CONTRACT_ADDRESSES[chainId][contract];
+// Contract address type
+type ContractName = keyof typeof CONTRACT_ADDRESSES[typeof CHAIN_IDS.cronosTestnet];
+
+// Get addresses for a specific chain
+// Components should pass chainId from useChain().paymentChainId
+export function getContractAddress(contract: ContractName, chainId: number = CHAIN_IDS.cronosTestnet): Address {
+  const chainContracts = CONTRACT_ADDRESSES[chainId as keyof typeof CONTRACT_ADDRESSES];
+
+  if (!chainContracts) {
+    // Fallback to Cronos Testnet if chain not configured
+    console.warn(`Contract addresses not configured for chain ${chainId}, falling back to Cronos Testnet`);
+    return CONTRACT_ADDRESSES[CHAIN_IDS.cronosTestnet][contract];
+  }
+
+  return chainContracts[contract];
+}
+
+// Get addresses for a SPECIFIC chain (for multi-chain fetching)
+export function getContractAddressForChain(contract: ContractName, chainId: number): Address {
+  const chainContracts = CONTRACT_ADDRESSES[chainId as keyof typeof CONTRACT_ADDRESSES];
+
+  if (!chainContracts) {
+    throw new Error(`Contract addresses not configured for chain ${chainId}`);
+  }
+
+  return chainContracts[contract];
 }
 
 // =============================================================================
@@ -559,6 +596,47 @@ export function getRFAContract() {
   return getContract({
     address: getContractAddress("RFA"),
     chain: paymentChain,
+    client: thirdwebClient,
+  });
+}
+
+// Chain-specific contract getters (for multi-chain fetching)
+export function getAgentFactoryContractForChain(chainId: number) {
+  const chain = CHAIN_OBJECTS[chainId as keyof typeof CHAIN_OBJECTS];
+  if (!chain) throw new Error(`Chain ${chainId} not configured`);
+  return getContract({
+    address: getContractAddressForChain("AgentFactory", chainId),
+    chain,
+    client: thirdwebClient,
+  });
+}
+
+export function getManowarContractForChain(chainId: number) {
+  const chain = CHAIN_OBJECTS[chainId as keyof typeof CHAIN_OBJECTS];
+  if (!chain) throw new Error(`Chain ${chainId} not configured`);
+  return getContract({
+    address: getContractAddressForChain("Manowar", chainId),
+    chain,
+    client: thirdwebClient,
+  });
+}
+
+export function getWarpContractForChain(chainId: number) {
+  const chain = CHAIN_OBJECTS[chainId as keyof typeof CHAIN_OBJECTS];
+  if (!chain) throw new Error(`Chain ${chainId} not configured`);
+  return getContract({
+    address: getContractAddressForChain("Warp", chainId),
+    chain,
+    client: thirdwebClient,
+  });
+}
+
+export function getRFAContractForChain(chainId: number) {
+  const chain = CHAIN_OBJECTS[chainId as keyof typeof CHAIN_OBJECTS];
+  if (!chain) throw new Error(`Chain ${chainId} not configured`);
+  return getContract({
+    address: getContractAddressForChain("RFA", chainId),
+    chain,
     client: thirdwebClient,
   });
 }

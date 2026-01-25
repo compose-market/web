@@ -1,13 +1,36 @@
-import { createThirdwebClient, getContract } from "thirdweb";
+import { createThirdwebClient, getContract, defineChain } from "thirdweb";
 import { avalancheFuji, avalanche, bscTestnet, bsc } from "thirdweb/chains";
 import type { SmartWalletOptions } from "thirdweb/wallets";
+
+// =============================================================================
+// Cronos Chain Definitions (not pre-exported from thirdweb/chains)
+// =============================================================================
+
+export const cronosTestnet = defineChain({
+  id: 338,
+  name: "Cronos Testnet",
+  nativeCurrency: { name: "Test CRO", symbol: "tCRO", decimals: 18 },
+  rpc: "https://evm-t3.cronos.org",
+  blockExplorers: [{ name: "Cronos Explorer", url: "https://explorer.cronos.org/testnet" }],
+});
+
+export const cronos = defineChain({
+  id: 25,
+  name: "Cronos",
+  nativeCurrency: { name: "Cronos", symbol: "CRO", decimals: 18 },
+  rpc: "https://evm.cronos.org",
+  blockExplorers: [{ name: "Cronos Explorer", url: "https://explorer.cronos.org" }],
+});
 
 // =============================================================================
 // Chain Configuration (Centralized - add new chains here)
 // =============================================================================
 
 export const CHAIN_IDS = {
-  // Avalanche (primary for Compose Market)
+  // Cronos
+  cronosTestnet: 338,
+  cronos: 25,
+  // Avalanche (legacy)
   avalancheFuji: 43113,
   avalanche: 43114,
   // BNB Chain (future support)
@@ -17,6 +40,9 @@ export const CHAIN_IDS = {
 
 // USDC addresses per chain (supports ERC-3009 for x402)
 export const USDC_ADDRESSES: Record<number, `0x${string}`> = {
+  // Cronos - devUSDC.e
+  [CHAIN_IDS.cronosTestnet]: "0xc01efAaF7C5C61bEbFAeb358E1161b537b8bC0e0",
+  [CHAIN_IDS.cronos]: "0xc21223249CA28397B4B6541dfFaEcC539BfF0c59",
   // Avalanche
   [CHAIN_IDS.avalancheFuji]: "0x5425890298aed601595a70AB815c96711a31Bc65",
   [CHAIN_IDS.avalanche]: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
@@ -27,6 +53,8 @@ export const USDC_ADDRESSES: Record<number, `0x${string}`> = {
 
 // Map chain IDs to thirdweb chain objects
 export const CHAIN_OBJECTS = {
+  [CHAIN_IDS.cronosTestnet]: cronosTestnet,
+  [CHAIN_IDS.cronos]: cronos,
   [CHAIN_IDS.avalancheFuji]: avalancheFuji,
   [CHAIN_IDS.avalanche]: avalanche,
   [CHAIN_IDS.bscTestnet]: bscTestnet,
@@ -38,28 +66,74 @@ export const CHAIN_CONFIG: Record<number, {
   name: string;
   isTestnet: boolean;
   explorer: string;
+  color: string; // Badge color
 }> = {
+  [CHAIN_IDS.cronosTestnet]: {
+    name: "Cronos Testnet",
+    isTestnet: true,
+    explorer: "https://explorer.cronos.org/testnet",
+    color: "blue",
+  },
+  [CHAIN_IDS.cronos]: {
+    name: "Cronos",
+    isTestnet: false,
+    explorer: "https://explorer.cronos.org",
+    color: "blue",
+  },
   [CHAIN_IDS.avalancheFuji]: {
     name: "Avalanche Fuji",
     isTestnet: true,
     explorer: "https://testnet.snowtrace.io",
+    color: "red",
   },
   [CHAIN_IDS.avalanche]: {
     name: "Avalanche C-Chain",
     isTestnet: false,
     explorer: "https://snowtrace.io",
+    color: "red",
   },
   [CHAIN_IDS.bscTestnet]: {
     name: "BNB Smart Chain Testnet",
     isTestnet: true,
     explorer: "https://testnet.bscscan.com",
+    color: "yellow",
   },
   [CHAIN_IDS.bsc]: {
     name: "BNB Smart Chain",
     isTestnet: false,
     explorer: "https://bscscan.com",
+    color: "yellow",
   },
 };
+
+// x402 Facilitator URLs per chain
+// - Cronos chains: Cronos Labs facilitator (https://facilitator.cronoslabs.org)
+// - Avalanche/other chains: ThirdWeb facilitator (uses thirdweb SDK default)
+export const FACILITATOR_URLS: Record<number, string | null> = {
+  // Cronos - use Cronos Labs facilitator
+  [CHAIN_IDS.cronosTestnet]: "https://facilitator.cronoslabs.org",
+  [CHAIN_IDS.cronos]: "https://facilitator.cronoslabs.org",
+  // Avalanche - use ThirdWeb facilitator (null = SDK default)
+  [CHAIN_IDS.avalancheFuji]: null,
+  [CHAIN_IDS.avalanche]: null,
+  // BNB - use ThirdWeb facilitator (null = SDK default)
+  [CHAIN_IDS.bscTestnet]: null,
+  [CHAIN_IDS.bsc]: null,
+};
+
+// Cronos network identifiers for facilitator API
+export const CRONOS_NETWORK_MAP: Record<number, string> = {
+  [CHAIN_IDS.cronosTestnet]: "cronos-testnet",
+  [CHAIN_IDS.cronos]: "cronos-mainnet",
+};
+
+// Chains with deployed contracts (for multi-chain fetching)
+// Order matters: first chain is default for factory pages
+export const SUPPORTED_CHAINS = [
+  { id: CHAIN_IDS.cronosTestnet, chain: cronosTestnet },
+  { id: CHAIN_IDS.avalancheFuji, chain: avalancheFuji },
+] as const;
+
 
 // =============================================================================
 // Pricing Configuration
@@ -100,15 +174,6 @@ export function getUsdcAddress(chainId: number): `0x${string}` | undefined {
   return USDC_ADDRESSES[chainId];
 }
 
-/**
- * Get the active chain ID based on environment
- */
-export function getActiveChainId(): number {
-  return import.meta.env.VITE_USE_MAINNET === "true"
-    ? CHAIN_IDS.avalanche
-    : CHAIN_IDS.avalancheFuji;
-}
-
 // =============================================================================
 // Client Initialization
 // =============================================================================
@@ -141,15 +206,14 @@ export const thirdwebClient = createThirdwebClient({
 // Payment Chain Configuration
 // =============================================================================
 
-// Active chain ID (from env)
-const activeChainId = getActiveChainId();
+// Payment chain - DEFAULT chain, components should use ChainContext.paymentChainId for user selection
+// This is set to Cronos Testnet to match ChainContext's default
+const defaultChainId = CHAIN_IDS.cronosTestnet;
+export const paymentChain = CHAIN_OBJECTS[defaultChainId as keyof typeof CHAIN_OBJECTS];
 
-// Payment chain - uses centralized chain config
-export const paymentChain = CHAIN_OBJECTS[activeChainId as keyof typeof CHAIN_OBJECTS] || avalancheFuji;
-
-// Payment token configuration
+// Payment token configuration - DEFAULT, use USDC_ADDRESSES[paymentChainId] for user selection
 export const paymentToken = {
-  address: USDC_ADDRESSES[activeChainId] || USDC_ADDRESSES[CHAIN_IDS.avalancheFuji],
+  address: USDC_ADDRESSES[defaultChainId],
   symbol: "USDC",
   decimals: 6,
   name: "USD Coin",
@@ -184,9 +248,14 @@ export function getUsdcContractForChain(chainId: number) {
   });
 }
 
-// Account abstraction config for gas sponsorship (ERC-4337)
+// =============================================================================
+// Account Abstraction (ERC-4337) Configuration
+// =============================================================================
+// Smart Account uses the active payment chain (Cronos Testnet by default)
+// =============================================================================
+
 export const accountAbstraction: SmartWalletOptions = {
-  chain: paymentChain,
+  chain: paymentChain, // Uses the active payment chain
   sponsorGas: true,
 };
 

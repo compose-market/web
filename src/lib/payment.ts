@@ -48,10 +48,10 @@ export function createNormalizedFetch(chainId: number = AVALANCHE_FUJI_CHAIN_ID)
       let paymentHeader: string | null = null;
 
       if (init?.headers instanceof Headers) {
-        paymentHeader = init.headers.get('x-payment') || init.headers.get('X-PAYMENT');
+        paymentHeader = init.headers.get('payment-signature') || init.headers.get('PAYMENT-SIGNATURE');
       } else if (typeof init?.headers === 'object' && init.headers !== null) {
         const headers = init.headers as Record<string, string>;
-        paymentHeader = headers['x-payment'] || headers['X-PAYMENT'];
+        paymentHeader = headers['payment-signature'] || headers['PAYMENT-SIGNATURE'];
       }
 
       if (paymentHeader) {
@@ -64,12 +64,12 @@ export function createNormalizedFetch(chainId: number = AVALANCHE_FUJI_CHAIN_ID)
             const normalizedPaymentHeader = btoa(JSON.stringify(decoded));
 
             if (init?.headers instanceof Headers) {
-              init.headers.set('X-PAYMENT', normalizedPaymentHeader);
+              init.headers.set('PAYMENT-SIGNATURE', normalizedPaymentHeader);
             } else if (typeof init?.headers === 'object' && init.headers !== null) {
               const headers = init.headers as Record<string, string>;
-              delete headers['x-payment'];
-              delete headers['X-PAYMENT'];
-              headers['X-PAYMENT'] = normalizedPaymentHeader;
+              delete headers['payment-signature'];
+              delete headers['PAYMENT-SIGNATURE'];
+              headers['PAYMENT-SIGNATURE'] = normalizedPaymentHeader;
             }
           }
         } catch {
