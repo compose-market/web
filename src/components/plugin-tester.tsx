@@ -5,10 +5,10 @@
  * Extracts all plugin testing functionality from the playground page.
  */
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { useActiveWallet } from "thirdweb/react";
-import { wrapFetchWithPayment } from "thirdweb/x402";
-import { thirdwebClient, inferencePriceWei } from "@/lib/facilitator";
-import { createNormalizedFetch } from "@/lib/payment";
+import { useActiveWallet, useActiveAccount } from "thirdweb/react";
+import { inferencePriceWei } from "@/lib/chains.js";
+import { createPaymentFetch } from "@/lib/payment";
+import { useChain } from "@/contexts/ChainContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -214,6 +214,8 @@ export function PluginTester({
     initialPlugin = "",
 }: PluginTesterProps) {
     const wallet = useActiveWallet();
+    const account = useActiveAccount();
+    const { paymentChainId } = useChain();
     const resultsEndRef = useRef<HTMLDivElement>(null);
 
     // Common state
@@ -345,13 +347,13 @@ export function PluginTester({
         setPluginError(null);
 
         try {
-            const normalizedFetch = createNormalizedFetch();
-            const fetchWithPayment = wrapFetchWithPayment(
-                normalizedFetch,
-                thirdwebClient,
+            // Chain-aware payment: routes to Cronos x402 or ThirdWeb based on selected chain
+            const fetchWithPayment = createPaymentFetch({
+                chainId: paymentChainId,
+                account: account!,
                 wallet,
-                { maxValue: BigInt(inferencePriceWei) }
-            );
+                maxValue: BigInt(inferencePriceWei),
+            });
 
             const headers: Record<string, string> = { "Content-Type": "application/json" };
             if (sessionActive && budgetRemaining > 0) {
@@ -457,13 +459,13 @@ export function PluginTester({
         setPluginError(null);
 
         try {
-            const normalizedFetch = createNormalizedFetch();
-            const fetchWithPayment = wrapFetchWithPayment(
-                normalizedFetch,
-                thirdwebClient,
+            // Chain-aware payment: routes to Cronos x402 or ThirdWeb based on selected chain
+            const fetchWithPayment = createPaymentFetch({
+                chainId: paymentChainId,
+                account: account!,
                 wallet,
-                { maxValue: BigInt(inferencePriceWei) }
-            );
+                maxValue: BigInt(inferencePriceWei),
+            });
 
             const headers: Record<string, string> = { "Content-Type": "application/json" };
             if (sessionActive && budgetRemaining > 0) {
@@ -606,13 +608,13 @@ export function PluginTester({
         setPluginError(null);
 
         try {
-            const normalizedFetch = createNormalizedFetch();
-            const fetchWithPayment = wrapFetchWithPayment(
-                normalizedFetch,
-                thirdwebClient,
+            // Chain-aware payment: routes to Cronos x402 or ThirdWeb based on selected chain
+            const fetchWithPayment = createPaymentFetch({
+                chainId: paymentChainId,
+                account: account!,
                 wallet,
-                { maxValue: BigInt(inferencePriceWei) }
-            );
+                maxValue: BigInt(inferencePriceWei),
+            });
 
             const headers: Record<string, string> = { "Content-Type": "application/json" };
             if (sessionActive && budgetRemaining > 0) {

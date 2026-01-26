@@ -3,7 +3,7 @@
 import { ConnectButton, useActiveAccount, useActiveWallet } from "thirdweb/react";
 import { createWallet, inAppWallet } from "thirdweb/wallets";
 import type { SmartWalletOptions } from "thirdweb/wallets";
-import { thirdwebClient, CHAIN_OBJECTS, USDC_ADDRESSES, CHAIN_CONFIG, paymentToken as defaultPaymentToken, CHAIN_IDS } from "@/lib/facilitator";
+import { thirdwebClient, CHAIN_OBJECTS, USDC_ADDRESSES, CHAIN_CONFIG, paymentToken as defaultPaymentToken, CHAIN_IDS } from "@/lib/chains";
 import { useChain } from "@/contexts/ChainContext";
 import { useTotalBalance } from "@/hooks/use-multichain";
 import { cn } from "@/lib/utils";

@@ -12,7 +12,7 @@ import {
 import { BackpackDialog } from "@/components/backpack";
 import { NetworkSelector } from "@/components/ui/network-selector";
 import { useChain } from "@/contexts/ChainContext";
-import { CHAIN_CONFIG } from "@/lib/facilitator";
+import { CHAIN_CONFIG } from "@/lib/chains";
 
 const SIDEBAR_COLLAPSED_KEY = "sidebar_collapsed";
 

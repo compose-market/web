@@ -70,7 +70,7 @@ import {
   isPinataConfigured,
   type AgentCard,
 } from "@/lib/pinata";
-import { CHAIN_IDS, CHAIN_CONFIG } from "@/lib/facilitator";
+import { CHAIN_IDS, CHAIN_CONFIG } from "@/lib/chains";
 import { useChain } from "@/contexts/ChainContext";
 import { AGENT_REGISTRIES, type AgentRegistryId } from "@/lib/agents";
 
@@ -860,7 +860,7 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
               <h3 className="font-bold font-display text-white">Warp Info</h3>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground font-mono">Network</span>
-                <span className="font-mono text-cyan-400">Avalanche Fuji</span>
+                <span className="font-mono text-cyan-400">{CHAIN_CONFIG[paymentChainId]?.name}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground font-mono">Contract</span>
@@ -952,7 +952,7 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Network</span>
-                <span className="font-mono text-cyan-400">Avalanche Fuji</span>
+                <span className="font-mono text-cyan-400">{CHAIN_CONFIG[paymentChainId]?.name}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Gas</span>

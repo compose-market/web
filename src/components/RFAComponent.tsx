@@ -49,7 +49,7 @@ import {
     usdcToWei,
 } from "@/lib/contracts";
 import { getContract } from "thirdweb";
-import { thirdwebClient, paymentChain } from "@/lib/facilitator";
+import { thirdwebClient, paymentChain } from "../lib/chains";
 import {
     DollarSign,
     Loader2,
@@ -59,6 +59,7 @@ import {
     CheckCircle2,
     Info,
 } from "lucide-react";
+import { useChain } from "@/contexts/ChainContext";
 
 // =============================================================================
 // Form Schema
@@ -85,18 +86,10 @@ interface RFAComponentProps {
 }
 
 // =============================================================================
-// USDC Contract Helper
+// USDC Contract Helper - Now uses dynamic chain configuration
 // =============================================================================
 
-function getUSDCContract() {
-    // USDC on Avalanche Fuji testnet
-    const usdcAddress = "0x5425890298aed601595a70AB815c96711a31Bc65";
-    return getContract({
-        address: usdcAddress,
-        chain: paymentChain,
-        client: thirdwebClient,
-    });
-}
+import { getUsdcContractForChain } from "../lib/chains";
 
 // =============================================================================
 // Component
@@ -113,6 +106,7 @@ export function RFAComponent({
     const wallet = useActiveWallet();
     const account = useActiveAccount();
     const { mutateAsync: sendTransaction, isPending } = useSendTransaction();
+    const { paymentChainId } = useChain();
 
     const [step, setStep] = useState<"form" | "approving" | "creating">("form");
 
@@ -162,7 +156,7 @@ export function RFAComponent({
 
         try {
             const rfaContract = getRFAContract();
-            const usdcContract = getUSDCContract();
+            const usdcContract = getUsdcContractForChain(paymentChainId);
             const rfaAddress = getContractAddress("RFA");
 
             // Convert offer amount to USDC wei (6 decimals)

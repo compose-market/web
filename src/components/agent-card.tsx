@@ -29,6 +29,8 @@ import {
     Cpu,
     Wrench,
 } from "lucide-react";
+import { useChain } from "@/contexts/ChainContext";
+import { CHAIN_CONFIG } from "@/lib/chains";
 
 export interface AgentCardProps {
     agent: OnchainAgent;
@@ -54,6 +56,9 @@ export function AgentCard({ agent, onCopyEndpoint }: AgentCardProps) {
     const licensesDisplay = agent.licenses === 0 ? "∞" : `${agent.licensesAvailable}/${agent.licenses}`;
     const model = agent.metadata?.model || "Unknown";
     const plugins = agent.metadata?.plugins || [];
+    const { selectedChainId } = useChain();
+    const chainInfo = CHAIN_CONFIG[selectedChainId] || { name: "Unknown" };
+    const chainAbbr = chainInfo.name.split(" ")[0].toUpperCase().slice(0, 4);
 
     // API endpoint URL - direct path without double /api/
     const apiEndpoint = agent.walletAddress
@@ -151,10 +156,10 @@ export function AgentCard({ agent, onCopyEndpoint }: AgentCardProps) {
                             <TooltipTrigger asChild>
                                 <div className="p-2 bg-background/50 border border-sidebar-border rounded-lg cursor-default">
                                     <Globe className="w-4 h-4 text-fuchsia-400 mx-auto" />
-                                    <p className="font-mono text-sm text-fuchsia-400 mt-1">AVAX</p>
+                                    <p className="font-mono text-sm text-fuchsia-400 mt-1">{chainAbbr}</p>
                                 </div>
                             </TooltipTrigger>
-                            <TooltipContent>Avalanche Chain</TooltipContent>
+                            <TooltipContent>{chainInfo.name}</TooltipContent>
                         </Tooltip>
                     </div>
 

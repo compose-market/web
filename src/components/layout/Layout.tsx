@@ -8,6 +8,9 @@ import { cn } from "@/lib/utils";
 import { WalletConnector, useWalletAccount } from "@/components/connector";
 import { BackpackDialog } from "@/components/backpack";
 import { SessionIndicator } from "@/components/session";
+import { useChain } from "@/contexts/ChainContext";
+import { CHAIN_CONFIG } from "@/lib/chains";
+import { NetworkSelector } from "@/components/ui/network-selector";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -33,6 +36,8 @@ export function Layout({ children }: LayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileVaultOpen, setMobileVaultOpen] = useState(false);
   const { isConnected } = useWalletAccount();
+  const { selectedChainId } = useChain();
+  const chainInfo = CHAIN_CONFIG[selectedChainId] || { name: "Unknown" };
 
   // Listen for sidebar collapse state changes
   useEffect(() => {
@@ -205,16 +210,11 @@ export function Layout({ children }: LayoutProps) {
           <BackpackDialog open={mobileVaultOpen} onOpenChange={setMobileVaultOpen} showTrigger={false} />
         </nav>
 
-        {/* Mobile Network Status Footer */}
+        {/* Mobile Network Selector Footer */}
         <div className="p-4 border-t border-sidebar-border">
-          <div className="glass-panel p-3 rounded-sm border border-primary/20">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] text-muted-foreground font-mono">NETWORK</span>
-              <span className="text-[10px] text-cyan-400 font-bold flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
-                AVALANCHE FUJI
-              </span>
-            </div>
+          <div className="space-y-2">
+            <span className="text-xs text-muted-foreground font-mono">NETWORK</span>
+            <NetworkSelector compact showBalance />
           </div>
         </div>
       </aside>

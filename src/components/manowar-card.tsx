@@ -39,6 +39,8 @@ import {
     ChevronRight,
     ArrowLeft,
 } from "lucide-react";
+import { useChain } from "@/contexts/ChainContext";
+import { CHAIN_CONFIG } from "@/lib/chains";
 
 export interface ManowarCardProps {
     manowar: OnchainManowar;
@@ -65,6 +67,9 @@ export function ManowarCard({ manowar, onCopyEndpoint }: ManowarCardProps) {
     // Agents from metadata
     const agents = manowar.metadata?.agents || [];
     const selectedAgent = selectedAgentIndex !== null ? agents[selectedAgentIndex] : null;
+    const { selectedChainId } = useChain();
+    const chainInfo = CHAIN_CONFIG[selectedChainId] || { name: "Unknown" };
+    const chainAbbr = chainInfo.name.split(" ")[0].toUpperCase().slice(0, 4);
 
     // API endpoint URL - direct path without double /api/
     const apiEndpoint = manowar.walletAddress
@@ -320,10 +325,10 @@ export function ManowarCard({ manowar, onCopyEndpoint }: ManowarCardProps) {
                             <TooltipTrigger asChild>
                                 <div className="p-1.5 sm:p-2 bg-background/50 border border-sidebar-border rounded-lg cursor-default">
                                     <Globe className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-400 mx-auto" />
-                                    <p className="font-mono text-xs sm:text-sm text-cyan-400 mt-0.5 sm:mt-1">AVAX</p>
+                                    <p className="font-mono text-xs sm:text-sm text-cyan-400 mt-0.5 sm:mt-1">{chainAbbr}</p>
                                 </div>
                             </TooltipTrigger>
-                            <TooltipContent>Avalanche Chain</TooltipContent>
+                            <TooltipContent>{chainInfo.name}</TooltipContent>
                         </Tooltip>
                     </div>
 

@@ -4,7 +4,7 @@
  * Used in sidebar and factory forms to select deployment/payment chain.
  */
 import { cn } from "@/lib/utils";
-import { SUPPORTED_CHAINS, CHAIN_CONFIG } from "@/lib/facilitator";
+import { SUPPORTED_CHAINS, CHAIN_CONFIG } from "@/lib/chains";
 import { useChain } from "@/contexts/ChainContext";
 import { useMultiChainBalance } from "@/hooks/use-multichain";
 import { useActiveAccount } from "thirdweb/react";
