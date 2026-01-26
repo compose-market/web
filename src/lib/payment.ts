@@ -1,16 +1,42 @@
 /**
  * x402 Payment Utilities
  * 
- * Handles signature normalization for Avalanche Fuji compatibility.
+ * Chain-aware payment routing for multichain x402 support:
+ * - Cronos chains (338, 25) use Cronos x402 V1 via wrapFetchWithCronosPayment
+ * - Other EVM chains use ThirdWeb x402 V2 via wrapFetchWithPayment
+ * 
+ * This module is fully chain-agnostic - all chain configuration comes from @/lib/chains
+ * 
+ * @module lib/payment
  */
 
-const AVALANCHE_FUJI_CHAIN_ID = 43113;
+import type { Account } from "thirdweb/wallets";
+import type { Wallet } from "thirdweb/wallets";
+import { wrapFetchWithPayment } from "thirdweb/x402";
+import { isCronosChain, CHAIN_IDS, thirdwebClient, CHAIN_CONFIG } from "./chains";
+import { wrapFetchWithCronosPayment } from "./cronos";
 
-// Set to false to disable signature normalization
+// =============================================================================
+// Configuration
+// =============================================================================
+
+/**
+ * Set to true to enable ECDSA signature v-value normalization.
+ * This is typically only needed for older ThirdWeb SDK versions.
+ * Currently disabled as modern SDK handles signatures correctly.
+ */
 const ENABLE_SIGNATURE_NORMALIZATION = false;
+
+// =============================================================================
+// Signature Normalization (For ThirdWeb x402)
+// =============================================================================
 
 /**
  * Normalizes ECDSA signature v value to legacy format (27/28)
+ * Some chains/wallets produce EIP-155 v values that need normalization.
+ * 
+ * @param signature - The hex signature string
+ * @param chainId - The chain ID (used for EIP-155 recovery)
  */
 function normalizeSignatureV(signature: string, chainId: number): string {
   const cleanSig = signature.startsWith('0x') ? signature.slice(2) : signature;
@@ -39,11 +65,19 @@ function normalizeSignatureV(signature: string, chainId: number): string {
   return prefix + cleanSig.slice(0, 128) + normalizedV.toString(16).padStart(2, '0');
 }
 
+// =============================================================================
+// Normalized Fetch (For ThirdWeb x402)
+// =============================================================================
+
 /**
- * Creates a fetch wrapper that normalizes payment signatures for Avalanche Fuji
+ * Creates a fetch wrapper that can optionally normalize payment signature headers.
+ * Used with ThirdWeb x402 for chains that need signature normalization.
+ * 
+ * @param chainId - Chain ID for EIP-155 v-value calculation (defaults to Cronos Testnet)
+ * @returns A fetch-compatible function
  */
-export function createNormalizedFetch(chainId: number = AVALANCHE_FUJI_CHAIN_ID): typeof fetch {
-  return async (input, init) => {
+export function createNormalizedFetch(chainId: number = CHAIN_IDS.cronosTestnet): typeof fetch {
+  const normalizedFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     if (ENABLE_SIGNATURE_NORMALIZATION) {
       let paymentHeader: string | null = null;
 
@@ -73,11 +107,122 @@ export function createNormalizedFetch(chainId: number = AVALANCHE_FUJI_CHAIN_ID)
             }
           }
         } catch {
-          // Ignore normalization errors
+          // Ignore normalization errors - proceed with original header
         }
       }
     }
 
     return fetch(input, init);
   };
+
+  // Cast to fetch type for compatibility with wrapFetchWithPayment
+  return normalizedFetch as typeof fetch;
 }
+
+// =============================================================================
+// Chain-Aware Payment Fetch Factory
+// =============================================================================
+
+export interface PaymentFetchParams {
+  /** Chain ID for payment routing (determines Cronos vs ThirdWeb flow) */
+  chainId: number;
+  /** ThirdWeb account for signing (used for Cronos EIP-712 signatures) */
+  account: Account;
+  /** ThirdWeb wallet (used for ThirdWeb x402 payments) */
+  wallet: Wallet;
+  /** Maximum payment amount in USDC wei (6 decimals) */
+  maxValue: bigint;
+}
+
+/**
+ * Chain-aware payment fetch wrapper factory
+ * 
+ * Automatically routes payment handling based on chain:
+ * - Cronos chains (338, 25): Uses Cronos x402 V1 with EIP-712 via @crypto.com/facilitator-client
+ * - Other EVM chains: Uses ThirdWeb x402 V2
+ * 
+ * @example
+ * ```ts
+ * const paymentFetch = createPaymentFetch({
+ *   chainId: 338, // Cronos Testnet
+ *   account,
+ *   wallet,
+ *   maxValue: BigInt(5000), // $0.005 USDC
+ * });
+ * 
+ * const response = await paymentFetch('https://api.example.com/inference', {
+ *   method: 'POST',
+ *   body: JSON.stringify({ prompt: 'Hello' }),
+ * });
+ * ```
+ */
+export function createPaymentFetch(params: PaymentFetchParams): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> {
+  const { chainId, account, wallet, maxValue } = params;
+
+  const chainName = CHAIN_CONFIG[chainId]?.name || `Chain ${chainId}`;
+
+  /**
+   * Helper to inject X-CHAIN-ID header into all requests.
+   * This tells the backend which chain the client is using,
+   * so it returns the correct 402 format (Cronos V1 vs ThirdWeb V2).
+   */
+  function injectChainHeader(init?: RequestInit): RequestInit {
+    const headers = new Headers(init?.headers);
+    headers.set('X-CHAIN-ID', chainId.toString());
+    return { ...init, headers };
+  }
+
+  if (isCronosChain(chainId)) {
+    // Route: Cronos x402 V1 payment flow
+    console.log(`[payment] Using Cronos x402 for ${chainName} (${chainId})`);
+
+    return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : (input as Request).url;
+
+      return wrapFetchWithCronosPayment(url, {
+        ...injectChainHeader(init),
+        account,
+        chainId,
+      });
+    };
+  } else {
+    // Route: ThirdWeb x402 V2 payment flow
+    console.log(`[payment] Using ThirdWeb x402 for ${chainName} (${chainId})`);
+
+    // Create fetch wrapper that injects X-CHAIN-ID header
+    const chainAwareFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      return fetch(input, injectChainHeader(init));
+    };
+
+    const normalizedFetch = createNormalizedFetch(chainId);
+
+    // Compose: chain header → normalize → ThirdWeb payment
+    const composedFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const initWithChain = injectChainHeader(init);
+      return normalizedFetch(input, initWithChain);
+    };
+
+    const thirdwebFetch = wrapFetchWithPayment(
+      composedFetch as typeof fetch,
+      thirdwebClient,
+      wallet,
+      { maxValue }
+    );
+
+    // Wrap to match our expected signature
+    return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const normalizedInput = input instanceof URL ? input.toString() : input;
+      return thirdwebFetch(normalizedInput, init);
+    };
+  }
+}
+
+// =============================================================================
+// Re-exports for convenience
+// =============================================================================
+
+export { isCronosChain, CHAIN_IDS } from "./chains";

@@ -29,7 +29,7 @@ export const MOCK_AGENTS: Agent[] = [
   {
     id: "a1",
     name: "Alpha Strategist",
-    description: "High-frequency trading analysis agent specialized in DeFi markets on Avalanche.",
+    description: "High-frequency trading analysis agent specialized in DeFi markets on Cronos.",
     type: "Finance",
     pricePerUse: 0.05,
     reputation: 98,

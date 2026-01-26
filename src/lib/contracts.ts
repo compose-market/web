@@ -1,75 +1,24 @@
 /**
  * Manowar Protocol Contract Configuration
  * Multi-chain support with Cronos Testnet as default
+ * 
+ * Contract addresses are defined in chains.ts (single source of truth)
  */
 
 import { getContract } from "thirdweb";
-import { thirdwebClient, paymentChain, CHAIN_IDS, CHAIN_OBJECTS } from "./facilitator";
+import {
+  thirdwebClient,
+  paymentChain,
+  CHAIN_IDS,
+  CHAIN_OBJECTS,
+  CONTRACT_ADDRESSES,
+  getContractAddress,
+  getContractAddressForChain,
+} from "./chains";
 import { keccak256, encodePacked, type Address } from "viem";
 
-// =============================================================================
-// Deployed Contract Addresses (Multi-chain)
-// Sourced from environment variables (VITE_ prefix for Vite/browser access)
-// =============================================================================
-
-export const CONTRACT_ADDRESSES = {
-  // Cronos Testnet - Deployed 2026-01-17
-  [CHAIN_IDS.cronosTestnet]: {
-    AgentFactory: (import.meta.env.VITE_CRONOSTEST_AGENT_FACTORY_CONTRACT || "0x29e4b813127faAfb0e0bDdbb2359453bf6D220da") as Address,
-    Clone: (import.meta.env.VITE_CRONOSTEST_CLONE_CONTRACT || "0x3111Ae6a45c19ea110F69Ea1F1282F7d999BD6BC") as Address,
-    Warp: (import.meta.env.VITE_CRONOSTEST_WARP_CONTRACT || "0xd83474ceB2EfB70266b8f4AF0a9232734e9c0b20") as Address,
-    Manowar: (import.meta.env.VITE_CRONOSTEST_MANOWAR_CONTRACT || "0x7dC71420085B4DeE2892E4070d7594895B586B81") as Address,
-    RFA: (import.meta.env.VITE_CRONOSTEST_RFA_CONTRACT || "0x74d41A2ECAc9231D51664E3B446CE7273b3e1FA4") as Address,
-    Lease: (import.meta.env.VITE_CRONOSTEST_LEASE_CONTRACT || "0x7a314b5821BB3F014af7b5aba26ad71803765995") as Address,
-    Royalties: (import.meta.env.VITE_CRONOSTEST_ROYALTIES_CONTRACT || "0x2DF1C45Cd2E6Df8BC9cBCf009BD525ce37Ed3D30") as Address,
-    Distributor: (import.meta.env.VITE_CRONOSTEST_DISTRIBUTOR_CONTRACT || "0xA5654dBa41a7E6B4af25A156D7145F30889EA04a") as Address,
-    Delegation: (import.meta.env.VITE_CRONOSTEST_DELEGATION_CONTRACT || "0xBE49FdCfbDb05e9F4648De9B5C05279ac8c4e277") as Address,
-    AgentManager: (import.meta.env.VITE_CRONOSTEST_AGENT_MANAGER_CONTRACT || "0x25055237a0C3dcf78758ACf5175fAF23B453eb6E") as Address,
-    Utils: (import.meta.env.VITE_CRONOSTEST_UTILS_CONTRACT || "0x500108101CB09b3102b11a255E0f0f75e7AAe016") as Address,
-  },
-  // Avalanche Fuji - Deployed 2025-12-14
-  [CHAIN_IDS.avalancheFuji]: {
-    AgentFactory: (import.meta.env.VITE_FUJI_AGENT_FACTORY_CONTRACT || "0xd136D89C05C521269Ba02D83dE26A75374e5d29B") as Address,
-    Clone: (import.meta.env.VITE_FUJI_CLONE_CONTRACT || "0x750eF994FcEe4C1BEC61499A3eF65ECad1900468") as Address,
-    Warp: (import.meta.env.VITE_FUJI_WARP_CONTRACT || "0xA01aD87A344381F1449c12a3c7575d9828e87128") as Address,
-    Manowar: (import.meta.env.VITE_FUJI_MANOWAR_CONTRACT || "0xf2E37f4d33d9Bfba13f092097FeDC695413F00f4") as Address,
-    RFA: (import.meta.env.VITE_FUJI_RFA_CONTRACT || "0xB79D30Dfcad93c4316d1996aEcA5da1fB218bCa7") as Address,
-    Lease: (import.meta.env.VITE_FUJI_LEASE_CONTRACT || "0x6d0CC378F93D972D00CbC4e4DDBBD3Cb4E9B8354") as Address,
-    Royalties: (import.meta.env.VITE_FUJI_ROYALTIES_CONTRACT || "0x1A67e2af24a28C26B8E760d6e7B21f41D7D23a5d") as Address,
-    Distributor: (import.meta.env.VITE_FUJI_DISTRIBUTOR_CONTRACT || "0x0FAFe6E2925646a53Cd9F1bFF1C8a4259f41B5D5") as Address,
-    Delegation: (import.meta.env.VITE_FUJI_DELEGATION_CONTRACT || "0xdbe73962269aF392B098159406ba786de4619e0E") as Address,
-    AgentManager: (import.meta.env.VITE_FUJI_AGENT_MANAGER_CONTRACT || "0x7A20DBF6A2F7f7146eD7C6564404Ca8596A1282C") as Address,
-    Utils: (import.meta.env.VITE_FUJI_UTILS_CONTRACT || "0x344FAa6a0B1E945aE423892C80490052EaF9dADb") as Address,
-  },
-} as const;
-
-// Contract address type
-type ContractName = keyof typeof CONTRACT_ADDRESSES[typeof CHAIN_IDS.cronosTestnet];
-
-// Get addresses for a specific chain
-// Components should pass chainId from useChain().paymentChainId
-export function getContractAddress(contract: ContractName, chainId: number = CHAIN_IDS.cronosTestnet): Address {
-  const chainContracts = CONTRACT_ADDRESSES[chainId as keyof typeof CONTRACT_ADDRESSES];
-
-  if (!chainContracts) {
-    // Fallback to Cronos Testnet if chain not configured
-    console.warn(`Contract addresses not configured for chain ${chainId}, falling back to Cronos Testnet`);
-    return CONTRACT_ADDRESSES[CHAIN_IDS.cronosTestnet][contract];
-  }
-
-  return chainContracts[contract];
-}
-
-// Get addresses for a SPECIFIC chain (for multi-chain fetching)
-export function getContractAddressForChain(contract: ContractName, chainId: number): Address {
-  const chainContracts = CONTRACT_ADDRESSES[chainId as keyof typeof CONTRACT_ADDRESSES];
-
-  if (!chainContracts) {
-    throw new Error(`Contract addresses not configured for chain ${chainId}`);
-  }
-
-  return chainContracts[contract];
-}
+// Re-export from chains.ts for backwards compatibility
+export { CONTRACT_ADDRESSES, getContractAddress, getContractAddressForChain };
 
 // =============================================================================
 // ABIs (Minimal - only functions we need on frontend)
