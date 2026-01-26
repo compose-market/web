@@ -22,7 +22,7 @@ import {
 import { useOnchainManowars, useManowarsWithRFA, useOnchainAgents, useOpenRFAs, type OnchainManowar, type OnchainAgent, type OnchainRFA } from "@/hooks/use-onchain";
 import { getIpfsUrl } from "@/lib/pinata";
 import { RFA_CATEGORIES, RFA_BOUNTY_LIMITS } from "@/lib/contracts";
-import { CHAIN_CONFIG } from "@/lib/facilitator";
+import { CHAIN_CONFIG } from "@/lib/chains";
 import { RFADetails } from "@/components/RFADetails";
 import {
   Box,

@@ -9,12 +9,12 @@
  * - PluginTester for plugin testing
  */
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { useActiveWallet } from "thirdweb/react";
-import { wrapFetchWithPayment } from "thirdweb/x402";
+import { useActiveWallet, useActiveAccount } from "thirdweb/react";
 import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
-import { thirdwebClient, inferencePriceWei } from "@/lib/facilitator";
-import { createNormalizedFetch } from "@/lib/payment";
+import { inferencePriceWei } from "@/lib/chains";
+import { createPaymentFetch } from "@/lib/payment";
+import { useChain } from "@/contexts/ChainContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -105,7 +105,9 @@ const API_BASE = (import.meta.env.VITE_API_URL || "https://api.compose.market").
 
 export default function PlaygroundPage() {
   const wallet = useActiveWallet();
+  const account = useActiveAccount();
   const { sessionActive, budgetRemaining, formatBudget, recordUsage } = useSession();
+  const { paymentChainId } = useChain();
 
   // Tab state - check URL params for pre-selected plugin
   const [activeTab, setActiveTab] = useState<"model" | "plugins">(() => {
@@ -372,17 +374,17 @@ export default function PlaygroundPage() {
     ]);
 
     try {
-      if (!wallet) {
+      if (!wallet || !account) {
         throw new Error("Connect wallet to use inference");
       }
 
-      const normalizedFetch = createNormalizedFetch();
-      const fetchWithPayment = wrapFetchWithPayment(
-        normalizedFetch,
-        thirdwebClient,
+      // Chain-aware payment: Cronos uses Cronos x402 V1, others use ThirdWeb x402 V2
+      const fetchWithPayment = createPaymentFetch({
+        chainId: paymentChainId,
+        account,
         wallet,
-        { maxValue: BigInt(inferencePriceWei) }
-      );
+        maxValue: BigInt(inferencePriceWei),
+      });
 
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (sessionActive && budgetRemaining > 0) {

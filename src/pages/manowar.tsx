@@ -10,10 +10,10 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useParams } from "wouter";
 import { Link } from "wouter";
-import { useActiveWallet } from "thirdweb/react";
-import { wrapFetchWithPayment } from "thirdweb/x402";
-import { thirdwebClient, inferencePriceWei } from "@/lib/facilitator";
-import { createNormalizedFetch } from "@/lib/payment";
+import { useActiveWallet, useActiveAccount } from "thirdweb/react";
+import { inferencePriceWei } from "@/lib/chains";
+import { createPaymentFetch } from "@/lib/payment";
+import { useChain } from "@/contexts/ChainContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -51,6 +51,8 @@ export default function ManowarPage() {
 
     const { toast } = useToast();
     const wallet = useActiveWallet();
+    const account = useActiveAccount();
+    const { paymentChainId } = useChain();
     const { sessionActive, budgetRemaining, recordUsage } = useSession();
 
     // Chat state from shared hook (includes messages, attachments, and recording)
@@ -170,7 +172,7 @@ export default function ManowarPage() {
         if (attachedFiles.some(f => f.uploading)) return;
         if ((!inputValue.trim() && attachedFiles.length === 0) || sending || !manowar) return;
 
-        if (!wallet) {
+        if (!wallet || !account) {
             toast({ title: "Connect wallet", description: "Please connect your wallet to execute workflow", variant: "destructive" });
             return;
         }
@@ -203,13 +205,13 @@ export default function ManowarPage() {
         try {
             setChatStatus("waiting");
 
-            const normalizedFetch = createNormalizedFetch();
-            const fetchWithPayment = wrapFetchWithPayment(
-                normalizedFetch,
-                thirdwebClient,
+            // Chain-aware payment: routes to Cronos x402 or ThirdWeb based on selected chain
+            const fetchWithPayment = createPaymentFetch({
+                chainId: paymentChainId,
+                account,
                 wallet,
-                { maxValue: BigInt(10_000) } // $0.01 - matches MANOWAR_PRICES.ORCHESTRATION
-            );
+                maxValue: BigInt(10_000), // $0.01 - matches MANOWAR_PRICES.ORCHESTRATION
+            });
 
             // Use Pinata URL for attachments (not base64)
             // The file is already uploaded by useFileAttachment hook

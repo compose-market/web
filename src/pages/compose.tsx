@@ -42,7 +42,6 @@ import {
 } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
 import { useActiveAccount, useActiveWallet, useSendTransaction } from "thirdweb/react";
-import { wrapFetchWithPayment } from "thirdweb/x402";
 import { prepareContractCall } from "thirdweb";
 import { readContract } from "thirdweb";
 import {
@@ -54,10 +53,10 @@ import {
   fileToDataUrl, isPinataConfigured, fetchFromIpfs,
   type ManowarMetadata, type AgentCard
 } from "@/lib/pinata";
-import { CHAIN_IDS, CHAIN_CONFIG, thirdwebClient, getPaymentTokenContract } from "@/lib/facilitator";
+import { CHAIN_IDS, CHAIN_CONFIG, thirdwebClient, getPaymentTokenContract } from "@/lib/chains";
 import { useChain } from "@/contexts/ChainContext";
 import { NetworkSelector } from "@/components/ui/network-selector";
-import { createNormalizedFetch } from "@/lib/payment";
+import { createPaymentFetch } from "@/lib/payment";
 import { coordinatorModels } from "@/hooks/use-coordinator";
 import { useSession } from "@/hooks/use-session.tsx";
 import {
@@ -647,6 +646,8 @@ function ComposeFlow() {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const wallet = useActiveWallet();
+  const account = useActiveAccount();
+  const { paymentChainId } = useChain();
   const { sessionActive, budgetRemaining } = useSession();
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
 
@@ -743,11 +744,13 @@ function ComposeFlow() {
         return updated;
       });
 
-      const normalizedFetch = createNormalizedFetch();
-      const fetchWithPayment = wrapFetchWithPayment(
-        normalizedFetch, thirdwebClient, wallet,
-        { maxValue: BigInt(10000 + (5000 * currentWorkflow.steps.length)) }
-      );
+      // Chain-aware payment: routes to Cronos x402 or ThirdWeb based on selected chain
+      const fetchWithPayment = createPaymentFetch({
+        chainId: paymentChainId,
+        account: account!,
+        wallet,
+        maxValue: BigInt(10000 + (5000 * currentWorkflow.steps.length)),
+      });
 
       const workflowPayload = {
         workflow: {

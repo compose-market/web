@@ -32,7 +32,7 @@ import { useActiveAccount, useSendTransaction } from "thirdweb/react";
 import { prepareContractCall } from "thirdweb";
 import { useAgentsByCreator, useManowarsByCreator, useRFAsByPublisher, type OnchainAgent, type OnchainManowar, type OnchainRFA } from "@/hooks/use-onchain";
 import { getIpfsUrl } from "@/lib/pinata";
-import { CHAIN_CONFIG, CHAIN_IDS } from "@/lib/facilitator";
+import { CHAIN_CONFIG, CHAIN_IDS } from "@/lib/chains";
 import { useChain } from "@/contexts/ChainContext";
 import { getContractAddress, getRFAContract, RFA_BOUNTY_LIMITS } from "@/lib/contracts";
 import { RFADetails } from "@/components/RFADetails";

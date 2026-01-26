@@ -58,13 +58,13 @@ import {
   usdcToWei,
   getContractAddress
 } from "@/lib/contracts";
-import { CHAIN_IDS, CHAIN_CONFIG, inferencePriceWei } from "@/lib/facilitator";
+import { CHAIN_IDS, CHAIN_CONFIG, inferencePriceWei } from "@/lib/chains";
 import { useChain } from "@/contexts/ChainContext";
 import { NetworkSelector } from "@/components/ui/network-selector";
 import { useActiveAccount } from "thirdweb/react";
 import { useSendTransaction } from "thirdweb/react";
 import { prepareContractCall } from "thirdweb";
-import { accountAbstraction } from "@/lib/facilitator";
+import { accountAbstraction } from "../lib/chains";
 import { getAgentFactoryContractForChain } from "@/lib/contracts";
 
 const MCP_URL = (import.meta.env.VITE_MCP_URL || "https://mcp.compose.market").replace(/\/+$/, "");
@@ -1496,7 +1496,7 @@ export default function CreateAgent() {
               )}
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Network</span>
-                <span className="font-mono text-cyan-400">Avalanche Fuji</span>
+                <span className="font-mono text-cyan-400">{CHAIN_CONFIG[selectedChainId]?.name || "Unknown"}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Gas</span>

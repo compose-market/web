@@ -25,7 +25,7 @@ export default function Home() {
             Powered by the <strong className="text-cyan-400">Manowar Framework</strong>.
           </p>
           <p className="text-xs sm:text-sm text-muted-foreground/70 font-mono">
-            ERC8004 Identity & x402 Payments on Avalanche
+            ERC8004 Identity & x402 Payments on Cronos
           </p>
         </div>
 
