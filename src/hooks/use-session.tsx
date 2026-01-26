@@ -21,7 +21,7 @@ import {
     CHAIN_OBJECTS,
     USDC_ADDRESSES,
     CHAIN_IDS,
-} from "@/lib/facilitator";
+} from "@/lib/chains";
 import { useChain } from "@/contexts/ChainContext";
 
 // Session storage key

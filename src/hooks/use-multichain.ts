@@ -6,7 +6,7 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { readContract } from "thirdweb";
-import { SUPPORTED_CHAINS, getUsdcContractForChain, CHAIN_CONFIG } from "@/lib/facilitator";
+import { SUPPORTED_CHAINS, getUsdcContractForChain, CHAIN_CONFIG } from "@/lib/chains";
 
 // =============================================================================
 // Types

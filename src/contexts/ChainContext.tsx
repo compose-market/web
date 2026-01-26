@@ -4,7 +4,7 @@
  * Manages selected chain for deployments and payments across the app.
  */
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
-import { CHAIN_IDS, SUPPORTED_CHAINS } from "@/lib/facilitator";
+import { CHAIN_IDS, SUPPORTED_CHAINS } from "@/lib/chains";
 
 // =============================================================================
 // Types

@@ -9,14 +9,11 @@
 
 import { useCallback } from "react";
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
-import { wrapFetchWithPayment } from "thirdweb/x402";
-import { thirdwebClient } from "@/lib/facilitator";
+import { createPaymentFetch } from "@/lib/payment";
+import { useChain } from "@/contexts/ChainContext";
 import { API_BASE_URL } from "@/lib/api";
 import { parseMultimodalResponse } from "@/lib/multimodal";
 import type { MultimodalResult } from "@/lib/api";
-
-// Normalized fetch that works with thirdweb payment wrapper
-const createNormalizedFetch = () => fetch;
 
 // =============================================================================
 // Configuration
@@ -64,6 +61,7 @@ export interface UseApiReturn {
 export function useApi(): UseApiReturn {
     const wallet = useActiveWallet();
     const account = useActiveAccount();
+    const { paymentChainId } = useChain();
     const isConnected = !!wallet && !!account;
 
     /**
@@ -90,14 +88,13 @@ export function useApi(): UseApiReturn {
             const baseUrl = endpoint === "playground" ? LAMBDA_URL : MANOWAR_URL;
             const fullUrl = `${baseUrl}${path}`;
 
-            // Create payment-wrapped fetch
-            const normalizedFetch = createNormalizedFetch();
-            const fetchWithPayment = wrapFetchWithPayment(
-                normalizedFetch,
-                thirdwebClient,
+            // Chain-aware payment: routes to Cronos x402 or ThirdWeb based on selected chain
+            const fetchWithPayment = createPaymentFetch({
+                chainId: paymentChainId,
+                account: account!,
                 wallet,
-                { maxValue: price }
-            );
+                maxValue: price,
+            });
 
             // Add session headers if available
             const sessionHeaders: Record<string, string> = {};

@@ -21,7 +21,7 @@ import {
   type AgentData,
   type ManowarData,
 } from "@/lib/contracts";
-import { SUPPORTED_CHAINS } from "@/lib/facilitator";
+import { SUPPORTED_CHAINS } from "@/lib/chains";
 import { getIpfsUrl } from "@/lib/pinata";
 import type { AgentCard, ManowarMetadata } from "@/lib/pinata";
 
