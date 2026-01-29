@@ -166,41 +166,47 @@ async function fetchAgentMetadata(agent: OnchainAgent): Promise<OnchainAgent> {
 
 /**
  * Find an agent by its wallet address (stored in IPFS metadata)
- * Iterates through all agents and checks metadata for matching wallet
+ * Searches across all supported chains to find the agent
  */
 export async function fetchAgentByWalletAddress(walletAddress: string): Promise<OnchainAgent | null> {
-  try {
-    const contract = getAgentFactoryContract();
+  const normalizedSearch = walletAddress.toLowerCase();
 
-    // Get total agents count
-    const total = await readContract({
-      contract,
-      method: "function totalAgents() view returns (uint256)",
-      params: [],
-    }) as bigint;
+  // Search across all supported chains
+  for (const { id: chainId } of SUPPORTED_CHAINS) {
+    try {
+      const contract = getAgentFactoryContractForChain(chainId);
 
-    const totalNum = Number(total);
-    const normalizedSearch = walletAddress.toLowerCase();
+      // Get total agents count for this chain
+      const total = await readContract({
+        contract,
+        method: "function totalAgents() view returns (uint256)",
+        params: [],
+      }) as bigint;
 
-    // Search through all agents (most recent first for efficiency)
-    // Agent IDs start at 1, not 0
-    for (let i = totalNum; i >= 1; i--) {
-      const agent = await fetchAgentData(i);
-      if (!agent) continue;
+      const totalNum = Number(total);
+      if (totalNum === 0) continue;
 
-      // Fetch metadata to get the wallet address (source of truth)
-      const agentWithMeta = await fetchAgentMetadata(agent);
+      // Search through all agents on this chain (most recent first for efficiency)
+      // Agent IDs start at 1, not 0
+      for (let i = totalNum; i >= 1; i--) {
+        const agent = await fetchAgentData(i, chainId);
+        if (!agent) continue;
 
-      if (agentWithMeta.walletAddress && agentWithMeta.walletAddress.toLowerCase() === normalizedSearch) {
-        return agentWithMeta;
+        // Fetch metadata to get the wallet address (source of truth)
+        const agentWithMeta = await fetchAgentMetadata(agent);
+
+        if (agentWithMeta.walletAddress && agentWithMeta.walletAddress.toLowerCase() === normalizedSearch) {
+          return agentWithMeta;
+        }
       }
+    } catch (error) {
+      console.warn(`Failed to search agents on chain ${chainId}:`, error);
+      // Continue to next chain
     }
-
-    return null;
-  } catch (error) {
-    console.error(`Failed to find agent by wallet ${walletAddress}:`, error);
-    return null;
   }
+
+  console.error(`Agent with wallet ${walletAddress} not found on any chain`);
+  return null;
 }
 
 async function fetchManowarData(manowarId: number, chainId?: number): Promise<OnchainManowar | null> {
@@ -507,41 +513,47 @@ export function useOnchainManowar(manowarId: number | null) {
 
 /**
  * Find a manowar by its wallet address (stored in IPFS metadata)
- * Iterates through all manowars and checks metadata for matching wallet
+ * Searches across all supported chains to find the manowar
  */
 async function fetchManowarByWalletAddress(walletAddress: string): Promise<OnchainManowar | null> {
-  try {
-    const contract = getManowarContract();
+  const normalizedSearch = walletAddress.toLowerCase();
 
-    // Get total manowars count
-    const total = await readContract({
-      contract,
-      method: "function totalManowars() view returns (uint256)",
-      params: [],
-    }) as bigint;
+  // Search across all supported chains
+  for (const { id: chainId } of SUPPORTED_CHAINS) {
+    try {
+      const contract = getManowarContractForChain(chainId);
 
-    const totalNum = Number(total);
-    const normalizedSearch = walletAddress.toLowerCase();
+      // Get total manowars count for this chain
+      const total = await readContract({
+        contract,
+        method: "function totalManowars() view returns (uint256)",
+        params: [],
+      }) as bigint;
 
-    // Search through all manowars (most recent first for efficiency)
-    // Manowar IDs start at 1, not 0
-    for (let i = totalNum; i >= 1; i--) {
-      const manowar = await fetchManowarData(i);
-      if (!manowar) continue;
+      const totalNum = Number(total);
+      if (totalNum === 0) continue;
 
-      // Fetch metadata to get the wallet address (source of truth)
-      const manowarWithMeta = await fetchManowarMetadata(manowar);
+      // Search through all manowars on this chain (most recent first for efficiency)
+      // Manowar IDs start at 1, not 0
+      for (let i = totalNum; i >= 1; i--) {
+        const manowar = await fetchManowarData(i, chainId);
+        if (!manowar) continue;
 
-      if (manowarWithMeta.walletAddress && manowarWithMeta.walletAddress.toLowerCase() === normalizedSearch) {
-        return manowarWithMeta;
+        // Fetch metadata to get the wallet address (source of truth)
+        const manowarWithMeta = await fetchManowarMetadata(manowar, chainId);
+
+        if (manowarWithMeta.walletAddress && manowarWithMeta.walletAddress.toLowerCase() === normalizedSearch) {
+          return manowarWithMeta;
+        }
       }
+    } catch (error) {
+      console.warn(`Failed to search manowars on chain ${chainId}:`, error);
+      // Continue to next chain
     }
-
-    return null;
-  } catch (error) {
-    console.error(`Failed to find manowar by wallet ${walletAddress}:`, error);
-    return null;
   }
+
+  console.error(`Manowar with wallet ${walletAddress} not found on any chain`);
+  return null;
 }
 
 /**

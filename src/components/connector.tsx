@@ -69,19 +69,41 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
     return CHAIN_OBJECTS[paymentChainId as keyof typeof CHAIN_OBJECTS];
   }, [paymentChainId]);
 
-  // Smart Account creation chain use Avalanche Fuji
-  // Reason: ThirdWeb bundler NOT deployed on Cronos (338.bundler returns "Invalid chain: 338")
-  // Smart Account addresses are universal - same address on ALL EVM chains (CREATE2 deterministic)
-  // So we create the account on Fuji, then use the same address on user's selected chain
+  // Smart Account chain - use user's selected payment chain
+  // The Smart Account address is deterministic (CREATE2) so it's the same on ALL chains
+  // But the accountAbstraction.chain must match the chain where transactions are sent
+  // ThirdWeb dashboard has gas sponsorship configured for both Fuji and Cronos Testnet
   const smartAccountChain = useMemo(() => {
-    return CHAIN_OBJECTS[CHAIN_IDS.avalancheFuji as keyof typeof CHAIN_OBJECTS];
-  }, []);
+    return CHAIN_OBJECTS[paymentChainId as keyof typeof CHAIN_OBJECTS] ||
+      CHAIN_OBJECTS[CHAIN_IDS.avalancheFuji as keyof typeof CHAIN_OBJECTS];
+  }, [paymentChainId]);
 
-  // Build accountAbstraction config - use Fuji for bundler
-  const dynamicAccountAbstraction: SmartWalletOptions = useMemo(() => ({
-    chain: smartAccountChain,
-    sponsorGas: true,
-  }), [smartAccountChain]);
+  // Cronos Testnet uses different AA infrastructure than ThirdWeb's default deterministic addresses
+  // v0.7 Deployed 2026-01-29 with canonical EntryPoint
+  const CRONOS_TESTNET_AA_CONFIG = {
+    factoryAddress: (import.meta.env.VITE_CRONOSTEST_ACCOUNT_FACTORY) as `0x${string}`,
+    entrypointAddress: (import.meta.env.VITE_CRONOSTEST_ENTRYPOINT) as `0x${string}`,
+  };
+
+  // Build accountAbstraction config - use selected chain for bundler/paymaster
+  // For Cronos Testnet, override with chain-specific factory and entrypoint addresses
+  const dynamicAccountAbstraction: SmartWalletOptions = useMemo(() => {
+    const config: SmartWalletOptions = {
+      chain: smartAccountChain,
+      sponsorGas: true,
+    };
+
+    // Override factory and entrypoint for Cronos Testnet (chain 338)
+    // ThirdWeb's default deterministic addresses are NOT deployed on Cronos
+    if (paymentChainId === CHAIN_IDS.cronosTestnet) {
+      config.factoryAddress = CRONOS_TESTNET_AA_CONFIG.factoryAddress;
+      config.overrides = {
+        entrypointAddress: CRONOS_TESTNET_AA_CONFIG.entrypointAddress,
+      };
+    }
+
+    return config;
+  }, [smartAccountChain, paymentChainId]);
 
   // Get USDC token config for the selected chain
   const selectedPaymentToken = useMemo(() => {
@@ -104,7 +126,7 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
       <ConnectButton
         client={thirdwebClient}
         wallets={wallets}
-        chain={smartAccountChain}  // Use Fuji for connection (bundler required)
+        chain={smartAccountChain}  // Use user's selected chain
         accountAbstraction={dynamicAccountAbstraction}
         connectButton={{
           label: "CONNECT",

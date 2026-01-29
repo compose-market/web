@@ -57,7 +57,7 @@ import {
 import { useActiveAccount, useSendTransaction } from "thirdweb/react";
 import { prepareContractCall } from "thirdweb";
 import {
-  getWarpContract,
+  getWarpContractForChain,
   usdcToWei,
   computeExternalAgentHash,
   deriveAgentWalletAddress,
@@ -430,7 +430,7 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
     // Step 2: Immediately trigger on-chain transaction (no second click needed)
     try {
       setMintStep("minting");
-      const contract = getWarpContract();
+      const contract = getWarpContractForChain(paymentChainId);
       const transaction = prepareContractCall({
         contract,
         method:
