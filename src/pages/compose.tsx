@@ -45,7 +45,7 @@ import { useActiveAccount, useActiveWallet, useSendTransaction } from "thirdweb/
 import { prepareContractCall } from "thirdweb";
 import { readContract } from "thirdweb";
 import {
-  getManowarContract, getContractAddress, getAgentFactoryContract,
+  getManowarContractForChain, getContractAddressForChain, getAgentFactoryContractForChain,
   weiToUsdc, computeManowarDnaHash, deriveManowarWalletAddress
 } from "@/lib/contracts";
 import {
@@ -53,7 +53,7 @@ import {
   fileToDataUrl, isPinataConfigured, fetchFromIpfs,
   type ManowarMetadata, type AgentCard
 } from "@/lib/pinata";
-import { CHAIN_IDS, CHAIN_CONFIG, thirdwebClient, getPaymentTokenContract } from "@/lib/chains";
+import { CHAIN_IDS, CHAIN_CONFIG, thirdwebClient, getUsdcContractForChain } from "@/lib/chains";
 import { useChain } from "@/contexts/ChainContext";
 import { NetworkSelector } from "@/components/ui/network-selector";
 import { createPaymentFetch } from "@/lib/payment";
@@ -258,7 +258,7 @@ function MintManowarDialog({
       const mintTimestamp = Math.floor(Date.now() / 1000);
       const dnaHash = computeManowarDnaHash(agentIds, mintTimestamp);
       const walletAddress = deriveManowarWalletAddress(dnaHash, mintTimestamp);
-      const agentFactoryContract = getAgentFactoryContract();
+      const agentFactoryContract = getAgentFactoryContractForChain(selectedChainId);
       const nestedAgentCards: AgentCard[] = [];
       for (const agentId of agentIds) {
         try {
@@ -297,9 +297,9 @@ function MintManowarDialog({
       };
       const metadataCid = await uploadManowarMetadata(metadata);
       const manowarCardUri = getIpfsUri(metadataCid);
-      const manowarContract = getManowarContract();
-      const usdcContract = getPaymentTokenContract();
-      const manowarAddress = getContractAddress("Manowar");
+      const manowarContract = getManowarContractForChain(selectedChainId);
+      const usdcContract = getUsdcContractForChain(selectedChainId);
+      const manowarAddress = getContractAddressForChain("Manowar", selectedChainId);
       const mintTransaction = prepareContractCall({
         contract: manowarContract,
         method: "function mintManowar((string title, string description, string banner, string manowarCardUri, uint256 units, bool leaseEnabled, uint256 leaseDuration, uint8 leasePercent, bool hasCoordinator, string coordinatorModel) params, uint256[] agentIds) returns (uint256 manowarId)",

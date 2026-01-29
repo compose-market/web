@@ -58,14 +58,15 @@ import {
   usdcToWei,
   getContractAddress
 } from "@/lib/contracts";
-import { CHAIN_IDS, CHAIN_CONFIG, inferencePriceWei } from "@/lib/chains";
+import { CHAIN_IDS, CHAIN_CONFIG, inferencePriceWei, isCronosChain } from "@/lib/chains";
 import { useChain } from "@/contexts/ChainContext";
 import { NetworkSelector } from "@/components/ui/network-selector";
-import { useActiveAccount } from "thirdweb/react";
+import { useActiveAccount, useAdminWallet } from "thirdweb/react";
 import { useSendTransaction } from "thirdweb/react";
-import { prepareContractCall } from "thirdweb";
+import { prepareContractCall, type Hex } from "thirdweb";
 import { accountAbstraction } from "../lib/chains";
 import { getAgentFactoryContractForChain } from "@/lib/contracts";
+import { submitCronosTransaction, encodeContractCall } from "@/lib/cronos/aa";
 
 const MCP_URL = (import.meta.env.VITE_MCP_URL || "https://mcp.compose.market").replace(/\/+$/, "");
 const MANOWAR_URL = (import.meta.env.VITE_MANOWAR_URL || "https://manowar.compose.market").replace(/\/+$/, "");
@@ -138,6 +139,7 @@ export default function CreateAgent() {
   const account = useActiveAccount();
   const { selectedChainId } = useChain();
   const { mutateAsync: sendTransaction, isPending: isSending } = useSendTransaction();
+  const adminWallet = useAdminWallet(); // EOA signer for Smart Account (needed for Cronos AA deployment)
 
   // Parse URL params
   const urlParams = new URLSearchParams(searchString);
@@ -451,7 +453,6 @@ export default function CreateAgent() {
 
     try {
       setMintStep("uploading");
-
       // 1. Upload avatar to IPFS (if provided)
       // Use gateway URL for explorer compatibility (not ipfs:// URI)
       let avatarUrl = "";
@@ -640,23 +641,81 @@ export default function CreateAgent() {
     // Step 2: Immediately trigger on-chain transaction (no second click needed)
     try {
       const contract = getAgentFactoryContractForChain(selectedChainId);
-      const transaction = prepareContractCall({
-        contract,
-        method: "function mintAgent(bytes32 dnaHash, uint256 licenses, uint256 licensePrice, bool cloneable, string agentCardUri) returns (uint256 agentId)",
-        params: [
-          txData.dnaHash,
-          txData.licenses,
-          txData.licensePrice,
-          txData.cloneable,
-          txData.agentCardUri,
-        ],
-      });
+      const factoryAddress = contract.address as `0x${string}`;
 
-      // Send transaction (gasless sponsorship configured on ThirdWeb)
-      const result = await sendTransaction(transaction);
+      // Chain-aware transaction execution
+      if (isCronosChain(selectedChainId) && account) {
+        // Cronos: Use our custom AA Paymaster flow (no ThirdWeb bundler available)
+        console.log(`[mint] Using Cronos AA for chain ${selectedChainId}`);
 
-      // Handle success
-      await handleMintSuccess({ transactionHash: result.transactionHash });
+        const mintData = encodeContractCall({
+          abi: [{
+            name: "mintAgent",
+            type: "function",
+            inputs: [
+              { name: "dnaHash", type: "bytes32" },
+              { name: "licenses", type: "uint256" },
+              { name: "licensePrice", type: "uint256" },
+              { name: "cloneable", type: "bool" },
+              { name: "agentCardUri", type: "string" },
+            ],
+            outputs: [{ name: "agentId", type: "uint256" }],
+          }],
+          functionName: "mintAgent",
+          args: [
+            txData.dnaHash,
+            txData.licenses,
+            txData.licensePrice,
+            txData.cloneable,
+            txData.agentCardUri,
+          ],
+        });
+
+        // Get admin wallet for signing (Smart Accounts return wrapped EIP-1271 signatures)
+        const adminAddress = adminWallet?.getAccount()?.address as `0x${string}` | undefined;
+        const adminAccount = adminWallet?.getAccount();
+        if (adminAddress) {
+          console.log(`[mint] Admin wallet (EOA signer): ${adminAddress}`);
+        }
+
+        const result = await submitCronosTransaction({
+          account,
+          to: factoryAddress,
+          data: mintData,
+          value: BigInt(0),
+          chainId: selectedChainId,
+          adminAddress, // For first-time Cronos transactions to deploy Smart Account
+          adminWallet: adminAccount, // EOA for signing (raw ECDSA)
+        });
+
+        if (!result.success) {
+          throw new Error(result.error || "Cronos transaction failed");
+        }
+
+        // Handle success
+        await handleMintSuccess({ transactionHash: result.txHash! });
+      } else {
+        // Fuji/other chains: Use ThirdWeb sendTransaction (bundler available)
+        console.log(`[mint] Using ThirdWeb for chain ${selectedChainId}`);
+
+        const transaction = prepareContractCall({
+          contract,
+          method: "function mintAgent(bytes32 dnaHash, uint256 licenses, uint256 licensePrice, bool cloneable, string agentCardUri) returns (uint256 agentId)",
+          params: [
+            txData.dnaHash,
+            txData.licenses,
+            txData.licensePrice,
+            txData.cloneable,
+            txData.agentCardUri,
+          ],
+        });
+
+        // Send transaction (gasless sponsorship configured on ThirdWeb)
+        const result = await sendTransaction(transaction);
+
+        // Handle success
+        await handleMintSuccess({ transactionHash: result.transactionHash });
+      }
     } catch (error) {
       handleMintError(error instanceof Error ? error : new Error(String(error)));
     }
