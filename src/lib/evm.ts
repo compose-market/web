@@ -104,7 +104,7 @@ export async function getPaymentWrappedFetch(
 
     if (isCronosChain(chainId)) {
         // Cronos chains use REST API facilitator
-        const { wrapFetchWithCronosPayment } = await import("./cronos");
+        const { wrapFetchWithCronosPayment } = await import("./cronos/facilitator");
         const account = wallet.getAccount();
         if (!account) {
             throw new Error("Wallet has no active account");

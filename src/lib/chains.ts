@@ -289,9 +289,14 @@ export const paymentToken = {
 // Account Abstraction (ERC-4337)
 // =============================================================================
 
+// Cronos SimpleAccountFactory (for chains without ThirdWeb bundler support)
+const cronosSimpleAccountFactory = import.meta.env.VITE_CRONOSTEST_SIMPLE_ACCOUNT_FACTORY as `0x${string}`;
+
 export const accountAbstraction: SmartWalletOptions = {
     chain: paymentChain,
     sponsorGas: true,
+    // Cronos requires explicit factory since ThirdWeb has no default bundler
+    ...(cronosSimpleAccountFactory && { factoryAddress: cronosSimpleAccountFactory }),
 };
 
 // =============================================================================

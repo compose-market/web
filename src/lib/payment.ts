@@ -14,7 +14,7 @@ import type { Account } from "thirdweb/wallets";
 import type { Wallet } from "thirdweb/wallets";
 import { wrapFetchWithPayment } from "thirdweb/x402";
 import { isCronosChain, CHAIN_IDS, thirdwebClient, CHAIN_CONFIG } from "./chains";
-import { wrapFetchWithCronosPayment } from "./cronos";
+import { wrapFetchWithCronosPayment } from "./cronos/facilitator";
 
 // =============================================================================
 // Configuration

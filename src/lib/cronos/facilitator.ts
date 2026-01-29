@@ -17,7 +17,7 @@ import {
     USDC_ADDRESSES,
     getCronosNetworkString,
     isCronosChain,
-} from "./chains";
+} from "../chains";
 
 // =============================================================================
 // EIP-712 Configuration for Cronos USDC.e
@@ -45,7 +45,7 @@ export function getCronosEIP712Domain(chainId: number) {
     return {
         name: CRONOS_EIP712_CONFIG.tokenName,
         version: CRONOS_EIP712_CONFIG.tokenVersion,
-        chainId: BigInt(chainId),
+        chainId: chainId, // EIP-712 uses uint256, must be number/bigint
         verifyingContract: usdcAddress,
     };
 }
@@ -241,13 +241,15 @@ export async function wrapFetchWithCronosPayment(
             validitySeconds: accepts0.maxTimeoutSeconds || 300,
         });
 
-        // Retry with X-PAYMENT header
+        // Retry with X-PAYMENT header - must use new Headers() to properly merge
+        // (Headers class objects can't be spread with {...})
+        const retryHeaders = new Headers(fetchOptions.headers);
+        retryHeaders.set("X-PAYMENT", paymentHeader);
+        retryHeaders.set("X-CHAIN-ID", chainId.toString()); // Ensure chainId is preserved
+
         const paidResponse = await fetch(url, {
             ...fetchOptions,
-            headers: {
-                ...fetchOptions.headers,
-                "X-PAYMENT": paymentHeader,
-            },
+            headers: retryHeaders,
         });
 
         return paidResponse;
@@ -257,4 +259,4 @@ export async function wrapFetchWithCronosPayment(
 }
 
 // Re-export chain utilities for convenience
-export { isCronosChain, getCronosNetworkString, CHAIN_IDS } from "./chains";
+export { isCronosChain, getCronosNetworkString, CHAIN_IDS } from "../chains";
