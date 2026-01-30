@@ -232,7 +232,6 @@ export async function wrapFetchWithCronosPayment(
         }
 
         // Generate payment header via account abstraction
-        console.log(`[cronos-x402] Generating payment header for ${accepts0.maxAmountRequired} wei`);
         const paymentHeader = await createCronosPaymentHeader({
             account,
             payTo: accepts0.payTo,

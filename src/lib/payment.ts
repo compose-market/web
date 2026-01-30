@@ -160,6 +160,7 @@ export function createPaymentFetch(params: PaymentFetchParams): (input: RequestI
   const { chainId, account, wallet, maxValue } = params;
 
   const chainName = CHAIN_CONFIG[chainId]?.name || `Chain ${chainId}`;
+  const isCronos = isCronosChain(chainId);
 
   /**
    * Helper to inject X-CHAIN-ID header into all requests.
@@ -172,10 +173,8 @@ export function createPaymentFetch(params: PaymentFetchParams): (input: RequestI
     return { ...init, headers };
   }
 
-  if (isCronosChain(chainId)) {
+  if (isCronos) {
     // Route: Cronos x402 V1 payment flow
-    console.log(`[payment] Using Cronos x402 for ${chainName} (${chainId})`);
-
     return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const url = typeof input === 'string'
         ? input
@@ -191,8 +190,6 @@ export function createPaymentFetch(params: PaymentFetchParams): (input: RequestI
     };
   } else {
     // Route: ThirdWeb x402 V2 payment flow
-    console.log(`[payment] Using ThirdWeb x402 for ${chainName} (${chainId})`);
-
     // Create fetch wrapper that injects X-CHAIN-ID header
     const chainAwareFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       return fetch(input, injectChainHeader(init));
