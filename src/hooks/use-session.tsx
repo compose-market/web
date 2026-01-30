@@ -6,7 +6,7 @@ import {
     useContext,
     ReactNode
 } from "react";
-import { useActiveAccount } from "thirdweb/react";
+import { useActiveAccount, useAdminWallet } from "thirdweb/react";
 import { getContract } from "thirdweb";
 import { addSessionKey, getAllActiveSigners } from "thirdweb/extensions/erc4337";
 import { approve, allowance, balanceOf } from "thirdweb/extensions/erc20";
@@ -21,11 +21,17 @@ import {
     CHAIN_OBJECTS,
     USDC_ADDRESSES,
     CHAIN_IDS,
+    isCronosChain,
 } from "@/lib/chains";
 import { useChain } from "@/contexts/ChainContext";
+import { submitCronosTransaction, encodeContractCall } from "@/lib/cronos/aa";
+import type { Address } from "viem";
 
 // Session storage key
 const SESSION_KEY = "manowar_session";
+
+// API endpoint for Compose Keys
+const API_BASE = (import.meta.env.VITE_API_URL || "https://api.compose.market").replace(/\/+$/, "");
 
 export interface SessionState {
     isActive: boolean;
@@ -35,6 +41,7 @@ export interface SessionState {
     expiresAt: number | null;
     sessionKeyAddress: string | null;
     chainId: number | null; // Track which chain the session was created on
+    composeKeyToken: string | null; // JWT token for backend authentication (Compose Key)
 }
 
 interface StoredSession {
@@ -44,6 +51,7 @@ interface StoredSession {
     sessionKeyAddress: string;
     userAddress: string;
     chainId: number;
+    composeKeyToken?: string; // JWT token for Cronos on-chain settlement
 }
 
 interface SessionContextValue {
@@ -59,6 +67,7 @@ interface SessionContextValue {
     sessionActive: boolean;
     budgetRemaining: number;
     budgetLimit: number;
+    composeKeyToken: string | null;
 }
 
 const defaultSession: SessionState = {
@@ -69,6 +78,7 @@ const defaultSession: SessionState = {
     expiresAt: null,
     sessionKeyAddress: null,
     chainId: null,
+    composeKeyToken: null,
 };
 
 // Create context with undefined default to enforce Provider usage
@@ -98,6 +108,7 @@ function loadStoredSession(userAddress: string, expectedChainId: number): Sessio
                 expiresAt: data.expiresAt,
                 sessionKeyAddress: data.sessionKeyAddress,
                 chainId: data.chainId,
+                composeKeyToken: data.composeKeyToken || null,
             };
         }
 
@@ -126,6 +137,7 @@ function saveSession(session: SessionState, userAddress: string): void {
         sessionKeyAddress: session.sessionKeyAddress || "",
         userAddress,
         chainId: session.chainId || paymentChain.id,
+        composeKeyToken: session.composeKeyToken || undefined,
     };
     localStorage.setItem(SESSION_KEY, JSON.stringify(data));
 }
@@ -136,6 +148,7 @@ function saveSession(session: SessionState, userAddress: string): void {
  */
 export function SessionProvider({ children }: { children: ReactNode }) {
     const account = useActiveAccount();
+    const adminWallet = useAdminWallet(); // EOA signer for Smart Account (needed for Cronos AA)
     const { paymentChainId } = useChain();
     const [session, setSession] = useState<SessionState>(defaultSession);
     const [isCreating, setIsCreating] = useState(false);
@@ -234,57 +247,154 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                     spender: TREASURY_WALLET,
                 });
 
-                if (currentAllowance < BigInt(budgetWei)) {
-                    // Need to approve more spending
-                    const approveTx = approve({
-                        contract: usdcContract,
-                        spender: TREASURY_WALLET,
-                        amountWei: BigInt(budgetWei),
+                // Check if this is a Cronos chain (no ThirdWeb bundler)
+                const useCronosAA = isCronosChain(paymentChainId);
+
+                if (useCronosAA) {
+                    // ===========================================================
+                    // CRONOS PATH: Use Lambda AA endpoints (no bundler)
+                    // ===========================================================
+                    console.log("[Session] Using Cronos AA for session creation");
+
+                    // Step 1: Approve USDC spending via Cronos AA
+                    if (currentAllowance < BigInt(budgetWei)) {
+                        // ERC20 approve function signature
+                        const approveData = encodeContractCall({
+                            abi: [{
+                                name: "approve",
+                                type: "function",
+                                inputs: [
+                                    { name: "spender", type: "address" },
+                                    { name: "amount", type: "uint256" },
+                                ],
+                                outputs: [{ type: "bool" }],
+                            }] as const,
+                            functionName: "approve",
+                            args: [TREASURY_WALLET, BigInt(budgetWei)],
+                        });
+
+                        // Get EOA signer for Cronos AA (Smart Accounts need raw ECDSA)
+                        const adminAddress = adminWallet?.getAccount()?.address as Address | undefined;
+                        const adminAccount = adminWallet?.getAccount();
+
+                        const approveResult = await submitCronosTransaction({
+                            account,
+                            to: usdcAddress as Address,
+                            data: approveData,
+                            chainId: paymentChainId,
+                            adminAddress,
+                            adminWallet: adminAccount,
+                        });
+
+                        if (!approveResult.success) {
+                            throw new Error(`Failed to approve USDC: ${approveResult.error}`);
+                        }
+                        console.log("[Session] USDC approval tx:", approveResult.txHash);
+                    }
+
+                    // Cronos x402 uses EIP-3009 TransferWithAuthorization for USDC payments.
+                    // Session key is tracked locally - USDC transfer is authorized via EIP-712
+                    // signature in facilitator.ts at payment time. No on-chain session key needed.
+                    console.log("[Session] Cronos session ready - USDC approval complete");
+
+                    // Register session with backend to create Compose Key for on-chain settlement
+                    console.log("[Session] Creating Compose Key for on-chain settlement...");
+                    const keysResponse = await fetch(`${API_BASE}/api/keys`, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "x-session-user-address": account.address,
+                            "x-session-active": "true",
+                        },
+                        body: JSON.stringify({
+                            budgetLimit: budgetWei,
+                            expiresAt,
+                            name: `Cronos Session ${new Date().toISOString().slice(0, 10)}`,
+                        }),
+                    });
+
+                    if (!keysResponse.ok) {
+                        const errorBody = await keysResponse.text();
+                        throw new Error(`Failed to create Compose Key: ${errorBody}`);
+                    }
+
+                    const keyResult = await keysResponse.json();
+                    console.log("[Session] Compose Key created:", keyResult.keyId);
+
+                    // Create new session state with Compose Key token
+                    const newSession: SessionState = {
+                        isActive: true,
+                        budgetLimit: budgetWei,
+                        budgetUsed: 0,
+                        budgetRemaining: budgetWei,
+                        expiresAt,
+                        sessionKeyAddress: TREASURY_WALLET,
+                        chainId: paymentChainId,
+                        composeKeyToken: keyResult.token,
+                    };
+
+                    // Save to localStorage first
+                    saveSession(newSession, account.address);
+
+                    // Then update React state
+                    setSession(newSession);
+
+                    return true;
+                } else {
+                    // ===========================================================
+                    // THIRDWEB PATH: Use bundler (Avalanche, etc.)
+                    // ===========================================================
+                    if (currentAllowance < BigInt(budgetWei)) {
+                        const approveTx = approve({
+                            contract: usdcContract,
+                            spender: TREASURY_WALLET,
+                            amountWei: BigInt(budgetWei),
+                        });
+
+                        await sendTransaction({
+                            transaction: approveTx,
+                            account,
+                        });
+                    }
+
+                    // Create session key for the treasury to pull payments
+                    const sessionKeyTx = addSessionKey({
+                        contract: smartAccountContract,
+                        account,
+                        sessionKeyAddress: TREASURY_WALLET,
+                        permissions: {
+                            approvedTargets: [usdcAddress],
+                            nativeTokenLimitPerTransaction: "0",
+                            permissionStartTimestamp: new Date(Date.now()),
+                            permissionEndTimestamp: new Date(expiresAt),
+                        },
                     });
 
                     await sendTransaction({
-                        transaction: approveTx,
+                        transaction: sessionKeyTx,
                         account,
                     });
+
+                    // Create new session state (no Compose Key for ThirdWeb path)
+                    const newSession: SessionState = {
+                        isActive: true,
+                        budgetLimit: budgetWei,
+                        budgetUsed: 0,
+                        budgetRemaining: budgetWei,
+                        expiresAt,
+                        sessionKeyAddress: TREASURY_WALLET,
+                        chainId: paymentChainId,
+                        composeKeyToken: null, // ThirdWeb uses on-chain session keys directly
+                    };
+
+                    // Save to localStorage first
+                    saveSession(newSession, account.address);
+
+                    // Then update React state
+                    setSession(newSession);
+
+                    return true;
                 }
-
-                // Step 2: Create session key for the treasury to pull payments
-                // This allows the server to settle payments without user signatures
-                const sessionKeyTx = addSessionKey({
-                    contract: smartAccountContract,
-                    account,
-                    sessionKeyAddress: TREASURY_WALLET,
-                    permissions: {
-                        approvedTargets: [usdcAddress], // Only USDC contract on this chain
-                        nativeTokenLimitPerTransaction: "0", // No native token spending
-                        permissionStartTimestamp: new Date(Date.now()),
-                        permissionEndTimestamp: new Date(expiresAt),
-                    },
-                });
-
-                await sendTransaction({
-                    transaction: sessionKeyTx,
-                    account,
-                });
-
-                // Create new session state
-                const newSession: SessionState = {
-                    isActive: true,
-                    budgetLimit: budgetWei,
-                    budgetUsed: 0,
-                    budgetRemaining: budgetWei,
-                    expiresAt,
-                    sessionKeyAddress: TREASURY_WALLET,
-                    chainId: paymentChainId,
-                };
-
-                // Save to localStorage first
-                saveSession(newSession, account.address);
-
-                // Then update React state
-                setSession(newSession);
-
-                return true;
             } catch (err) {
                 console.error("[Session] Failed to create session:", err);
                 setError(err instanceof Error ? err.message : "Failed to create session");
@@ -293,7 +403,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 setIsCreating(false);
             }
         },
-        [account, paymentChainId]
+        [account, paymentChainId, adminWallet]
     );
 
     /**
@@ -365,6 +475,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         sessionActive: session.isActive,
         budgetRemaining: session.budgetRemaining,
         budgetLimit: session.budgetLimit,
+        composeKeyToken: session.composeKeyToken,
     };
 
     return (

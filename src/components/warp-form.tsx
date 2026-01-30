@@ -54,23 +54,26 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useActiveAccount, useSendTransaction } from "thirdweb/react";
+import { useActiveAccount, useSendTransaction, useAdminWallet } from "thirdweb/react";
 import { prepareContractCall } from "thirdweb";
+import { submitCronosTransaction, encodeContractCall } from "@/lib/cronos/aa";
 import {
   getWarpContractForChain,
   usdcToWei,
   computeExternalAgentHash,
   deriveAgentWalletAddress,
+  getContractAddressForChain,
 } from "@/lib/contracts";
 import {
   uploadAgentAvatar,
   uploadAgentCard,
   getIpfsUri,
+  getIpfsUrl,
   fileToDataUrl,
   isPinataConfigured,
   type AgentCard,
 } from "@/lib/pinata";
-import { CHAIN_IDS, CHAIN_CONFIG } from "@/lib/chains";
+import { CHAIN_IDS, CHAIN_CONFIG, isCronosChain } from "@/lib/chains";
 import { useChain } from "@/contexts/ChainContext";
 import { AGENT_REGISTRIES, type AgentRegistryId } from "@/lib/agents";
 
@@ -117,6 +120,7 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const account = useActiveAccount();
+  const adminWallet = useAdminWallet();
   const { paymentChainId } = useChain();
   const { mutateAsync: sendTransaction, isPending: isSending } = useSendTransaction();
 
@@ -345,7 +349,8 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
       };
 
       const cardCid = await uploadAgentCard(agentCard);
-      const agentCardUri = getIpfsUri(cardCid);
+      // Use HTTPS gateway URL for Cronos (explorer doesn't resolve ipfs://), ipfs:// for others
+      const agentCardUri = isCronosChain(chainId) ? getIpfsUrl(cardCid) : getIpfsUri(cardCid);
 
       // 5. Prepare transaction params
       const licensePrice = usdcToWei(parseFloat(values.licensePrice));
@@ -430,25 +435,78 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
     // Step 2: Immediately trigger on-chain transaction (no second click needed)
     try {
       setMintStep("minting");
-      const contract = getWarpContractForChain(paymentChainId);
-      const transaction = prepareContractCall({
-        contract,
-        method:
-          "function warpAgent(bytes32 originalAgentHash, address originalCreator, uint256 licenses, uint256 licensePrice, string agentCardUri) returns (uint256 warpedAgentId)",
-        params: [
-          txData.originalAgentHash,
-          txData.originalCreator,
-          txData.licenses,
-          txData.licensePrice,
-          txData.agentCardUri,
-        ],
-      });
 
-      // Send transaction (gasless sponsorship configured on ThirdWeb)
-      const result = await sendTransaction(transaction);
+      // Chain-aware transaction: Cronos uses our AA Paymaster, others use ThirdWeb
+      if (isCronosChain(paymentChainId) && account) {
+        // Cronos: Use our custom AA Paymaster flow
+        const warpData = encodeContractCall({
+          abi: [
+            {
+              type: "function",
+              name: "warpAgent",
+              inputs: [
+                { type: "bytes32", name: "originalAgentHash" },
+                { type: "address", name: "originalCreator" },
+                { type: "uint256", name: "licenses" },
+                { type: "uint256", name: "licensePrice" },
+                { type: "string", name: "agentCardUri" },
+              ],
+              outputs: [{ type: "uint256", name: "warpedAgentId" }],
+            },
+          ],
+          functionName: "warpAgent",
+          args: [
+            txData.originalAgentHash,
+            txData.originalCreator,
+            txData.licenses,
+            txData.licensePrice,
+            txData.agentCardUri,
+          ],
+        });
 
-      // Handle success
-      await handleWarpSuccess({ transactionHash: result.transactionHash });
+        const warpContractAddress = getContractAddressForChain("Warp", paymentChainId);
+
+        // Get admin wallet for signing (Smart Accounts return wrapped EIP-1271 signatures)
+        const adminAddress = adminWallet?.getAccount()?.address as `0x${string}` | undefined;
+        const adminAccount = adminWallet?.getAccount();
+
+        const result = await submitCronosTransaction({
+          account,
+          to: warpContractAddress as `0x${string}`,
+          data: warpData as `0x${string}`,
+          value: BigInt(0),
+          chainId: paymentChainId,
+          adminAddress,
+          adminWallet: adminAccount,
+        });
+
+        if (!result.success) {
+          throw new Error(result.error || "Cronos transaction failed");
+        }
+
+        await handleWarpSuccess({ transactionHash: result.txHash! });
+      } else {
+        // Fuji/other chains: Use ThirdWeb sendTransaction with AA
+        const contract = getWarpContractForChain(paymentChainId);
+        const transaction = prepareContractCall({
+          contract,
+          method:
+            "function warpAgent(bytes32 originalAgentHash, address originalCreator, uint256 licenses, uint256 licensePrice, string agentCardUri) returns (uint256 warpedAgentId)",
+          params: [
+            txData.originalAgentHash,
+            txData.originalCreator,
+            txData.licenses,
+            txData.licensePrice,
+            txData.agentCardUri,
+          ],
+        });
+
+        // Send transaction (gasless sponsorship configured on ThirdWeb)
+        const result = await sendTransaction(transaction);
+
+        // Handle success
+        await handleWarpSuccess({ transactionHash: result.transactionHash });
+      }
     } catch (error) {
       handleWarpError(error instanceof Error ? error : new Error(String(error)));
     }
