@@ -240,6 +240,12 @@ export default function ManowarPage() {
                     headers["x-session-user-address"] = userAddress;
                 }
 
+                // Add session headers for x402 payment bypass
+                if (sessionActive && budgetRemaining > 0) {
+                    headers["x-session-active"] = "true";
+                    headers["x-session-budget-remaining"] = budgetRemaining.toString();
+                }
+
                 // Build request body with Pinata URL for attachments
                 const requestBody: Record<string, unknown> = {
                     message: userMessage.content,

@@ -106,7 +106,7 @@ const API_BASE = (import.meta.env.VITE_API_URL || "https://api.compose.market").
 export default function PlaygroundPage() {
   const wallet = useActiveWallet();
   const account = useActiveAccount();
-  const { sessionActive, budgetRemaining, formatBudget, recordUsage } = useSession();
+  const { sessionActive, budgetRemaining, formatBudget, recordUsage, composeKeyToken } = useSession();
   const { paymentChainId } = useChain();
 
   // Tab state - check URL params for pre-selected plugin
@@ -390,6 +390,10 @@ export default function PlaygroundPage() {
       if (sessionActive && budgetRemaining > 0) {
         headers["x-session-active"] = "true";
         headers["x-session-budget-remaining"] = budgetRemaining.toString();
+        // Use Compose Key for backend authentication (enables on-chain settlement)
+        if (composeKeyToken) {
+          headers["Authorization"] = `Bearer ${composeKeyToken}`;
+        }
       }
 
       // Build request body and select endpoint based on output type

@@ -504,7 +504,8 @@ export default function CreateAgent() {
       };
 
       const cardCid = await uploadAgentCard(agentCard);
-      const agentCardUri = getIpfsUri(cardCid);
+      // Use HTTPS gateway URL for Cronos (explorer doesn't resolve ipfs://), ipfs:// for others
+      const agentCardUri = isCronosChain(chainId) ? getIpfsUrl(cardCid) : getIpfsUri(cardCid);
 
       const licensePrice = usdcToWei(parseFloat(values.licensePrice));
       const licenses = values.licenses ? BigInt(values.licenses) : BigInt(0);

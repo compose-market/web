@@ -68,7 +68,7 @@ export default function AgentDetailPage() {
   const wallet = useActiveWallet();
   const account = useActiveAccount();
   const { paymentChainId } = useChain();
-  const { sessionActive, budgetRemaining, recordUsage } = useSession();
+  const { sessionActive, budgetRemaining, recordUsage, composeKeyToken } = useSession();
 
   // Build the A2A-compatible endpoint URL using wallet address (canonical identifier)
   const agentWallet = agent?.walletAddress;
@@ -235,6 +235,16 @@ export default function AgentDetailPage() {
 
         if (userAddress) {
           headers["x-session-user-address"] = userAddress;
+        }
+
+        // Add session headers for x402 payment bypass
+        if (sessionActive && budgetRemaining > 0) {
+          headers["x-session-active"] = "true";
+          headers["x-session-budget-remaining"] = budgetRemaining.toString();
+          // Use Compose Key for backend authentication (enables on-chain settlement)
+          if (composeKeyToken) {
+            headers["Authorization"] = `Bearer ${composeKeyToken}`;
+          }
         }
 
         // Collect granted permissions from sessionStorage (from Backpack)

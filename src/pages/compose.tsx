@@ -41,9 +41,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
-import { useActiveAccount, useActiveWallet, useSendTransaction } from "thirdweb/react";
+import { useActiveAccount, useActiveWallet, useSendTransaction, useAdminWallet } from "thirdweb/react";
 import { prepareContractCall } from "thirdweb";
 import { readContract } from "thirdweb";
+import { submitCronosTransaction, encodeContractCall } from "@/lib/cronos/aa";
 import {
   getManowarContractForChain, getContractAddressForChain, getAgentFactoryContractForChain,
   weiToUsdc, computeManowarDnaHash, deriveManowarWalletAddress
@@ -53,7 +54,7 @@ import {
   fileToDataUrl, isPinataConfigured, fetchFromIpfs,
   type ManowarMetadata, type AgentCard
 } from "@/lib/pinata";
-import { CHAIN_IDS, CHAIN_CONFIG, thirdwebClient, getUsdcContractForChain } from "@/lib/chains";
+import { CHAIN_IDS, CHAIN_CONFIG, thirdwebClient, getUsdcContractForChain, isCronosChain, getUsdcAddress } from "@/lib/chains";
 import { useChain } from "@/contexts/ChainContext";
 import { NetworkSelector } from "@/components/ui/network-selector";
 import { createPaymentFetch } from "@/lib/payment";
@@ -119,6 +120,7 @@ function MintManowarDialog({
   const { toast } = useToast();
   const wallet = useActiveWallet();
   const account = useActiveAccount();
+  const adminWallet = useAdminWallet();
   const { selectedChainId } = useChain();
   const { mutateAsync: sendTransaction } = useSendTransaction();
 
@@ -253,7 +255,8 @@ function MintManowarDialog({
       let bannerImageUri = "";
       if (bannerFile) {
         const bannerCid = await uploadManowarBanner(bannerFile, title);
-        bannerImageUri = getIpfsUri(bannerCid);
+        // Use HTTPS gateway for Cronos (explorer doesn't resolve ipfs://), ipfs:// for others
+        bannerImageUri = isCronosChain(selectedChainId) ? getIpfsUrl(bannerCid) : getIpfsUri(bannerCid);
       }
       const mintTimestamp = Math.floor(Date.now() / 1000);
       const dnaHash = computeManowarDnaHash(agentIds, mintTimestamp);
@@ -296,59 +299,181 @@ function MintManowarDialog({
         createdAt: new Date().toISOString(),
       };
       const metadataCid = await uploadManowarMetadata(metadata);
-      const manowarCardUri = getIpfsUri(metadataCid);
-      const manowarContract = getManowarContractForChain(selectedChainId);
-      const usdcContract = getUsdcContractForChain(selectedChainId);
+      // Use HTTPS gateway for Cronos (explorer doesn't resolve ipfs://), ipfs:// for others
+      const manowarCardUri = isCronosChain(selectedChainId) ? getIpfsUrl(metadataCid) : getIpfsUri(metadataCid);
       const manowarAddress = getContractAddressForChain("Manowar", selectedChainId);
-      const mintTransaction = prepareContractCall({
-        contract: manowarContract,
-        method: "function mintManowar((string title, string description, string banner, string manowarCardUri, uint256 units, bool leaseEnabled, uint256 leaseDuration, uint8 leasePercent, bool hasCoordinator, string coordinatorModel) params, uint256[] agentIds) returns (uint256 manowarId)",
-        params: [
-          {
-            title,
-            description,
-            banner: bannerImageUri,
-            manowarCardUri,
-            units: units ? BigInt(parseInt(units)) : BigInt(1),
-            leaseEnabled,
-            leaseDuration: BigInt(parseInt(leaseDuration) || 0),
-            leasePercent: parseInt(leasePercent) || 0,
-            hasCoordinator: !!coordinatorModel,
-            coordinatorModel: coordinatorModel || "",
-          },
-          agentIds.map(id => BigInt(id)),
-        ],
-      });
-      if (totalAgentPrice > BigInt(0)) {
-        const approvalTx = prepareContractCall({
-          contract: usdcContract,
-          method: "function approve(address spender, uint256 amount) returns (bool)",
-          params: [manowarAddress, totalAgentPrice],
+
+      // Chain-aware transaction: Cronos uses our AA Paymaster, others use ThirdWeb
+      if (isCronosChain(selectedChainId) && account) {
+        // Cronos: Use our custom AA Paymaster flow
+        const adminAddress = adminWallet?.getAccount()?.address as `0x${string}` | undefined;
+        const adminAccount = adminWallet?.getAccount();
+
+        // USDC approval if needed
+        if (totalAgentPrice > BigInt(0)) {
+          const usdcContractAddress = getUsdcAddress(selectedChainId);
+          const approvalData = encodeContractCall({
+            abi: [{
+              type: "function",
+              name: "approve",
+              inputs: [
+                { type: "address", name: "spender" },
+                { type: "uint256", name: "amount" },
+              ],
+              outputs: [{ type: "bool" }],
+            }],
+            functionName: "approve",
+            args: [manowarAddress, totalAgentPrice],
+          });
+
+          const approvalResult = await submitCronosTransaction({
+            account,
+            to: usdcContractAddress as `0x${string}`,
+            data: approvalData as `0x${string}`,
+            value: BigInt(0),
+            chainId: selectedChainId,
+            adminAddress,
+            adminWallet: adminAccount,
+          });
+
+          if (!approvalResult.success) {
+            throw new Error(approvalResult.error || "USDC approval failed");
+          }
+        }
+
+        // Mint Manowar
+        const mintData = encodeContractCall({
+          abi: [{
+            type: "function",
+            name: "mintManowar",
+            inputs: [
+              {
+                type: "tuple",
+                name: "params",
+                components: [
+                  { type: "string", name: "title" },
+                  { type: "string", name: "description" },
+                  { type: "string", name: "banner" },
+                  { type: "string", name: "manowarCardUri" },
+                  { type: "uint256", name: "units" },
+                  { type: "bool", name: "leaseEnabled" },
+                  { type: "uint256", name: "leaseDuration" },
+                  { type: "uint8", name: "leasePercent" },
+                  { type: "bool", name: "hasCoordinator" },
+                  { type: "string", name: "coordinatorModel" },
+                ],
+              },
+              { type: "uint256[]", name: "agentIds" },
+            ],
+            outputs: [{ type: "uint256", name: "manowarId" }],
+          }],
+          functionName: "mintManowar",
+          args: [
+            {
+              title,
+              description,
+              banner: bannerImageUri,
+              manowarCardUri,
+              units: units ? BigInt(parseInt(units)) : BigInt(1),
+              leaseEnabled,
+              leaseDuration: BigInt(parseInt(leaseDuration) || 0),
+              leasePercent: parseInt(leasePercent) || 0,
+              hasCoordinator: !!coordinatorModel,
+              coordinatorModel: coordinatorModel || "",
+            },
+            agentIds.map(id => BigInt(id)),
+          ],
         });
-        await sendTransaction(approvalTx);
+
+        const result = await submitCronosTransaction({
+          account,
+          to: manowarAddress as `0x${string}`,
+          data: mintData as `0x${string}`,
+          value: BigInt(0),
+          chainId: selectedChainId,
+          adminAddress,
+          adminWallet: adminAccount,
+        });
+
+        if (!result.success) {
+          throw new Error(result.error || "Cronos transaction failed");
+        }
+
+        toast({
+          title: "Manowar Minted!",
+          description: (
+            <div className="space-y-1">
+              <p>{title} deployed to {CHAIN_CONFIG[selectedChainId]?.name || 'testnet'}.</p>
+              {totalAgentPrice > BigInt(0) && (
+                <p className="text-xs text-muted-foreground">
+                  ${totalAgentPriceFormatted} USDC paid to agent creators
+                </p>
+              )}
+              <a
+                href={`${CHAIN_CONFIG[selectedChainId].explorer}/tx/${result.txHash}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-cyan-400 hover:underline text-xs flex items-center gap-1"
+              >
+                View transaction <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+          ),
+        });
+      } else {
+        // Fuji/other chains: Use ThirdWeb sendTransaction with AA
+        const manowarContract = getManowarContractForChain(selectedChainId);
+        const usdcContract = getUsdcContractForChain(selectedChainId);
+        const mintTransaction = prepareContractCall({
+          contract: manowarContract,
+          method: "function mintManowar((string title, string description, string banner, string manowarCardUri, uint256 units, bool leaseEnabled, uint256 leaseDuration, uint8 leasePercent, bool hasCoordinator, string coordinatorModel) params, uint256[] agentIds) returns (uint256 manowarId)",
+          params: [
+            {
+              title,
+              description,
+              banner: bannerImageUri,
+              manowarCardUri,
+              units: units ? BigInt(parseInt(units)) : BigInt(1),
+              leaseEnabled,
+              leaseDuration: BigInt(parseInt(leaseDuration) || 0),
+              leasePercent: parseInt(leasePercent) || 0,
+              hasCoordinator: !!coordinatorModel,
+              coordinatorModel: coordinatorModel || "",
+            },
+            agentIds.map(id => BigInt(id)),
+          ],
+        });
+        if (totalAgentPrice > BigInt(0)) {
+          const approvalTx = prepareContractCall({
+            contract: usdcContract,
+            method: "function approve(address spender, uint256 amount) returns (bool)",
+            params: [manowarAddress, totalAgentPrice],
+          });
+          await sendTransaction(approvalTx);
+        }
+        const result = await sendTransaction(mintTransaction);
+        toast({
+          title: "Manowar Minted!",
+          description: (
+            <div className="space-y-1">
+              <p>{title} deployed to {CHAIN_CONFIG[selectedChainId]?.name || 'testnet'}.</p>
+              {totalAgentPrice > BigInt(0) && (
+                <p className="text-xs text-muted-foreground">
+                  ${totalAgentPriceFormatted} USDC paid to agent creators
+                </p>
+              )}
+              <a
+                href={`${CHAIN_CONFIG[selectedChainId].explorer}/tx/${result.transactionHash}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-cyan-400 hover:underline text-xs flex items-center gap-1"
+              >
+                View transaction <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+          ),
+        });
       }
-      const result = await sendTransaction(mintTransaction);
-      toast({
-        title: "Manowar Minted!",
-        description: (
-          <div className="space-y-1">
-            <p>{title} deployed to {CHAIN_CONFIG[selectedChainId]?.name || 'testnet'}.</p>
-            {totalAgentPrice > BigInt(0) && (
-              <p className="text-xs text-muted-foreground">
-                ${totalAgentPriceFormatted} USDC paid to agent creators
-              </p>
-            )}
-            <a
-              href={`${CHAIN_CONFIG[selectedChainId].explorer}/tx/${result.transactionHash}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-cyan-400 hover:underline text-xs flex items-center gap-1"
-            >
-              View transaction <ExternalLink className="w-3 h-3" />
-            </a>
-          </div>
-        ),
-      });
       onOpenChange(false);
     } catch (error) {
       toast({
