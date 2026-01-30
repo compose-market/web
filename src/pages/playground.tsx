@@ -12,7 +12,7 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from "react"
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
 import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
-import { inferencePriceWei } from "@/lib/chains";
+import { inferencePriceWei, isCronosChain } from "@/lib/chains";
 import { createPaymentFetch } from "@/lib/payment";
 import { useChain } from "@/contexts/ChainContext";
 import { Button } from "@/components/ui/button";
@@ -61,6 +61,7 @@ import { MirrorPane, type ModelParamsSchema } from "@/components/mirror-pane";
 import { PluginTester } from "@/components/plugin-tester";
 import { useChat } from "@/hooks/use-chat";
 import { useModels } from "@/hooks/use-model";
+import { useToast } from "@/hooks/use-toast";
 import { fileToDataUrl } from "@/lib/pinata";
 import type { AIModel } from "@/lib/models";
 
@@ -108,6 +109,7 @@ export default function PlaygroundPage() {
   const account = useActiveAccount();
   const { sessionActive, budgetRemaining, formatBudget, recordUsage, composeKeyToken } = useSession();
   const { paymentChainId } = useChain();
+  const { toast } = useToast();
 
   // Tab state - check URL params for pre-selected plugin
   const [activeTab, setActiveTab] = useState<"model" | "plugins">(() => {
@@ -338,6 +340,17 @@ export default function PlaygroundPage() {
     if (attachedFiles.some(f => f.uploading)) return;
     if ((!inputValue.trim() && attachedFiles.length === 0) || streaming || !selectedModel) return;
 
+    // Cronos requires active session for payments (no EIP-3009 fallback for smart wallets)
+    if (isCronosChain(paymentChainId) && (!sessionActive || budgetRemaining <= 0)) {
+      toast({
+        title: "Session Required",
+        description: "Cronos payments require an active session. Please create one to continue.",
+        variant: "destructive"
+      });
+      setShowSessionDialog(true);
+      return;
+    }
+
     const attached = attachedFiles[0];
 
     // Use Pinata URL (already uploaded by useChat hook) instead of re-converting to base64
@@ -540,7 +553,7 @@ export default function PlaygroundPage() {
     } finally {
       setStreaming(false);
     }
-  }, [inputValue, streaming, selectedModel, messages, systemPrompt, wallet, budgetRemaining, recordUsage, outputType, attachedFiles, clearFiles, sessionActive, activeTools, isGoogleModel, modelSupportsSearchGrounding, modelSupportsCodeExecution]);
+  }, [inputValue, streaming, selectedModel, messages, systemPrompt, wallet, budgetRemaining, recordUsage, outputType, attachedFiles, clearFiles, sessionActive, activeTools, isGoogleModel, modelSupportsSearchGrounding, modelSupportsCodeExecution, paymentChainId, toast, setShowSessionDialog]);
 
   const handleClearChat = useCallback(() => {
     setMessages([]);

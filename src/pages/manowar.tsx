@@ -11,7 +11,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useParams } from "wouter";
 import { Link } from "wouter";
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
-import { inferencePriceWei } from "@/lib/chains";
+import { inferencePriceWei, isCronosChain } from "@/lib/chains";
 import { createPaymentFetch } from "@/lib/payment";
 import { useChain } from "@/contexts/ChainContext";
 import { Button } from "@/components/ui/button";
@@ -53,7 +53,7 @@ export default function ManowarPage() {
     const wallet = useActiveWallet();
     const account = useActiveAccount();
     const { paymentChainId } = useChain();
-    const { sessionActive, budgetRemaining, recordUsage } = useSession();
+    const { sessionActive, budgetRemaining, recordUsage, composeKeyToken } = useSession();
 
     // Chat state from shared hook (includes messages, attachments, and recording)
     const manowarWallet = manowar?.walletAddress;
@@ -177,6 +177,17 @@ export default function ManowarPage() {
             return;
         }
 
+        // Cronos requires active session for payments
+        if (isCronosChain(paymentChainId) && (!sessionActive || budgetRemaining <= 0)) {
+            toast({
+                title: "Session Required",
+                description: "Cronos payments require an active session. Please create one to continue.",
+                variant: "destructive"
+            });
+            setShowSessionDialog(true);
+            return;
+        }
+
         const attached = attachedFiles[0];
         const userMessage: ChatMessage = {
             id: crypto.randomUUID(),
@@ -244,6 +255,10 @@ export default function ManowarPage() {
                 if (sessionActive && budgetRemaining > 0) {
                     headers["x-session-active"] = "true";
                     headers["x-session-budget-remaining"] = budgetRemaining.toString();
+                    // Use Compose Key for backend authentication (enables on-chain settlement)
+                    if (composeKeyToken) {
+                        headers["Authorization"] = `Bearer ${composeKeyToken}`;
+                    }
                 }
 
                 // Build request body with Pinata URL for attachments
@@ -453,7 +468,7 @@ export default function ManowarPage() {
             setSending(false);
             setChatStatus("idle");
         }
-    }, [inputValue, sending, manowar, wallet, toast, attachedFiles, autoRegisterManowar, recordUsage]);
+    }, [inputValue, sending, manowar, wallet, toast, attachedFiles, autoRegisterManowar, recordUsage, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, setShowSessionDialog]);
 
     const copyEndpoint = () => {
         toast({

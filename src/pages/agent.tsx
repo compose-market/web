@@ -11,7 +11,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useParams } from "wouter";
 import { Link } from "wouter";
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
-import { inferencePriceWei } from "@/lib/chains";
+import { inferencePriceWei, isCronosChain } from "@/lib/chains";
 import { createPaymentFetch } from "@/lib/payment";
 import { useChain } from "@/contexts/ChainContext";
 import { Button } from "@/components/ui/button";
@@ -168,6 +168,17 @@ export default function AgentDetailPage() {
 
     if (!wallet || !account) {
       toast({ title: "Connect wallet", description: "Please connect your wallet to chat", variant: "destructive" });
+      return;
+    }
+
+    // Cronos requires active session for payments (no EIP-3009 fallback for smart wallets)
+    if (isCronosChain(paymentChainId) && (!sessionActive || budgetRemaining <= 0)) {
+      toast({
+        title: "Session Required",
+        description: "Cronos payments require an active session. Please create one to continue.",
+        variant: "destructive"
+      });
+      setShowSessionDialog(true);
       return;
     }
 
