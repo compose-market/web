@@ -349,8 +349,7 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
       };
 
       const cardCid = await uploadAgentCard(agentCard);
-      // Use HTTPS gateway URL for Cronos (explorer doesn't resolve ipfs://), ipfs:// for others
-      const agentCardUri = isCronosChain(chainId) ? getIpfsUrl(cardCid) : getIpfsUri(cardCid);
+      const agentCardUri = getIpfsUri(cardCid);
 
       // 5. Prepare transaction params
       const licensePrice = usdcToWei(parseFloat(values.licensePrice));

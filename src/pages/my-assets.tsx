@@ -343,7 +343,11 @@ function AgentAssetCard({ agent, chainId }: { agent: OnchainAgent; chainId: numb
   }
 
   const initials = name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
-  const explorerUrl = `${CHAIN_CONFIG[chainId].explorer}/token/${getContractAddress("AgentFactory", chainId)}?a=${agent.id}`;
+  // Use chainId from agent metadata (source of truth for where it was minted)
+  const agentChainId = agent.metadata?.chain;
+  const explorerUrl = agentChainId && CHAIN_CONFIG[agentChainId]
+    ? `${CHAIN_CONFIG[agentChainId].explorer}/token/${getContractAddress("AgentFactory", agentChainId)}?a=${agent.id}`
+    : null;
 
   // Agent page URL using wallet address (primary) or ID (fallback)
   const agentPageUrl = agent.walletAddress
@@ -351,98 +355,101 @@ function AgentAssetCard({ agent, chainId }: { agent: OnchainAgent; chainId: numb
     : `/agent/${agent.id}`;
 
   return (
-    <Card
-      className="bg-background border-sidebar-border hover:border-cyan-500/50 transition-colors cursor-pointer group"
-      onClick={() => window.location.href = agentPageUrl}
-    >
-      <CardContent className="p-4 sm:p-5 space-y-3 sm:space-y-4">
-        <div className="flex items-start gap-2.5 sm:gap-3">
-          <Avatar className="w-10 h-10 sm:w-12 sm:h-12 border-2 border-cyan-500/30 group-hover:border-cyan-500/60 transition-colors shrink-0">
-            <AvatarImage src={avatarUrl || undefined} alt={name} />
-            <AvatarFallback className="bg-cyan-500/10 text-cyan-400 font-mono text-xs sm:text-sm">
-              {initials}
-            </AvatarFallback>
-          </Avatar>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-start justify-between gap-2">
-              <h3 className="font-display font-bold text-foreground truncate group-hover:text-cyan-400 transition-colors text-sm sm:text-base">
-                {name}
-              </h3>
-              <a
-                href={explorerUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={(e) => e.stopPropagation()}
-                className="p-1 text-muted-foreground hover:text-cyan-400 transition-colors shrink-0"
-                title="View on explorer"
-              >
-                <ExternalLink className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-              </a>
+    <Link href={agentPageUrl} className="block">
+      <Card
+        className="bg-background border-sidebar-border hover:border-cyan-500/50 transition-colors cursor-pointer group"
+      >
+        <CardContent className="p-4 sm:p-5 space-y-3 sm:space-y-4">
+          <div className="flex items-start gap-2.5 sm:gap-3">
+            <Avatar className="w-10 h-10 sm:w-12 sm:h-12 border-2 border-cyan-500/30 group-hover:border-cyan-500/60 transition-colors shrink-0">
+              <AvatarImage src={avatarUrl || undefined} alt={name} />
+              <AvatarFallback className="bg-cyan-500/10 text-cyan-400 font-mono text-xs sm:text-sm">
+                {initials}
+              </AvatarFallback>
+            </Avatar>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start justify-between gap-2">
+                <h3 className="font-display font-bold text-foreground truncate group-hover:text-cyan-400 transition-colors text-sm sm:text-base">
+                  {name}
+                </h3>
+                {explorerUrl && (
+                  <a
+                    href={explorerUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="p-1 text-muted-foreground hover:text-cyan-400 transition-colors shrink-0"
+                    title="View on explorer"
+                  >
+                    <ExternalLink className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                  </a>
+                )}
+              </div>
+              <p className="text-[10px] sm:text-xs font-mono text-muted-foreground">
+                Agent #{agent.id} • ERC8004
+              </p>
             </div>
-            <p className="text-[10px] sm:text-xs font-mono text-muted-foreground">
-              Agent #{agent.id} • ERC8004
-            </p>
           </div>
-        </div>
 
-        <p className="text-[10px] sm:text-xs text-muted-foreground line-clamp-2">
-          {description}
-        </p>
+          <p className="text-[10px] sm:text-xs text-muted-foreground line-clamp-2">
+            {description}
+          </p>
 
-        <div className="flex flex-wrap gap-1 sm:gap-1.5">
-          <Badge variant="outline" className="text-[8px] sm:text-[10px] font-mono border-cyan-500/30 text-cyan-400 bg-cyan-500/10 px-1 sm:px-1.5 py-0">
-            <Sparkles className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
-            on-chain
-          </Badge>
-          {agent.isWarped && (
-            <Badge variant="outline" className="text-[8px] sm:text-[10px] font-mono border-fuchsia-500/30 text-fuchsia-400 bg-fuchsia-500/10 px-1 sm:px-1.5 py-0">
-              <ArrowRightLeft className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
-              warped
+          <div className="flex flex-wrap gap-1 sm:gap-1.5">
+            <Badge variant="outline" className="text-[8px] sm:text-[10px] font-mono border-cyan-500/30 text-cyan-400 bg-cyan-500/10 px-1 sm:px-1.5 py-0">
+              <Sparkles className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
+              on-chain
             </Badge>
-          )}
-          {agent.cloneable && (
-            <Badge variant="outline" className="text-[8px] sm:text-[10px] font-mono border-purple-500/30 text-purple-400 bg-purple-500/10 px-1 sm:px-1.5 py-0">
-              cloneable
-            </Badge>
-          )}
-          {agent.isClone && (
-            <Badge variant="outline" className="text-[8px] sm:text-[10px] font-mono border-orange-500/30 text-orange-400 bg-orange-500/10 px-1 sm:px-1.5 py-0">
-              clone #{agent.parentAgentId}
-            </Badge>
-          )}
-        </div>
+            {agent.isWarped && (
+              <Badge variant="outline" className="text-[8px] sm:text-[10px] font-mono border-fuchsia-500/30 text-fuchsia-400 bg-fuchsia-500/10 px-1 sm:px-1.5 py-0">
+                <ArrowRightLeft className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
+                warped
+              </Badge>
+            )}
+            {agent.cloneable && (
+              <Badge variant="outline" className="text-[8px] sm:text-[10px] font-mono border-purple-500/30 text-purple-400 bg-purple-500/10 px-1 sm:px-1.5 py-0">
+                cloneable
+              </Badge>
+            )}
+            {agent.isClone && (
+              <Badge variant="outline" className="text-[8px] sm:text-[10px] font-mono border-orange-500/30 text-orange-400 bg-orange-500/10 px-1 sm:px-1.5 py-0">
+                clone #{agent.parentAgentId}
+              </Badge>
+            )}
+          </div>
 
-        <div className="grid grid-cols-3 gap-1.5 sm:gap-3 text-[10px] sm:text-xs font-mono">
-          <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
-            <DollarSign className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-green-400" />
-            <p className="text-foreground font-bold truncate">{agent.licensePriceFormatted}</p>
-            <p className="text-muted-foreground text-[8px] sm:text-[10px]">license cost</p>
+          <div className="grid grid-cols-3 gap-1.5 sm:gap-3 text-[10px] sm:text-xs font-mono">
+            <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
+              <DollarSign className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-green-400" />
+              <p className="text-foreground font-bold truncate">{agent.licensePriceFormatted}</p>
+              <p className="text-muted-foreground text-[8px] sm:text-[10px]">license cost</p>
+            </div>
+            <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
+              <Users className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-cyan-400" />
+              <p className="text-foreground font-bold">{agent.licensesMinted}</p>
+              <p className="text-muted-foreground text-[8px] sm:text-[10px]">minted</p>
+            </div>
+            <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
+              <Zap className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-fuchsia-400" />
+              <p className="text-foreground font-bold">
+                {agent.licenses === 0 ? "∞" : agent.licensesAvailable}
+              </p>
+              <p className="text-muted-foreground text-[8px] sm:text-[10px]">available</p>
+            </div>
           </div>
-          <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
-            <Users className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-cyan-400" />
-            <p className="text-foreground font-bold">{agent.licensesMinted}</p>
-            <p className="text-muted-foreground text-[8px] sm:text-[10px]">minted</p>
-          </div>
-          <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
-            <Zap className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-fuchsia-400" />
-            <p className="text-foreground font-bold">
-              {agent.licenses === 0 ? "∞" : agent.licensesAvailable}
-            </p>
-            <p className="text-muted-foreground text-[8px] sm:text-[10px]">available</p>
-          </div>
-        </div>
 
-        {/* Global API Endpoint */}
-        {agent.walletAddress && (
-          <div className="pt-2 border-t border-sidebar-border">
-            <p className="text-[9px] sm:text-[10px] text-muted-foreground mb-1">API Endpoint</p>
-            <code className="text-[9px] sm:text-[10px] font-mono text-cyan-400 break-all block bg-sidebar-accent/50 p-1 sm:p-1.5 rounded">
-              api.compose.market/agent/{agent.walletAddress.slice(0, 8)}...
-            </code>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+          {/* Global API Endpoint */}
+          {agent.walletAddress && (
+            <div className="pt-2 border-t border-sidebar-border">
+              <p className="text-[9px] sm:text-[10px] text-muted-foreground mb-1">API Endpoint</p>
+              <code className="text-[9px] sm:text-[10px] font-mono text-cyan-400 break-all block bg-sidebar-accent/50 p-1 sm:p-1.5 rounded">
+                api.compose.market/agent/{agent.walletAddress.slice(0, 8)}...
+              </code>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </Link>
   );
 }
 
@@ -452,7 +459,11 @@ function ManowarAssetCard({ manowar, chainId }: { manowar: OnchainManowar; chain
     bannerUrl = getIpfsUrl(manowar.image.replace("ipfs://", ""));
   }
 
-  const explorerUrl = `${CHAIN_CONFIG[chainId].explorer}/token/${getContractAddress("Manowar", chainId)}?a=${manowar.id}`;
+  // Use chainId from manowar's first agent metadata (source of truth)
+  const manowarChainId = manowar.metadata?.agents?.[0]?.chain;
+  const explorerUrl = manowarChainId && CHAIN_CONFIG[manowarChainId]
+    ? `${CHAIN_CONFIG[manowarChainId].explorer}/token/${getContractAddress("Manowar", manowarChainId)}?a=${manowar.id}`
+    : null;
 
   // Use wallet address for navigation (primary), fallback to numeric ID
   const manowarPageUrl = manowar.walletAddress
@@ -460,89 +471,92 @@ function ManowarAssetCard({ manowar, chainId }: { manowar: OnchainManowar; chain
     : `/manowar/${manowar.id}`;
 
   return (
-    <Card
-      className="bg-background border-sidebar-border hover:border-fuchsia-500/50 transition-colors overflow-hidden cursor-pointer group"
-      onClick={() => window.location.href = manowarPageUrl}
-    >
-      {bannerUrl ? (
-        <div className="h-24 sm:h-32 bg-cover bg-center" style={{ backgroundImage: `url(${bannerUrl})` }} />
-      ) : (
-        <div className="h-24 sm:h-32 bg-gradient-to-br from-fuchsia-500/20 to-cyan-500/20 flex items-center justify-center">
-          <Layers className="w-10 h-10 sm:w-12 sm:h-12 text-fuchsia-400/50" />
-        </div>
-      )}
-
-      <CardContent className="p-4 sm:p-5 space-y-3 sm:space-y-4">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <h3 className="font-display font-bold text-foreground text-sm sm:text-base truncate group-hover:text-fuchsia-400 transition-colors">
-              {manowar.title || `Workflow #${manowar.id}`}
-            </h3>
-            <p className="text-[10px] sm:text-xs font-mono text-muted-foreground">
-              Manowar #{manowar.id} • ERC7401
-            </p>
+    <Link href={manowarPageUrl} className="block">
+      <Card
+        className="bg-background border-sidebar-border hover:border-fuchsia-500/50 transition-colors overflow-hidden cursor-pointer group"
+      >
+        {bannerUrl ? (
+          <div className="h-24 sm:h-32 bg-cover bg-center" style={{ backgroundImage: `url(${bannerUrl})` }} />
+        ) : (
+          <div className="h-24 sm:h-32 bg-gradient-to-br from-fuchsia-500/20 to-cyan-500/20 flex items-center justify-center">
+            <Layers className="w-10 h-10 sm:w-12 sm:h-12 text-fuchsia-400/50" />
           </div>
-          <a
-            href={explorerUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="p-1 text-muted-foreground hover:text-fuchsia-400 transition-colors shrink-0"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <ExternalLink className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-          </a>
-        </div>
-
-        {manowar.description && (
-          <p className="text-[10px] sm:text-xs text-muted-foreground line-clamp-2">
-            {manowar.description}
-          </p>
         )}
 
-        <div className="flex flex-wrap gap-1 sm:gap-1.5">
-          <Badge variant="outline" className="text-[8px] sm:text-[10px] font-mono border-fuchsia-500/30 text-fuchsia-400 bg-fuchsia-500/10 px-1 sm:px-1.5 py-0">
-            <Sparkles className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
-            nestable NFT
-          </Badge>
-          {manowar.leaseEnabled && (
-            <Badge variant="outline" className="text-[8px] sm:text-[10px] font-mono border-green-500/30 text-green-400 bg-green-500/10 px-1 sm:px-1.5 py-0">
-              <Clock className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
-              leasable ({manowar.leasePercent}%)
-            </Badge>
-          )}
-          {manowar.hasActiveRfa && (
-            <Badge variant="outline" className="text-[8px] sm:text-[10px] font-mono border-yellow-500/30 text-yellow-400 bg-yellow-500/10 px-1 sm:px-1.5 py-0">
-              active RFA
-            </Badge>
-          )}
-          {manowar.coordinatorModel && (
-            <Badge variant="outline" className="text-[8px] sm:text-[10px] font-mono border-purple-500/30 text-purple-400 bg-purple-500/10 px-1 sm:px-1.5 py-0">
-              + coordinator
-            </Badge>
-          )}
-        </div>
+        <CardContent className="p-4 sm:p-5 space-y-3 sm:space-y-4">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <h3 className="font-display font-bold text-foreground text-sm sm:text-base truncate group-hover:text-fuchsia-400 transition-colors">
+                {manowar.title || `Workflow #${manowar.id}`}
+              </h3>
+              <p className="text-[10px] sm:text-xs font-mono text-muted-foreground">
+                Manowar #{manowar.id} • ERC7401
+              </p>
+            </div>
+            {explorerUrl && (
+              <a
+                href={explorerUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-1 text-muted-foreground hover:text-fuchsia-400 transition-colors shrink-0"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <ExternalLink className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+              </a>
+            )}
+          </div>
 
-        <div className="grid grid-cols-3 gap-1.5 sm:gap-3 text-[10px] sm:text-xs font-mono">
-          <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
-            <DollarSign className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-green-400" />
-            <p className="text-foreground font-bold truncate">${manowar.totalPrice}</p>
-            <p className="text-muted-foreground text-[8px] sm:text-[10px]">total cost</p>
-          </div>
-          <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
-            <Layers className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-cyan-400" />
-            <p className="text-foreground font-bold">{manowar.agentIds?.length || 0}</p>
-            <p className="text-muted-foreground text-[8px] sm:text-[10px]">agents</p>
-          </div>
-          <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
-            <Zap className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-fuchsia-400" />
-            <p className="text-foreground font-bold">
-              {manowar.units === 0 ? "∞" : manowar.units - manowar.unitsMinted}
+          {manowar.description && (
+            <p className="text-[10px] sm:text-xs text-muted-foreground line-clamp-2">
+              {manowar.description}
             </p>
-            <p className="text-muted-foreground text-[8px] sm:text-[10px]">avail</p>
+          )}
+
+          <div className="flex flex-wrap gap-1 sm:gap-1.5">
+            <Badge variant="outline" className="text-[8px] sm:text-[10px] font-mono border-fuchsia-500/30 text-fuchsia-400 bg-fuchsia-500/10 px-1 sm:px-1.5 py-0">
+              <Sparkles className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
+              nestable NFT
+            </Badge>
+            {manowar.leaseEnabled && (
+              <Badge variant="outline" className="text-[8px] sm:text-[10px] font-mono border-green-500/30 text-green-400 bg-green-500/10 px-1 sm:px-1.5 py-0">
+                <Clock className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
+                leasable ({manowar.leasePercent}%)
+              </Badge>
+            )}
+            {manowar.hasActiveRfa && (
+              <Badge variant="outline" className="text-[8px] sm:text-[10px] font-mono border-yellow-500/30 text-yellow-400 bg-yellow-500/10 px-1 sm:px-1.5 py-0">
+                active RFA
+              </Badge>
+            )}
+            {manowar.coordinatorModel && (
+              <Badge variant="outline" className="text-[8px] sm:text-[10px] font-mono border-purple-500/30 text-purple-400 bg-purple-500/10 px-1 sm:px-1.5 py-0">
+                + coordinator
+              </Badge>
+            )}
           </div>
-        </div>
-      </CardContent>
-    </Card>
+
+          <div className="grid grid-cols-3 gap-1.5 sm:gap-3 text-[10px] sm:text-xs font-mono">
+            <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
+              <DollarSign className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-green-400" />
+              <p className="text-foreground font-bold truncate">${manowar.totalPrice}</p>
+              <p className="text-muted-foreground text-[8px] sm:text-[10px]">total cost</p>
+            </div>
+            <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
+              <Layers className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-cyan-400" />
+              <p className="text-foreground font-bold">{manowar.agentIds?.length || 0}</p>
+              <p className="text-muted-foreground text-[8px] sm:text-[10px]">agents</p>
+            </div>
+            <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
+              <Zap className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-fuchsia-400" />
+              <p className="text-foreground font-bold">
+                {manowar.units === 0 ? "∞" : manowar.units - manowar.unitsMinted}
+              </p>
+              <p className="text-muted-foreground text-[8px] sm:text-[10px]">avail</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </Link>
   );
 }
 

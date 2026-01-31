@@ -255,8 +255,7 @@ function MintManowarDialog({
       let bannerImageUri = "";
       if (bannerFile) {
         const bannerCid = await uploadManowarBanner(bannerFile, title);
-        // Use HTTPS gateway for Cronos (explorer doesn't resolve ipfs://), ipfs:// for others
-        bannerImageUri = isCronosChain(selectedChainId) ? getIpfsUrl(bannerCid) : getIpfsUri(bannerCid);
+        bannerImageUri = getIpfsUri(bannerCid);
       }
       const mintTimestamp = Math.floor(Date.now() / 1000);
       const dnaHash = computeManowarDnaHash(agentIds, mintTimestamp);
@@ -299,8 +298,7 @@ function MintManowarDialog({
         createdAt: new Date().toISOString(),
       };
       const metadataCid = await uploadManowarMetadata(metadata);
-      // Use HTTPS gateway for Cronos (explorer doesn't resolve ipfs://), ipfs:// for others
-      const manowarCardUri = isCronosChain(selectedChainId) ? getIpfsUrl(metadataCid) : getIpfsUri(metadataCid);
+      const manowarCardUri = getIpfsUri(metadataCid);
       const manowarAddress = getContractAddressForChain("Manowar", selectedChainId);
 
       // Chain-aware transaction: Cronos uses our AA Paymaster, others use ThirdWeb

@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/select";
 import { useOnchainManowars, useManowarsWithRFA, useOnchainAgents, useOpenRFAs, type OnchainManowar, type OnchainAgent, type OnchainRFA } from "@/hooks/use-onchain";
 import { getIpfsUrl } from "@/lib/pinata";
-import { RFA_CATEGORIES, RFA_BOUNTY_LIMITS } from "@/lib/contracts";
+import { RFA_CATEGORIES, RFA_BOUNTY_LIMITS, getContractAddress } from "@/lib/contracts";
 import { CHAIN_CONFIG } from "@/lib/chains";
 import { RFADetails } from "@/components/RFADetails";
 import {
@@ -268,135 +268,142 @@ const ManowarCard = React.memo(function ManowarCard({ manowar }: { manowar: Onch
     : `/manowar/${manowar.id}`;
 
   return (
-    <Card
-      className="glass-panel border-cyan-500/20 hover:border-cyan-500/60 transition-all duration-300 group overflow-hidden cursor-pointer"
-      onClick={() => window.location.href = manowarPageUrl}
-    >
-      {/* Banner */}
-      <div className="h-28 sm:h-36 bg-gradient-to-br from-cyan-500/10 to-fuchsia-500/10 relative overflow-hidden">
-        {bannerUrl ? (
-          <img
-            src={bannerUrl}
-            alt={manowar.title}
-            width={400}
-            height={144}
-            loading="lazy"
-            decoding="async"
-            className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
-          />
-        ) : (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="w-full h-full bg-[linear-gradient(45deg,transparent_25%,rgba(6,182,212,0.1)_25%,rgba(6,182,212,0.1)_50%,transparent_50%,transparent_75%,rgba(6,182,212,0.1)_75%,rgba(6,182,212,0.1)_100%)] bg-[length:20px_20px]"></div>
-            <Layers className="w-10 h-10 sm:w-12 sm:h-12 text-cyan-500/30 absolute" />
-          </div>
-        )}
+    <Link href={manowarPageUrl} className="block">
+      <Card
+        className="glass-panel border-cyan-500/20 hover:border-cyan-500/60 transition-all duration-300 group overflow-hidden cursor-pointer"
+      >
+        {/* Banner */}
+        <div className="h-28 sm:h-36 bg-gradient-to-br from-cyan-500/10 to-fuchsia-500/10 relative overflow-hidden">
+          {bannerUrl ? (
+            <img
+              src={bannerUrl}
+              alt={manowar.title}
+              width={400}
+              height={144}
+              loading="lazy"
+              decoding="async"
+              className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
+            />
+          ) : (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="w-full h-full bg-[linear-gradient(45deg,transparent_25%,rgba(6,182,212,0.1)_25%,rgba(6,182,212,0.1)_50%,transparent_50%,transparent_75%,rgba(6,182,212,0.1)_75%,rgba(6,182,212,0.1)_100%)] bg-[length:20px_20px]"></div>
+              <Layers className="w-10 h-10 sm:w-12 sm:h-12 text-cyan-500/30 absolute" />
+            </div>
+          )}
 
-        {/* Badges */}
-        <div className="absolute top-2 right-2 flex gap-1">
-          {/* Chain badge */}
-          {manowar.metadata?.agents?.[0]?.chain && (() => {
-            const chainId = manowar.metadata.agents[0].chain;
-            const chainInfo = CHAIN_CONFIG[chainId];
-            const colorClass = chainInfo?.color === 'red'
-              ? 'border-red-500/30 text-red-400 bg-red-500/10'
-              : 'border-blue-500/30 text-blue-400 bg-blue-500/10';
-            return (
-              <Badge variant="outline" className={`text-[8px] sm:text-[10px] ${colorClass}`}>
-                {chainInfo?.name || `Chain ${chainId}`}
-              </Badge>
-            );
-          })()}
-          <Badge className="bg-cyan-500/20 text-cyan-400 border-cyan-500/30 text-[8px] sm:text-[10px]">
-            <Sparkles className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
-            ERC-7401
-          </Badge>
-        </div>
-
-        {/* Lease badge */}
-        {manowar.leaseEnabled && (
-          <div className="absolute top-2 left-2">
-            <Badge className="bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30 text-[8px] sm:text-[10px]">
-              <Percent className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
-              Leaseable
+          {/* Badges */}
+          <div className="absolute top-2 right-2 flex gap-1">
+            {/* Chain badge */}
+            {manowar.metadata?.agents?.[0]?.chain && (() => {
+              const chainId = manowar.metadata.agents[0].chain;
+              const chainInfo = CHAIN_CONFIG[chainId];
+              const colorClass = chainInfo?.color === 'red'
+                ? 'border-red-500/30 text-red-400 bg-red-500/10'
+                : 'border-blue-500/30 text-blue-400 bg-blue-500/10';
+              return (
+                <Badge variant="outline" className={`text-[8px] sm:text-[10px] ${colorClass}`}>
+                  {chainInfo?.name || `Chain ${chainId}`}
+                </Badge>
+              );
+            })()}
+            <Badge className="bg-cyan-500/20 text-cyan-400 border-cyan-500/30 text-[8px] sm:text-[10px]">
+              <Sparkles className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
+              ERC-7401
             </Badge>
           </div>
-        )}
-      </div>
 
-      <CardHeader className="p-3 sm:p-4 pb-2">
-        <CardTitle className="text-base sm:text-lg font-display font-bold text-white group-hover:text-cyan-400 transition-colors truncate">
-          {manowar.title || `Manowar #${manowar.id}`}
-        </CardTitle>
-        <CardDescription className="line-clamp-2 text-[10px] sm:text-xs h-7 sm:h-8">
-          {manowar.description || "No description"}
-        </CardDescription>
-      </CardHeader>
-
-      <CardContent className="p-3 sm:p-4 pt-0 space-y-2 sm:space-y-3">
-        {/* Stats Grid */}
-        <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
-          <div className="p-1.5 sm:p-2 bg-background border border-sidebar-border/50 rounded">
-            <p className="text-[8px] sm:text-[10px] text-muted-foreground uppercase">Total Price</p>
-            <div className="flex items-center gap-1">
-              <DollarSign className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-green-400" />
-              <span className="font-mono text-xs sm:text-sm text-green-400 truncate">{manowar.totalPrice} USDC</span>
-            </div>
-          </div>
-          <div className="p-1.5 sm:p-2 bg-background border border-sidebar-border/50 rounded">
-            <p className="text-[8px] sm:text-[10px] text-muted-foreground uppercase">Agents</p>
-            <div className="flex items-center gap-1">
-              <Zap className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-cyan-400" />
-              <span className="font-mono text-xs sm:text-sm text-cyan-400 truncate">{manowar.agentIds?.length || "?"}</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
-          <div className="p-1.5 sm:p-2 bg-background border border-sidebar-border/50 rounded">
-            <p className="text-[8px] sm:text-[10px] text-muted-foreground uppercase">Supply</p>
-            <div className="flex items-center gap-1">
-              <Package className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-cyan-400" />
-              <span className="font-mono text-xs sm:text-sm text-cyan-400">{unitsAvailable}</span>
-            </div>
-          </div>
+          {/* Lease badge */}
           {manowar.leaseEnabled && (
-            <div className="p-1.5 sm:p-2 bg-background border border-sidebar-border/50 rounded">
-              <p className="text-[8px] sm:text-[10px] text-muted-foreground uppercase">Lease</p>
-              <div className="flex items-center gap-1">
-                <Calendar className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-fuchsia-400" />
-                <span className="font-mono text-[10px] sm:text-sm text-fuchsia-400 truncate">{manowar.leaseDuration}d @ {manowar.leasePercent}%</span>
-              </div>
-            </div>
-          )}
-          {manowar.coordinatorModel && (
-            <div className="p-1.5 sm:p-2 bg-background border border-sidebar-border/50 rounded">
-              <p className="text-[8px] sm:text-[10px] text-muted-foreground uppercase">Coordinator</p>
-              <div className="flex items-center gap-1">
-                <Users className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-amber-400" />
-                <span className="font-mono text-[10px] sm:text-sm text-amber-400 truncate">{manowar.coordinatorModel || "Active"}</span>
-              </div>
+            <div className="absolute top-2 left-2">
+              <Badge className="bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30 text-[8px] sm:text-[10px]">
+                <Percent className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
+                Leaseable
+              </Badge>
             </div>
           )}
         </div>
-      </CardContent>
 
-      <CardFooter className="p-3 sm:p-4 pt-0 flex gap-2">
-        <Button
-          className="flex-1 bg-cyan-500 hover:bg-cyan-600 text-black font-bold font-mono text-[10px] sm:text-xs h-8 sm:h-9"
-          onClick={(e) => { e.stopPropagation(); /* TODO: Purchase */ }}
-        >
-          <DollarSign className="w-3 h-3 mr-1" />
-          PURCHASE
-        </Button>
-        <Button
-          variant="outline"
-          className="border-sidebar-border hover:border-cyan-500/50 h-8 sm:h-9 w-8 sm:w-9"
-          onClick={(e) => { e.stopPropagation(); window.open(`https://testnet.snowtrace.io/token/${import.meta.env.VITE_FUJI_MANOWAR_CONTRACT}?a=${manowar.id}`, "_blank"); }}
-        >
-          <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-        </Button>
-      </CardFooter>
-    </Card>
+        <CardHeader className="p-3 sm:p-4 pb-2">
+          <CardTitle className="text-base sm:text-lg font-display font-bold text-white group-hover:text-cyan-400 transition-colors truncate">
+            {manowar.title || `Manowar #${manowar.id}`}
+          </CardTitle>
+          <CardDescription className="line-clamp-2 text-[10px] sm:text-xs h-7 sm:h-8">
+            {manowar.description || "No description"}
+          </CardDescription>
+        </CardHeader>
+
+        <CardContent className="p-3 sm:p-4 pt-0 space-y-2 sm:space-y-3">
+          {/* Stats Grid */}
+          <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
+            <div className="p-1.5 sm:p-2 bg-background border border-sidebar-border/50 rounded">
+              <p className="text-[8px] sm:text-[10px] text-muted-foreground uppercase">Total Price</p>
+              <div className="flex items-center gap-1">
+                <DollarSign className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-green-400" />
+                <span className="font-mono text-xs sm:text-sm text-green-400 truncate">{manowar.totalPrice} USDC</span>
+              </div>
+            </div>
+            <div className="p-1.5 sm:p-2 bg-background border border-sidebar-border/50 rounded">
+              <p className="text-[8px] sm:text-[10px] text-muted-foreground uppercase">Agents</p>
+              <div className="flex items-center gap-1">
+                <Zap className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-cyan-400" />
+                <span className="font-mono text-xs sm:text-sm text-cyan-400 truncate">{manowar.agentIds?.length || "?"}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
+            <div className="p-1.5 sm:p-2 bg-background border border-sidebar-border/50 rounded">
+              <p className="text-[8px] sm:text-[10px] text-muted-foreground uppercase">Supply</p>
+              <div className="flex items-center gap-1">
+                <Package className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-cyan-400" />
+                <span className="font-mono text-xs sm:text-sm text-cyan-400">{unitsAvailable}</span>
+              </div>
+            </div>
+            {manowar.leaseEnabled && (
+              <div className="p-1.5 sm:p-2 bg-background border border-sidebar-border/50 rounded">
+                <p className="text-[8px] sm:text-[10px] text-muted-foreground uppercase">Lease</p>
+                <div className="flex items-center gap-1">
+                  <Calendar className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-fuchsia-400" />
+                  <span className="font-mono text-[10px] sm:text-sm text-fuchsia-400 truncate">{manowar.leaseDuration}d @ {manowar.leasePercent}%</span>
+                </div>
+              </div>
+            )}
+            {manowar.coordinatorModel && (
+              <div className="p-1.5 sm:p-2 bg-background border border-sidebar-border/50 rounded">
+                <p className="text-[8px] sm:text-[10px] text-muted-foreground uppercase">Coordinator</p>
+                <div className="flex items-center gap-1">
+                  <Users className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-amber-400" />
+                  <span className="font-mono text-[10px] sm:text-sm text-amber-400 truncate">{manowar.coordinatorModel || "Active"}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </CardContent>
+
+        <CardFooter className="p-3 sm:p-4 pt-0 flex gap-2">
+          <Button
+            className="flex-1 bg-cyan-500 hover:bg-cyan-600 text-black font-bold font-mono text-[10px] sm:text-xs h-8 sm:h-9"
+            onClick={(e) => { e.stopPropagation(); /* TODO: Purchase */ }}
+          >
+            <DollarSign className="w-3 h-3 mr-1" />
+            PURCHASE
+          </Button>
+          <Button
+            variant="outline"
+            className="border-sidebar-border hover:border-cyan-500/50 h-8 sm:h-9 w-8 sm:w-9"
+            onClick={(e) => {
+              e.stopPropagation();
+              const metadataChainId = manowar.metadata?.agents?.[0]?.chain;
+              if (metadataChainId && CHAIN_CONFIG[metadataChainId]) {
+                window.open(`${CHAIN_CONFIG[metadataChainId].explorer}/token/${getContractAddress("Manowar", metadataChainId)}?a=${manowar.id}`, "_blank");
+              }
+            }}
+          >
+            <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          </Button>
+        </CardFooter>
+      </Card>
+    </Link>
   );
 });
 
@@ -773,124 +780,130 @@ const AgentCard = React.memo(function AgentCard({ agent }: { agent: OnchainAgent
     : `/agent/${agent.id}`;
 
   return (
-    <Card
-      className="glass-panel border-cyan-500/20 hover:border-cyan-500/60 transition-all duration-300 group overflow-hidden cursor-pointer"
-      onClick={() => window.location.href = agentPageUrl}
-    >
-      {/* Header with Avatar */}
-      <CardHeader className="p-3 sm:p-4 pb-2">
-        <div className="flex items-start gap-2 sm:gap-3">
-          <Avatar className="w-10 h-10 sm:w-12 sm:h-12 border-2 border-cyan-500/30 group-hover:border-cyan-500/60 transition-colors shrink-0">
-            <AvatarImage src={avatarUrl || undefined} alt={name} />
-            <AvatarFallback className="bg-cyan-500/10 text-cyan-400 font-mono text-xs sm:text-sm">
-              {initials}
-            </AvatarFallback>
-          </Avatar>
-          <div className="min-w-0 flex-1">
-            <CardTitle className="text-sm sm:text-lg font-display font-bold text-white group-hover:text-cyan-400 transition-colors truncate">
-              {name}
-            </CardTitle>
-            <p className="text-[9px] sm:text-xs font-mono text-muted-foreground mt-0.5 truncate">
-              Agent #{agent.id} • ERC8004
-            </p>
+    <Link href={agentPageUrl} className="block">
+      <Card
+        className="glass-panel border-cyan-500/20 hover:border-cyan-500/60 transition-all duration-300 group overflow-hidden cursor-pointer"
+      >
+        {/* Header with Avatar */}
+        <CardHeader className="p-3 sm:p-4 pb-2">
+          <div className="flex items-start gap-2 sm:gap-3">
+            <Avatar className="w-10 h-10 sm:w-12 sm:h-12 border-2 border-cyan-500/30 group-hover:border-cyan-500/60 transition-colors shrink-0">
+              <AvatarImage src={avatarUrl || undefined} alt={name} />
+              <AvatarFallback className="bg-cyan-500/10 text-cyan-400 font-mono text-xs sm:text-sm">
+                {initials}
+              </AvatarFallback>
+            </Avatar>
+            <div className="min-w-0 flex-1">
+              <CardTitle className="text-sm sm:text-lg font-display font-bold text-white group-hover:text-cyan-400 transition-colors truncate">
+                {name}
+              </CardTitle>
+              <p className="text-[9px] sm:text-xs font-mono text-muted-foreground mt-0.5 truncate">
+                Agent #{agent.id} • ERC8004
+              </p>
+            </div>
           </div>
-        </div>
 
-        {/* Badges */}
-        <div className="flex flex-wrap gap-1 mt-2">
-          {/* Chain badge */}
-          {agent.metadata?.chain && (() => {
-            const chainInfo = CHAIN_CONFIG[agent.metadata.chain];
-            const colorClass = chainInfo?.color === 'red'
-              ? 'border-red-500/30 text-red-400 bg-red-500/10'
-              : 'border-blue-500/30 text-blue-400 bg-blue-500/10';
-            return (
-              <Badge variant="outline" className={`text-[8px] sm:text-[10px] ${colorClass}`}>
-                {chainInfo?.name || `Chain ${agent.metadata.chain}`}
+          {/* Badges */}
+          <div className="flex flex-wrap gap-1 mt-2">
+            {/* Chain badge */}
+            {agent.metadata?.chain && (() => {
+              const chainInfo = CHAIN_CONFIG[agent.metadata.chain];
+              const colorClass = chainInfo?.color === 'red'
+                ? 'border-red-500/30 text-red-400 bg-red-500/10'
+                : 'border-blue-500/30 text-blue-400 bg-blue-500/10';
+              return (
+                <Badge variant="outline" className={`text-[8px] sm:text-[10px] ${colorClass}`}>
+                  {chainInfo?.name || `Chain ${agent.metadata.chain}`}
+                </Badge>
+              );
+            })()}
+            <Badge className="bg-cyan-500/20 text-cyan-400 border-cyan-500/30 text-[8px] sm:text-[10px]">
+              <Sparkles className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
+              on-chain
+            </Badge>
+            {agent.isWarped && (
+              <Badge className="bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30 text-[8px] sm:text-[10px]">
+                <ArrowRightLeft className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
+                warped
               </Badge>
-            );
-          })()}
-          <Badge className="bg-cyan-500/20 text-cyan-400 border-cyan-500/30 text-[8px] sm:text-[10px]">
-            <Sparkles className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
-            on-chain
-          </Badge>
-          {agent.isWarped && (
-            <Badge className="bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30 text-[8px] sm:text-[10px]">
-              <ArrowRightLeft className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
-              warped
-            </Badge>
-          )}
-          {agent.cloneable && (
-            <Badge variant="outline" className="text-[8px] sm:text-[10px] border-purple-500/30 text-purple-400 bg-purple-500/10">
-              cloneable
-            </Badge>
-          )}
-          {agent.isClone && (
-            <Badge variant="outline" className="text-[8px] sm:text-[10px] border-orange-500/30 text-orange-400 bg-orange-500/10">
-              clone
-            </Badge>
-          )}
-        </div>
-      </CardHeader>
+            )}
+            {agent.cloneable && (
+              <Badge variant="outline" className="text-[8px] sm:text-[10px] border-purple-500/30 text-purple-400 bg-purple-500/10">
+                cloneable
+              </Badge>
+            )}
+            {agent.isClone && (
+              <Badge variant="outline" className="text-[8px] sm:text-[10px] border-orange-500/30 text-orange-400 bg-orange-500/10">
+                clone
+              </Badge>
+            )}
+          </div>
+        </CardHeader>
 
-      <CardContent className="p-3 sm:p-4 pt-0 space-y-2 sm:space-y-3">
-        {/* Description */}
-        <CardDescription className="line-clamp-2 text-[10px] sm:text-xs h-7 sm:h-8">
-          {description}
-        </CardDescription>
+        <CardContent className="p-3 sm:p-4 pt-0 space-y-2 sm:space-y-3">
+          {/* Description */}
+          <CardDescription className="line-clamp-2 text-[10px] sm:text-xs h-7 sm:h-8">
+            {description}
+          </CardDescription>
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
-          <div className="p-1.5 sm:p-2 bg-background border border-sidebar-border/50 rounded">
-            <p className="text-[8px] sm:text-[10px] text-muted-foreground uppercase">License Price</p>
-            <div className="flex items-center gap-1">
-              <DollarSign className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-green-400" />
-              <span className="font-mono text-xs sm:text-sm text-green-400 truncate">{agent.licensePriceFormatted}</span>
+          {/* Stats Grid */}
+          <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
+            <div className="p-1.5 sm:p-2 bg-background border border-sidebar-border/50 rounded">
+              <p className="text-[8px] sm:text-[10px] text-muted-foreground uppercase">License Price</p>
+              <div className="flex items-center gap-1">
+                <DollarSign className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-green-400" />
+                <span className="font-mono text-xs sm:text-sm text-green-400 truncate">{agent.licensePriceFormatted}</span>
+              </div>
+            </div>
+            <div className="p-1.5 sm:p-2 bg-background border border-sidebar-border/50 rounded">
+              <p className="text-[8px] sm:text-[10px] text-muted-foreground uppercase">Licenses</p>
+              <div className="flex items-center gap-1">
+                <Package className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-cyan-400" />
+                <span className="font-mono text-xs sm:text-sm text-cyan-400">{licensesDisplay}</span>
+              </div>
             </div>
           </div>
-          <div className="p-1.5 sm:p-2 bg-background border border-sidebar-border/50 rounded">
-            <p className="text-[8px] sm:text-[10px] text-muted-foreground uppercase">Licenses</p>
+
+          {/* x402 Default Price - shows inference cost */}
+          <div className="p-1.5 sm:p-2 bg-gradient-to-r from-cyan-500/10 to-transparent border border-cyan-500/20 rounded">
+            <p className="text-[8px] sm:text-[10px] text-muted-foreground uppercase">x402 Call Price</p>
             <div className="flex items-center gap-1">
-              <Package className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-cyan-400" />
-              <span className="font-mono text-xs sm:text-sm text-cyan-400">{licensesDisplay}</span>
+              <Zap className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-yellow-400" />
+              <span className="font-mono text-xs sm:text-sm text-yellow-400">$0.005 USDC</span>
             </div>
           </div>
-        </div>
+        </CardContent>
 
-        {/* x402 Default Price - shows inference cost */}
-        <div className="p-1.5 sm:p-2 bg-gradient-to-r from-cyan-500/10 to-transparent border border-cyan-500/20 rounded">
-          <p className="text-[8px] sm:text-[10px] text-muted-foreground uppercase">x402 Call Price</p>
-          <div className="flex items-center gap-1">
-            <Zap className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-yellow-400" />
-            <span className="font-mono text-xs sm:text-sm text-yellow-400">$0.005 USDC</span>
-          </div>
-        </div>
-      </CardContent>
-
-      <CardFooter className="p-3 sm:p-4 pt-0 flex gap-1.5 sm:gap-2">
-        <Button
-          className="flex-1 bg-cyan-500 hover:bg-cyan-600 text-black font-bold font-mono text-[9px] sm:text-xs h-8 sm:h-9 px-2 sm:px-3 min-w-0"
-          onClick={(e) => { e.stopPropagation(); window.location.href = agentPageUrl; }}
-        >
-          <Zap className="w-3 h-3 mr-0.5 sm:mr-1 shrink-0" />
-          <span className="truncate">USE IT</span>
-        </Button>
-        <Button
-          variant="outline"
-          className="flex-1 border-fuchsia-500/30 hover:bg-fuchsia-500/10 font-bold font-mono text-[9px] sm:text-xs h-8 sm:h-9 px-2 sm:px-3 min-w-0"
-          onClick={(e) => { e.stopPropagation(); /* TODO: Nest / License */ }}
-        >
-          <Layers className="w-3 h-3 mr-0.5 sm:mr-1 shrink-0" />
-          <span className="truncate">NEST</span>
-        </Button>
-        <Button
-          variant="outline"
-          className="border-sidebar-border hover:border-cyan-500/50 h-8 sm:h-9 w-8 sm:w-9 shrink-0 p-0"
-          onClick={(e) => { e.stopPropagation(); window.open(`https://testnet.snowtrace.io/token/${import.meta.env.VITE_FUJI_AGENT_FACTORY_CONTRACT}?a=${agent.id}`, "_blank"); }}
-        >
-          <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-        </Button>
-      </CardFooter>
-    </Card>
+        <CardFooter className="p-3 sm:p-4 pt-0 flex gap-1.5 sm:gap-2">
+          <Button
+            className="flex-1 bg-cyan-500 hover:bg-cyan-600 text-black font-bold font-mono text-[9px] sm:text-xs h-8 sm:h-9 px-2 sm:px-3 min-w-0"
+          >
+            <Zap className="w-3 h-3 mr-0.5 sm:mr-1 shrink-0" />
+            <span className="truncate">USE IT</span>
+          </Button>
+          <Button
+            variant="outline"
+            className="flex-1 border-fuchsia-500/30 hover:bg-fuchsia-500/10 font-bold font-mono text-[9px] sm:text-xs h-8 sm:h-9 px-2 sm:px-3 min-w-0"
+            onClick={(e) => { e.stopPropagation(); /* TODO: Nest / License */ }}
+          >
+            <Layers className="w-3 h-3 mr-0.5 sm:mr-1 shrink-0" />
+            <span className="truncate">NEST</span>
+          </Button>
+          <Button
+            variant="outline"
+            className="border-sidebar-border hover:border-cyan-500/50 h-8 sm:h-9 w-8 sm:w-9 shrink-0 p-0"
+            onClick={(e) => {
+              e.stopPropagation();
+              const metadataChainId = agent.metadata?.chain;
+              if (metadataChainId && CHAIN_CONFIG[metadataChainId]) {
+                window.open(`${CHAIN_CONFIG[metadataChainId].explorer}/token/${getContractAddress("AgentFactory", metadataChainId)}?a=${agent.id}`, "_blank");
+              }
+            }}
+          >
+            <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          </Button>
+        </CardFooter>
+      </Card>
+    </Link>
   );
 });

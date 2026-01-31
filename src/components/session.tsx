@@ -77,7 +77,7 @@ export function SessionBudgetDialog({
 }: SessionBudgetDialogProps = {}) {
   const { isConnected } = useWalletAccount();
   const { session, isCreating, error, createSession, budgetPresets } = useSession();
-  const [selectedBudget, setSelectedBudget] = useState(budgetPresets[1].value); // Default $5
+  const [selectedBudget, setSelectedBudget] = useState<number>(budgetPresets[1].value);
   const [duration, setDuration] = useState(24); // Default 24 hours
   const [internalOpen, setInternalOpen] = useState(false);
 
