@@ -223,17 +223,20 @@ export default function PlaygroundPage() {
     }
   }, [models, selectedModel]);
 
-  // Clear chat when model is switched to prevent identity persistence
+  // Track the index from which to include messages for current model
+  // Messages before this index are visible but not sent to the model
+  const [conversationStartIndex, setConversationStartIndex] = useState(0);
   const prevModelRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (prevModelRef.current !== null && prevModelRef.current !== selectedModel && messages.length > 0) {
-      console.log(`[playground] Model switched from ${prevModelRef.current} to ${selectedModel}, clearing chat`);
-      setMessages([]);
-      streamedTextRef.current = "";
-      currentAssistantIdRef.current = null;
+      console.log(`[playground] Model switched from ${prevModelRef.current} to ${selectedModel}`);
+      // Model switched: mark current position as start of new context
+      // Previous messages remain visible but won't be sent to new model
+      setConversationStartIndex(messages.length);
     }
     prevModelRef.current = selectedModel;
-  }, [selectedModel, setMessages, messages.length]);
+  }, [selectedModel, messages.length]);
 
   // Fetch model params when selectedModel changes
   useEffect(() => {
@@ -419,7 +422,7 @@ export default function PlaygroundPage() {
           model: selectedModel,
           prompt: userMessage.content,
         };
-        // Send URL for image-to-image instead of base64
+        // Send URL for image-to-image
         if (attachmentUrl && attachmentType === "image") requestBody.image_url = attachmentUrl;
       } else if (outputType === "video") {
         endpoint = `${API_BASE}/v1/videos/generations`;
@@ -427,34 +430,42 @@ export default function PlaygroundPage() {
           model: selectedModel,
           prompt: userMessage.content,
         };
+        // Send URL for image-to-video
+        if (attachmentUrl && attachmentType === "image") requestBody.image_url = attachmentUrl;
       } else if (outputType === "audio") {
         endpoint = `${API_BASE}/v1/audio/speech`;
         requestBody = {
           model: selectedModel,
           input: userMessage.content,
         };
+        // Audio generation doesn't typically take attachments, but include for consistency
+        if (attachmentUrl && attachmentType === "audio") requestBody.audio_url = attachmentUrl;
       } else if (outputType === "embedding") {
         endpoint = `${API_BASE}/v1/embeddings`;
         requestBody = {
           model: selectedModel,
           input: userMessage.content,
         };
+        // Embeddings can process images for multimodal embedding models
+        if (attachmentUrl && attachmentType === "image") requestBody.image_url = attachmentUrl;
       } else {
         // Text/chat generation
         endpoint = `${API_BASE}/v1/chat/completions`;
         requestBody = {
           model: selectedModel,
-          messages: [...messages, userMessage].map(({ role, content }) => ({ role, content })),
+          messages: [...messages.slice(conversationStartIndex), userMessage].map(({ role, content }) => ({ role, content })),
           stream: true,
         };
         if (systemPrompt) {
           (requestBody.messages as unknown[]).unshift({ role: "system", content: systemPrompt });
         }
-        // Send URLs for vision/audio models instead of base64
+        // Send URLs for vision/audio models
         if (attachmentUrl && attachmentType === "image") {
           requestBody.image_url = attachmentUrl;
         } else if (attachmentUrl && attachmentType === "audio") {
           requestBody.audio_url = attachmentUrl;
+        } else if (attachmentUrl && attachmentType === "video") {
+          requestBody.video_url = attachmentUrl;
         }
         // Add Google tools if any are enabled
         if (activeTools) {
@@ -479,11 +490,9 @@ export default function PlaygroundPage() {
       }
 
       // Parse response using unified multimodal handler
-      console.log(`[playground] Starting stream for model: ${selectedModel}`);
       const { parseMultimodalResponse } = await import("@/lib/multimodal");
       const result = await parseMultimodalResponse(response, {
         onStreamChunk: (chunk) => {
-          console.log(`[playground] Chunk received:`, chunk.substring(0, 50));
           streamedTextRef.current += chunk;
           scheduleStreamUpdate(streamedTextRef.current);
         },
@@ -492,7 +501,6 @@ export default function PlaygroundPage() {
         // Handle async video polling
         onVideoPolling: {
           onProgress: (status, progress) => {
-            console.log(`[playground] Video progress: ${status} (${progress ?? 0}%)`);
             updateAssistantMessage(assistantId, {
               content: `Video generating... (${status}${progress ? ` - ${progress}%` : ""})`,
               type: "video",
@@ -559,6 +567,7 @@ export default function PlaygroundPage() {
     setMessages([]);
     setInferenceError(null);
     clearFiles();
+    setConversationStartIndex(0);
     if (uploadedCids.length > 0) cleanupFiles();
   }, [uploadedCids, cleanupFiles, clearFiles, setMessages]);
 
