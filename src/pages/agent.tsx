@@ -565,12 +565,10 @@ export default function AgentDetailPage() {
   if (error || !agent) {
     return (
       <div className="flex flex-col h-[calc(100vh-120px)]">
-        <Link href="/agents">
-          <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-fuchsia-400 -ml-2 mb-3">
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back
-          </Button>
-        </Link>
+        <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-fuchsia-400 -ml-2 mb-3" onClick={() => history.back()}>
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          Back
+        </Button>
 
         <div className="flex-1 flex items-center justify-center border border-dashed border-red-500/30 rounded-lg">
           <div className="text-center">
@@ -587,12 +585,10 @@ export default function AgentDetailPage() {
     <div className="flex flex-col h-[calc(100vh-120px)]">
       {/* Compact Header */}
       <div className="shrink-0 mb-3 flex items-center justify-between">
-        <Link href="/agents">
-          <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-fuchsia-400 -ml-2 h-7 px-2">
-            <ArrowLeft className="w-3.5 h-3.5 mr-1" />
-            <span className="hidden sm:inline">Back</span>
-          </Button>
-        </Link>
+        <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-fuchsia-400 -ml-2 h-7 px-2" onClick={() => history.back()}>
+          <ArrowLeft className="w-3.5 h-3.5 mr-1" />
+          <span className="hidden sm:inline">Back</span>
+        </Button>
 
         <Badge className="bg-cyan-500/20 text-cyan-400 border-cyan-500/30 text-xs">
           <Sparkles className="w-3 h-3 mr-1" />

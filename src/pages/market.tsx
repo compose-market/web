@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useOnchainManowars, useManowarsWithRFA, useOnchainAgents, useOpenRFAs, type OnchainManowar, type OnchainAgent, type OnchainRFA } from "@/hooks/use-onchain";
+import { useTabs } from "@/hooks/use-tabs";
 import { getIpfsUrl } from "@/lib/pinata";
 import { RFA_CATEGORIES, RFA_BOUNTY_LIMITS, getContractAddress } from "@/lib/contracts";
 import { CHAIN_CONFIG } from "@/lib/chains";
@@ -51,6 +52,9 @@ export default function Market() {
   // Defer search filtering so typing stays responsive (Fix 8)
   const deferredQuery = useDeferredValue(searchQuery);
 
+  // Persisted tab state - survives browser back/forward navigation
+  const [activeTab, setActiveTab] = useTabs("market", "manowars");
+
   return (
     <div className="space-y-4 sm:space-y-6 lg:space-y-8">
       {/* Page Header */}
@@ -78,7 +82,7 @@ export default function Market() {
         />
       </div>
 
-      <Tabs defaultValue="manowars" className="w-full">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="bg-sidebar-accent border border-sidebar-border p-1 mb-4 sm:mb-6 lg:mb-8 w-full sm:w-auto">
           <TabsTrigger
             value="manowars"

@@ -499,12 +499,10 @@ export default function ManowarPage() {
     if (manowarError || !manowar) {
         return (
             <div className="flex flex-col h-[calc(100vh-120px)]">
-                <Link href="/my-assets">
-                    <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-fuchsia-400 -ml-2 mb-3">
-                        <ArrowLeft className="w-4 h-4 mr-2" />
-                        Back
-                    </Button>
-                </Link>
+                <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-fuchsia-400 -ml-2 mb-3" onClick={() => history.back()}>
+                    <ArrowLeft className="w-4 h-4 mr-2" />
+                    Back
+                </Button>
 
                 <div className="flex-1 flex items-center justify-center border border-dashed border-red-500/30 rounded-lg">
                     <div className="text-center">
@@ -521,12 +519,10 @@ export default function ManowarPage() {
         <div className="flex flex-col h-[calc(100vh-120px)]">
             {/* Compact Header */}
             <div className="shrink-0 mb-3 flex items-center justify-between">
-                <Link href="/my-assets">
-                    <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-fuchsia-400 -ml-2 h-7 px-2">
-                        <ArrowLeft className="w-3.5 h-3.5 mr-1" />
-                        <span className="hidden sm:inline">Back</span>
-                    </Button>
-                </Link>
+                <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-fuchsia-400 -ml-2 h-7 px-2" onClick={() => history.back()}>
+                    <ArrowLeft className="w-3.5 h-3.5 mr-1" />
+                    <span className="hidden sm:inline">Back</span>
+                </Button>
 
                 <Badge className="bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30 text-xs">
                     <Layers className="w-3 h-3 mr-1" />
