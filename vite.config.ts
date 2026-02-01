@@ -18,6 +18,29 @@ export default defineConfig(() => ({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist"),
     emptyOutDir: true,
+    chunkSizeWarningLimit: 4000, // 4MB - mermaid/thirdweb are large but already code-split
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Core React
+          "vendor-react": ["react", "react-dom"],
+          // ThirdWeb (large)
+          "vendor-thirdweb": ["thirdweb"],
+          // UI components
+          "vendor-radix": [
+            "@radix-ui/react-dialog",
+            "@radix-ui/react-dropdown-menu",
+            "@radix-ui/react-tabs",
+            "@radix-ui/react-tooltip",
+            "@radix-ui/react-select",
+            "@radix-ui/react-scroll-area",
+            "@radix-ui/react-avatar",
+          ],
+          // Query + routing
+          "vendor-data": ["@tanstack/react-query", "wouter"],
+        },
+      },
+    },
   },
   server: {
     port: CLIENT_PORT,
