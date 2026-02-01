@@ -29,8 +29,8 @@ import {
     Cpu,
     Wrench,
 } from "lucide-react";
-import { useChain } from "@/contexts/ChainContext";
 import { CHAIN_CONFIG } from "@/lib/chains";
+import { getContractAddress } from "@/lib/contracts";
 
 export interface AgentCardProps {
     agent: OnchainAgent;
@@ -56,8 +56,10 @@ export function AgentCard({ agent, onCopyEndpoint }: AgentCardProps) {
     const licensesDisplay = agent.licenses === 0 ? "∞" : `${agent.licensesAvailable}/${agent.licenses}`;
     const model = agent.metadata?.model || "Unknown";
     const plugins = agent.metadata?.plugins || [];
-    const { selectedChainId } = useChain();
-    const chainInfo = CHAIN_CONFIG[selectedChainId] || { name: "Unknown" };
+
+    // Use agent's chain from metadata (source of truth)
+    const agentChainId = agent.metadata!.chain;
+    const chainInfo = CHAIN_CONFIG[agentChainId];
     const chainAbbr = chainInfo.name.split(" ")[0].toUpperCase().slice(0, 4);
 
     // API endpoint URL - direct path without double /api/
@@ -92,7 +94,7 @@ export function AgentCard({ agent, onCopyEndpoint }: AgentCardProps) {
                                 <Tooltip>
                                     <TooltipTrigger asChild>
                                         <button
-                                            onClick={() => window.open(`https://testnet.snowtrace.io/token/${import.meta.env.VITE_FUJI_AGENT_FACTORY_CONTRACT}?a=${agent.id}`, "_blank")}
+                                            onClick={() => window.open(`${CHAIN_CONFIG[agentChainId].explorer}/token/${getContractAddress("AgentFactory", agentChainId)}?a=${agent.id}`, "_blank")}
                                             className="text-muted-foreground hover:text-cyan-400 transition-colors shrink-0"
                                         >
                                             <ExternalLink className="w-4 h-4" />
@@ -229,7 +231,7 @@ export function AgentCard({ agent, onCopyEndpoint }: AgentCardProps) {
                             <div className="flex items-center gap-2 mt-3 text-xs text-muted-foreground">
                                 <span>Creator:</span>
                                 <a
-                                    href={`https://testnet.snowtrace.io/address/${agent.creator}`}
+                                    href={`${CHAIN_CONFIG[agentChainId].explorer}/address/${agent.creator}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="text-fuchsia-400 hover:underline font-mono"

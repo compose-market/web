@@ -72,6 +72,8 @@ export interface OnchainManowar {
   // Resolved metadata
   metadata?: ManowarMetadata;
   agentIds?: number[];
+  // Chain where this manowar was minted
+  chainId?: number;
 }
 
 // =============================================================================
@@ -237,6 +239,7 @@ async function fetchManowarData(manowarId: number, chainId?: number): Promise<On
       coordinatorModel: data.coordinatorModel,
       hasActiveRfa: data.hasActiveRfa,
       rfaId: Number(data.rfaId),
+      chainId,
     };
   } catch (error) {
     console.error(`Failed to fetch manowar ${manowarId} on chain ${chainId}:`, error);
@@ -338,7 +341,8 @@ export function useOnchainAgents(options?: { includeMetadata?: boolean }) {
       const chainsAgents = await Promise.all(chainPromises);
       return chainsAgents.flat();
     },
-    staleTime: 30 * 1000, // 30 seconds
+    staleTime: 30 * 1000,
+    gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes // 30 seconds
     retry: 2,
   });
 }
@@ -357,6 +361,7 @@ export function useOnchainAgent(agentId: number | null) {
     },
     enabled: !!agentId,
     staleTime: 30 * 1000,
+    gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
   });
 }
 
@@ -373,6 +378,7 @@ export function useOnchainAgentByWallet(walletAddress: string | null) {
     },
     enabled: !!walletAddress && walletAddress.startsWith("0x"),
     staleTime: 30 * 1000,
+    gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
   });
 }
 
@@ -467,6 +473,7 @@ export function useOnchainManowars(options?: {
       return chainsManowars.flat();
     },
     staleTime: 30 * 1000,
+    gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
     retry: 2,
   });
 }
@@ -508,6 +515,7 @@ export function useOnchainManowar(manowarId: number | null) {
     },
     enabled: !!manowarId,
     staleTime: 30 * 1000,
+    gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
   });
 }
 
@@ -569,6 +577,7 @@ export function useOnchainManowarByWallet(walletAddress: string | null) {
     },
     enabled: !!walletAddress && walletAddress.startsWith("0x"),
     staleTime: 30 * 1000,
+    gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
   });
 }
 
@@ -737,6 +746,7 @@ export function useOpenRFAs() {
       return rfas.filter((r): r is OnchainRFA => r !== null);
     },
     staleTime: 30 * 1000,
+    gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
     retry: 2,
   });
 }
@@ -753,6 +763,7 @@ export function useRFAData(rfaId: number | null) {
     },
     enabled: !!rfaId && rfaId > 0,
     staleTime: 30 * 1000,
+    gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
   });
 }
 
@@ -768,6 +779,7 @@ export function useRFASubmissions(rfaId: number | null) {
     },
     enabled: !!rfaId && rfaId > 0,
     staleTime: 30 * 1000,
+    gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
   });
 }
 
@@ -796,6 +808,7 @@ export function useRFAsByPublisher(publisher: string | undefined) {
     },
     enabled: !!publisher,
     staleTime: 30 * 1000,
+    gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
   });
 }
 
@@ -824,6 +837,7 @@ export function useRFAsForManowar(manowarId: number | null) {
     },
     enabled: !!manowarId && manowarId > 0,
     staleTime: 30 * 1000,
+    gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
   });
 }
 

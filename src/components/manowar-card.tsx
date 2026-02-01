@@ -39,8 +39,7 @@ import {
     ChevronRight,
     ArrowLeft,
 } from "lucide-react";
-import { useChain } from "@/contexts/ChainContext";
-import { CHAIN_CONFIG } from "@/lib/chains";
+import { CHAIN_CONFIG, getContractAddress } from "@/lib/chains";
 
 export interface ManowarCardProps {
     manowar: OnchainManowar;
@@ -64,11 +63,12 @@ export function ManowarCard({ manowar, onCopyEndpoint }: ManowarCardProps) {
 
     const unitsDisplay = manowar.units === 0 ? "∞" : `${manowar.units - manowar.unitsMinted}/${manowar.units}`;
 
-    // Agents from metadata
     const agents = manowar.metadata?.agents || [];
     const selectedAgent = selectedAgentIndex !== null ? agents[selectedAgentIndex] : null;
-    const { selectedChainId } = useChain();
-    const chainInfo = CHAIN_CONFIG[selectedChainId] || { name: "Unknown" };
+
+    // Manowar's minting chain
+    const manowarChainId = manowar.chainId!;
+    const chainInfo = CHAIN_CONFIG[manowarChainId];
     const chainAbbr = chainInfo.name.split(" ")[0].toUpperCase().slice(0, 4);
 
     // API endpoint URL - direct path without double /api/
@@ -261,7 +261,7 @@ export function ManowarCard({ manowar, onCopyEndpoint }: ManowarCardProps) {
                                 <Tooltip>
                                     <TooltipTrigger asChild>
                                         <button
-                                            onClick={() => window.open(`https://testnet.snowtrace.io/token/${import.meta.env.VITE_FUJI_MANOWAR_CONTRACT}?a=${manowar.id}`, "_blank")}
+                                            onClick={() => window.open(`${CHAIN_CONFIG[manowarChainId].explorer}/token/${getContractAddress("Manowar", manowarChainId)}?a=${manowar.id}`, "_blank")}
                                             className="text-muted-foreground hover:text-fuchsia-400 transition-colors shrink-0"
                                         >
                                             <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
@@ -415,7 +415,7 @@ export function ManowarCard({ manowar, onCopyEndpoint }: ManowarCardProps) {
                             <div className="flex items-center gap-1.5 sm:gap-2 mt-2 sm:mt-3 text-[10px] sm:text-xs text-muted-foreground">
                                 <span>Creator:</span>
                                 <a
-                                    href={`https://testnet.snowtrace.io/address/${manowar.creator}`}
+                                    href={`${CHAIN_CONFIG[manowarChainId].explorer}/address/${manowar.creator}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="text-fuchsia-400 hover:underline font-mono"
