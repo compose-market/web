@@ -171,11 +171,11 @@ export default function AgentDetailPage() {
       return;
     }
 
-    // Cronos requires active session for payments (no EIP-3009 fallback for smart wallets)
-    if (isCronosChain(paymentChainId) && (!sessionActive || budgetRemaining <= 0)) {
+    // Require active session for all chains (enables session bypass for <100ms latency)
+    if (!sessionActive || budgetRemaining <= 0) {
       toast({
         title: "Session Required",
-        description: "Cronos payments require an active session. Please create one to continue.",
+        description: "Please create a session to continue. Sessions enable faster responses.",
         variant: "destructive"
       });
       setShowSessionDialog(true);
@@ -214,11 +214,19 @@ export default function AgentDetailPage() {
       setChatStatus("waiting");
 
       // Chain-aware payment: routes to Cronos x402 or ThirdWeb based on selected chain
+      // When session is active, uses session bypass for instant <100ms latency
       const fetchWithPayment = createPaymentFetch({
         chainId: paymentChainId,
         account,
         wallet,
         maxValue: BigInt(inferencePriceWei), // $0.005
+        // Session bypass: skip x402 wallet flow when session is active
+        sessionToken: sessionActive && budgetRemaining > 0 && composeKeyToken ? composeKeyToken : undefined,
+        sessionHeaders: sessionActive && budgetRemaining > 0 ? {
+          'x-session-user-address': account.address,
+          'x-session-active': 'true',
+          'x-session-budget-remaining': budgetRemaining.toString(),
+        } : undefined,
       });
 
       // Use Pinata URL for attachments (not base64)
@@ -243,19 +251,8 @@ export default function AgentDetailPage() {
         const headers: Record<string, string> = {
           "Content-Type": "application/json",
         };
-
         if (userAddress) {
           headers["x-session-user-address"] = userAddress;
-        }
-
-        // Add session headers for x402 payment bypass
-        if (sessionActive && budgetRemaining > 0) {
-          headers["x-session-active"] = "true";
-          headers["x-session-budget-remaining"] = budgetRemaining.toString();
-          // Use Compose Key for backend authentication (enables on-chain settlement)
-          if (composeKeyToken) {
-            headers["Authorization"] = `Bearer ${composeKeyToken}`;
-          }
         }
 
         // Collect granted permissions from sessionStorage (from Backpack)

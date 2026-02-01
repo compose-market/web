@@ -561,7 +561,7 @@ function SessionManageDialog({ open, onOpenChange }: SessionManageDialogProps) {
 
 /**
  * Compose Key Generation Dialog
- * Allows users to generate API keys for external tools (Cursor, VSCode)
+ * Allows users to generate API keys for external tools (Cursor, OpenClaw, OpenCode, ...)
  */
 interface ComposeKeyDialogProps {
   open: boolean;
@@ -636,7 +636,7 @@ function ComposeKeyDialog({ open, onOpenChange }: ComposeKeyDialogProps) {
             Generate API Key
           </DialogTitle>
           <DialogDescription className="text-muted-foreground">
-            Create a key for external tools like Cursor or VSCode.
+            Create a key for external tools like Cursor or OpenClaw.
             Uses your current session budget.
           </DialogDescription>
         </DialogHeader>
@@ -653,7 +653,7 @@ function ComposeKeyDialog({ open, onOpenChange }: ComposeKeyDialogProps) {
                   type="text"
                   value={keyName}
                   onChange={(e) => setKeyName(e.target.value)}
-                  placeholder="e.g., Cursor, VSCode"
+                  placeholder="e.g., Cursor, OpenCode"
                   className="w-full px-3 py-2 bg-sidebar-accent border border-sidebar-border rounded-sm font-mono text-sm focus:border-fuchsia-500 focus:outline-none"
                 />
               </div>
@@ -727,7 +727,7 @@ function ComposeKeyDialog({ open, onOpenChange }: ComposeKeyDialogProps) {
               {/* Usage Instructions */}
               <div className="bg-sidebar-accent rounded-sm p-4 space-y-2 border border-sidebar-border">
                 <p className="text-sm text-muted-foreground font-mono">
-                  Use in Cursor/VSCode settings:
+                  Use in Cursor/OpenCode settings:
                 </p>
                 <code className="block text-xs bg-black/50 p-2 rounded font-mono text-fuchsia-400 break-all">
                   Authorization: Bearer {generatedKey.slice(0, 20)}...

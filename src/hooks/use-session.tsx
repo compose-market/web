@@ -51,7 +51,8 @@ interface StoredSession {
     sessionKeyAddress: string;
     userAddress: string;
     chainId: number;
-    composeKeyToken?: string; // JWT token for Cronos on-chain settlement
+    // NOTE: composeKeyToken only kept in memory 
+    // Then fetched fresh from backend on reload
 }
 
 interface SessionContextValue {
@@ -108,7 +109,7 @@ function loadStoredSession(userAddress: string, expectedChainId: number): Sessio
                 expiresAt: data.expiresAt,
                 sessionKeyAddress: data.sessionKeyAddress,
                 chainId: data.chainId,
-                composeKeyToken: data.composeKeyToken || null,
+                composeKeyToken: null, // Token fetched separately from backend
             };
         }
 
@@ -137,7 +138,6 @@ function saveSession(session: SessionState, userAddress: string): void {
         sessionKeyAddress: session.sessionKeyAddress || "",
         userAddress,
         chainId: session.chainId || paymentChain.id,
-        composeKeyToken: session.composeKeyToken || undefined,
     };
     localStorage.setItem(SESSION_KEY, JSON.stringify(data));
 }
@@ -154,19 +154,49 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const [isCreating, setIsCreating] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // Load session from storage when account or chain changes
+    // Load session from backend API or localStorage when account or chain changes
     useEffect(() => {
         if (!account?.address) {
             setSession(defaultSession);
             return;
         }
 
-        const stored = loadStoredSession(account.address, paymentChainId);
-        if (stored) {
-            setSession(stored);
-        } else {
-            setSession(defaultSession);
-        }
+        // Fetch active session from backend (Redis-backed, survives wallet switching)
+        const fetchSession = async () => {
+            try {
+                const response = await fetch(`${API_BASE}/api/session`, {
+                    headers: {
+                        "x-session-user-address": account.address,
+                        "x-chain-id": paymentChainId.toString(),
+                    },
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.hasSession) {
+                        console.log("[Session] Restored session from backend");
+                        const restoredSession: SessionState = {
+                            isActive: true,
+                            budgetLimit: data.budgetLimit,
+                            budgetUsed: data.budgetUsed,
+                            budgetRemaining: data.budgetRemaining,
+                            expiresAt: data.expiresAt,
+                            sessionKeyAddress: TREASURY_WALLET,
+                            chainId: data.chainId || paymentChainId,
+                            composeKeyToken: data.token,
+                        };
+                        setSession(restoredSession);
+                        // Save metadata to localStorage (token not stored)
+                        saveSession(restoredSession, account.address);
+                        return;
+                    }
+                }
+            } catch (fetchError) {
+                console.warn("[Session] Backend fetch failed, using localStorage");
+            }
+        };
+
+        fetchSession();
     }, [account?.address, paymentChainId]);
 
     // Listen for storage changes from other tabs/windows
@@ -319,7 +349,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                     }
 
                     const keyResult = await keysResponse.json();
-                    console.log("[Session] Compose Key created:", keyResult.keyId);
 
                     // Create new session state with Compose Key token
                     const newSession: SessionState = {
@@ -375,7 +404,34 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                         account,
                     });
 
-                    // Create new session state (no Compose Key for ThirdWeb path)
+                    // Register session with backend to create Compose Key for session bypass
+                    // This enables <100ms latency by skipping x402 payment flow
+                    console.log("[Session] Creating Compose Key for session bypass...");
+                    const keysResponse = await fetch(`${API_BASE}/api/keys`, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "x-session-user-address": account.address,
+                            "x-session-active": "true",
+                        },
+                        body: JSON.stringify({
+                            budgetLimit: budgetWei,
+                            expiresAt,
+                            chainId: paymentChainId,
+                            name: `Session ${new Date().toISOString().slice(0, 10)}`,
+                        }),
+                    });
+
+                    let composeKeyToken: string | null = null;
+                    if (keysResponse.ok) {
+                        const keyResult = await keysResponse.json();
+                        composeKeyToken = keyResult.token;
+                    } else {
+                        // Compose Key creation failed - session still works but with slower x402 flow
+                        console.warn("[Session] Compose Key creation failed, falling back to x402 flow");
+                    }
+
+                    // Create new session state with Compose Key token
                     const newSession: SessionState = {
                         isActive: true,
                         budgetLimit: budgetWei,
@@ -384,7 +440,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                         expiresAt,
                         sessionKeyAddress: TREASURY_WALLET,
                         chainId: paymentChainId,
-                        composeKeyToken: null, // ThirdWeb uses on-chain session keys directly
+                        composeKeyToken,
                     };
 
                     // Save to localStorage first

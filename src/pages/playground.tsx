@@ -343,11 +343,11 @@ export default function PlaygroundPage() {
     if (attachedFiles.some(f => f.uploading)) return;
     if ((!inputValue.trim() && attachedFiles.length === 0) || streaming || !selectedModel) return;
 
-    // Cronos requires active session for payments (no EIP-3009 fallback for smart wallets)
-    if (isCronosChain(paymentChainId) && (!sessionActive || budgetRemaining <= 0)) {
+    // Require active session for all chains (enables session bypass for <100ms latency)
+    if (!sessionActive || budgetRemaining <= 0) {
       toast({
         title: "Session Required",
-        description: "Cronos payments require an active session. Please create one to continue.",
+        description: "Please create a session to continue. Sessions enable faster responses.",
         variant: "destructive"
       });
       setShowSessionDialog(true);
@@ -395,22 +395,23 @@ export default function PlaygroundPage() {
       }
 
       // Chain-aware payment: Cronos uses Cronos x402 V1, others use ThirdWeb x402 V2
+      // When session is active, uses session bypass for instant <100ms latency
       const fetchWithPayment = createPaymentFetch({
         chainId: paymentChainId,
         account,
         wallet,
         maxValue: BigInt(inferencePriceWei),
+        // Session bypass: skip x402 wallet flow when session is active
+        sessionToken: sessionActive && budgetRemaining > 0 && composeKeyToken ? composeKeyToken : undefined,
+        sessionHeaders: sessionActive && budgetRemaining > 0 ? {
+          'x-session-user-address': account.address,
+          'x-session-active': 'true',
+          'x-session-budget-remaining': budgetRemaining.toString(),
+        } : undefined,
       });
 
       const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (sessionActive && budgetRemaining > 0) {
-        headers["x-session-active"] = "true";
-        headers["x-session-budget-remaining"] = budgetRemaining.toString();
-        // Use Compose Key for backend authentication (enables on-chain settlement)
-        if (composeKeyToken) {
-          headers["Authorization"] = `Bearer ${composeKeyToken}`;
-        }
-      }
+      // Note: Session headers are now handled by createPaymentFetch session bypass
 
       // Build request body and select endpoint based on output type
       let requestBody: Record<string, unknown>;

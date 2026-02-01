@@ -132,6 +132,10 @@ export interface PaymentFetchParams {
   wallet: Wallet;
   /** Maximum payment amount in USDC wei (6 decimals) */
   maxValue: bigint;
+  /** Session bypass: compose key token for Authorization header */
+  sessionToken?: string;
+  /** Session bypass: pre-built session headers to include */
+  sessionHeaders?: Record<string, string>;
 }
 
 /**
@@ -141,8 +145,12 @@ export interface PaymentFetchParams {
  * - Cronos chains (338, 25): Uses Cronos x402 V1 with EIP-712 via @crypto.com/facilitator-client
  * - Other EVM chains: Uses ThirdWeb x402 V2
  * 
+ * SESSION BYPASS: When sessionToken is provided, skips x402 payment flow entirely
+ * and uses a simple fetch with session headers for <100ms latency.
+ * 
  * @example
  * ```ts
+ * // Standard x402 flow
  * const paymentFetch = createPaymentFetch({
  *   chainId: 338, // Cronos Testnet
  *   account,
@@ -150,14 +158,22 @@ export interface PaymentFetchParams {
  *   maxValue: BigInt(5000), // $0.005 USDC
  * });
  * 
- * const response = await paymentFetch('https://api.example.com/inference', {
- *   method: 'POST',
- *   body: JSON.stringify({ prompt: 'Hello' }),
+ * // Session bypass flow (instant)
+ * const sessionFetch = createPaymentFetch({
+ *   chainId: 43114,
+ *   account,
+ *   wallet,
+ *   maxValue: BigInt(5000),
+ *   sessionToken: 'compose-abc123...',
+ *   sessionHeaders: {
+ *     'x-session-active': 'true',
+ *     'x-session-budget-remaining': '5000000',
+ *   },
  * });
  * ```
  */
 export function createPaymentFetch(params: PaymentFetchParams): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> {
-  const { chainId, account, wallet, maxValue } = params;
+  const { chainId, account, wallet, maxValue, sessionToken, sessionHeaders } = params;
 
   const chainName = CHAIN_CONFIG[chainId]?.name || `Chain ${chainId}`;
   const isCronos = isCronosChain(chainId);
@@ -171,6 +187,24 @@ export function createPaymentFetch(params: PaymentFetchParams): (input: RequestI
     const headers = new Headers(init?.headers);
     headers.set('X-CHAIN-ID', chainId.toString());
     return { ...init, headers };
+  }
+
+  // SESSION BYPASS: Skip x402 entirely when we have a valid session token
+  // This provides <100ms latency instead of ~2-3s for payment flow
+  if (sessionToken && sessionHeaders) {
+    console.log(`[payment] Using session bypass for chain ${chainId}`);
+    return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const headers = new Headers(init?.headers);
+      headers.set('X-CHAIN-ID', chainId.toString());
+      headers.set('Authorization', `Bearer ${sessionToken}`);
+
+      // Add all session headers
+      for (const [key, value] of Object.entries(sessionHeaders)) {
+        headers.set(key, value);
+      }
+
+      return fetch(input, { ...init, headers });
+    };
   }
 
   if (isCronos) {
