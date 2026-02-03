@@ -28,8 +28,8 @@ const MANOWAR_URL = import.meta.env.VITE_MANOWAR_URL
 // Default prices in USDC wei (6 decimals)
 const PRICES = {
     playground: BigInt(5000),   // $0.005
-    agent: BigInt(5000),        // $0.005
-    manowar: BigInt(10000),     // $0.01 orchestration fee
+    agent: BigInt(10000),        // $0.01
+    manowar: BigInt(50000),     // $0.05 orchestration fee
 } as const;
 
 // =============================================================================

@@ -282,7 +282,7 @@ function MintManowarDialog({
         schemaVersion: "1.0.0",
         title,
         description,
-        image: bannerImageUri ? getIpfsUrl(bannerImageUri.replace("ipfs://", "")) : undefined,
+        image: bannerImageUri,
         dnaHash,
         walletAddress,
         walletTimestamp: mintTimestamp,

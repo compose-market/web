@@ -158,7 +158,10 @@ function ManowarsTab({ searchQuery }: { searchQuery: string }) {
           return parseFloat(b.totalPrice) - parseFloat(a.totalPrice);
         case "newest":
         default:
-          return b.id - a.id;
+          // Sort by minting date (from IPFS metadata), newest first
+          const aDate = a.metadata?.createdAt ? new Date(a.metadata.createdAt).getTime() : 0;
+          const bDate = b.metadata?.createdAt ? new Date(b.metadata.createdAt).getTime() : 0;
+          return bDate - aDate;
       }
     });
 
@@ -423,17 +426,23 @@ function RFAsTab({ searchQuery }: { searchQuery: string }) {
   const [selectedRfaId, setSelectedRfaId] = React.useState<number | null>(null);
   const [showDetails, setShowDetails] = React.useState(false);
 
-  // Filter
+  // Filter and sort by newest
   const filteredRFAs = React.useMemo(() => {
     if (!rfas) return [];
 
-    if (!searchQuery) return rfas;
+    let filtered = rfas;
 
-    const q = searchQuery.toLowerCase();
-    return rfas.filter(rfa =>
-      rfa.title.toLowerCase().includes(q) ||
-      rfa.description.toLowerCase().includes(q)
-    );
+    // Search filter
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      filtered = filtered.filter(rfa =>
+        rfa.title.toLowerCase().includes(q) ||
+        rfa.description.toLowerCase().includes(q)
+      );
+    }
+
+    // Sort by createdAt (newest first)
+    return [...filtered].sort((a, b) => b.createdAt - a.createdAt);
   }, [rfas, searchQuery]);
 
   return (
@@ -664,7 +673,10 @@ function AgentsTab({ searchQuery }: { searchQuery: string }) {
           return parseFloat(b.licensePrice) - parseFloat(a.licensePrice);
         case "newest":
         default:
-          return b.id - a.id;
+          // Sort by minting date (from IPFS metadata), newest first
+          const aDate = a.metadata?.createdAt ? new Date(a.metadata.createdAt).getTime() : 0;
+          const bDate = b.metadata?.createdAt ? new Date(b.metadata.createdAt).getTime() : 0;
+          return bDate - aDate;
       }
     });
 

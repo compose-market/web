@@ -453,12 +453,11 @@ export default function CreateAgent() {
 
     try {
       setMintStep("uploading");
-      // 1. Upload avatar to IPFS (if provided)
-      // Use gateway URL for explorer compatibility (not ipfs:// URI)
-      let avatarUrl = "";
+      // 1. Upload avatar to IPFS
+      let avatarUri = "";
       if (avatarFile) {
         const avatarCid = await uploadAgentAvatar(avatarFile, values.name);
-        avatarUrl = getIpfsUrl(avatarCid); // Use https:// gateway URL for NFT metadata
+        avatarUri = getIpfsUri(avatarCid);
       }
 
       // 2. Compute DNA hash (skills, chainId, model) - matches contract expectation
@@ -481,14 +480,14 @@ export default function CreateAgent() {
         name: values.name,
         description: values.description,
         skills,
-        image: avatarUrl || "none", // Standard NFT metadata field (UI shows as "Avatar")
-        avatar: avatarUrl || "none", // Legacy field for backward compatibility
+        image: avatarUri || "none",
+        avatar: avatarUri || "none",
         dnaHash, // Store computed dnaHash (skills, chainId, model)
-        walletAddress, // Derived from dnaHash + timestamp - single source of truth
+        walletAddress,
         walletTimestamp: timestamp, // Backend needs this to derive the same private key
         chain: chainId,
         model: modelId,
-        framework: values.framework, // ElizaOS or LangChain
+        framework: values.framework,
         licensePrice: usdcToWei(parseFloat(values.licensePrice)).toString(),
         licenses: values.licenses ? parseInt(values.licenses) : 0,
         cloneable: values.isCloneable,

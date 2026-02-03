@@ -242,7 +242,7 @@ export async function pollVideoJob(
     }
 ): Promise<void> {
     const API_BASE = API_BASE_URL || "";
-    const pollInterval = options?.pollIntervalMs || 5000;
+    const pollInterval = options?.pollIntervalMs;
     const maxAttempts = options?.maxAttempts || 120; // 10 minutes max
 
     let attempts = 0;
