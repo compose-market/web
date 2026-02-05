@@ -68,7 +68,7 @@ import { accountAbstraction } from "../lib/chains";
 import { getAgentFactoryContractForChain } from "@/lib/contracts";
 import { submitCronosTransaction, encodeContractCall } from "@/lib/cronos/aa";
 
-const MCP_URL = (import.meta.env.VITE_MCP_URL || "https://mcp.compose.market").replace(/\/+$/, "");
+const MCP_URL = (import.meta.env.VITE_RUNTIME_URL || "https://runtime.compose.market").replace(/\/+$/, "");
 const MANOWAR_URL = (import.meta.env.VITE_MANOWAR_URL || "https://manowar.compose.market").replace(/\/+$/, "");
 
 interface SelectedHFModel {
