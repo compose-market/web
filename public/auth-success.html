@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connected — Compose Market</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #0a0a0f;
+            color: #e0e0e0;
+            font-family: 'Rajdhani', 'Inter', sans-serif;
+        }
+        .container {
+            text-align: center;
+            padding: 2rem;
+        }
+        .check {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            animation: pop 0.4s ease;
+        }
+        .msg {
+            font-size: 1.1rem;
+            color: #00ffc6;
+            margin-bottom: 0.5rem;
+        }
+        .sub {
+            font-size: 0.85rem;
+            color: #888;
+        }
+        @keyframes pop {
+            0%   { transform: scale(0); opacity: 0; }
+            60%  { transform: scale(1.2); }
+            100% { transform: scale(1); opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="check">✅</div>
+        <p class="msg">Connected!</p>
+        <p class="sub">This window will close automatically…</p>
+    </div>
+    <script>
+        // Try to close after a short delay so the user sees the confirmation
+        setTimeout(() => {
+            try { window.close(); } catch (_) {}
+        }, 800);
+        // Fallback: update text if window.close() fails (e.g. not opened via script)
+        setTimeout(() => {
+            document.querySelector('.sub').textContent = 'You can close this tab.';
+        }, 1500);
+    </script>
+</body>
+</html>
