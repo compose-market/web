@@ -17,6 +17,7 @@ import { useChain } from "@/contexts/ChainContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
@@ -35,6 +36,7 @@ import {
     Shield,
     Layers,
     IdCard,
+    StopCircle,
 } from "lucide-react";
 
 const MANOWAR_URL = (import.meta.env.VITE_MANOWAR_URL || "https://manowar.compose.market").replace(/\/+$/, "");
@@ -73,6 +75,9 @@ export default function ManowarPage() {
     const [sending, setSending] = useState(false);
     const [chatError, setChatError] = useState<string | null>(null);
     const [chatStatus, setChatStatus] = useState<"idle" | "paying" | "waiting" | "streaming">("idle");
+    const [continuousEnabled, setContinuousEnabled] = useState(false);
+    const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+    const abortControllerRef = useRef<AbortController | null>(null);
 
     // Session dialog
     const [showSessionDialog, setShowSessionDialog] = useState(false);
@@ -208,6 +213,7 @@ export default function ManowarPage() {
         setSending(true);
         setChatError(null);
         setChatStatus("paying");
+        abortControllerRef.current = new AbortController();
 
         // Create assistant placeholder
         const assistantId = crypto.randomUUID();
@@ -250,6 +256,7 @@ export default function ManowarPage() {
                     threadId = `manowar-${manowar.walletAddress}-user-${userAddress}-${crypto.randomUUID()}`;
                     sessionStorage.setItem(threadKey, threadId);
                 }
+                setActiveThreadId(threadId);
 
                 const headers: Record<string, string> = {
                     "Content-Type": "application/json",
@@ -262,6 +269,7 @@ export default function ManowarPage() {
                 const requestBody: Record<string, unknown> = {
                     message: userMessage.content,
                     threadId: threadId,
+                    continuous: continuousEnabled,
                 };
 
                 // Send Pinata URLs, not base64 data
@@ -278,6 +286,7 @@ export default function ManowarPage() {
                     method: "POST",
                     headers,
                     body: JSON.stringify(requestBody),
+                    signal: abortControllerRef.current?.signal,
                 });
             };
 
@@ -456,6 +465,9 @@ export default function ManowarPage() {
                 }
             }
         } catch (err) {
+            if (err instanceof DOMException && err.name === "AbortError") {
+                return;
+            }
             const errorMsg = err instanceof Error ? err.message : "Unknown error";
             setChatError(errorMsg);
             setMessages(prev =>
@@ -464,8 +476,26 @@ export default function ManowarPage() {
         } finally {
             setSending(false);
             setChatStatus("idle");
+            abortControllerRef.current = null;
         }
-    }, [inputValue, sending, manowar, wallet, toast, attachedFiles, autoRegisterManowar, recordUsage, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, setShowSessionDialog]);
+    }, [inputValue, sending, manowar, wallet, toast, attachedFiles, autoRegisterManowar, recordUsage, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, setShowSessionDialog, continuousEnabled]);
+
+    const handleStopExecution = useCallback(async () => {
+        if (!manowar?.walletAddress || !activeThreadId) return;
+        try {
+            abortControllerRef.current?.abort();
+            await fetch(`${MANOWAR_URL}/manowar/${manowar.walletAddress}/stop`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ threadId: activeThreadId }),
+            });
+            setChatStatus("idle");
+            setSending(false);
+            toast({ title: "Stopped", description: "Workflow execution stopped" });
+        } catch {
+            toast({ title: "Stop failed", description: "Could not stop workflow", variant: "destructive" });
+        }
+    }, [manowar?.walletAddress, activeThreadId, toast]);
 
     const copyEndpoint = () => {
         toast({
@@ -521,10 +551,32 @@ export default function ManowarPage() {
                     <span className="hidden sm:inline">Back</span>
                 </Button>
 
-                <Badge className="bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30 text-xs">
-                    <Layers className="w-3 h-3 mr-1" />
-                    Manowar {manowar.walletAddress?.slice(0, 6)}…{manowar.walletAddress?.slice(-4)}
-                </Badge>
+                <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Checkbox
+                            id="continuous-execution"
+                            checked={continuousEnabled}
+                            onCheckedChange={(val) => setContinuousEnabled(Boolean(val))}
+                        />
+                        <label htmlFor="continuous-execution" className="cursor-pointer select-none">
+                            Continuous (max 5)
+                        </label>
+                    </div>
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-muted-foreground hover:text-red-400 h-7 w-7 p-0"
+                        onClick={handleStopExecution}
+                        disabled={!sending && chatStatus !== "streaming"}
+                        aria-label="Stop workflow"
+                    >
+                        <StopCircle className="w-4 h-4" />
+                    </Button>
+                    <Badge className="bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30 text-xs">
+                        <Layers className="w-3 h-3 mr-1" />
+                        Manowar {manowar.walletAddress?.slice(0, 6)}…{manowar.walletAddress?.slice(-4)}
+                    </Badge>
+                </div>
 
                 {/* Mobile Card Button - only visible on mobile */}
                 <Button
