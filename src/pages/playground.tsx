@@ -414,65 +414,28 @@ export default function PlaygroundPage() {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       // Note: Session headers are now handled by createPaymentFetch session bypass
 
-      // Build request body and select endpoint based on output type
-      let requestBody: Record<string, unknown>;
-      let endpoint: string;
-
-      if (outputType === "image") {
-        endpoint = `${API_BASE}/v1/images/generations`;
-        requestBody = {
-          model: selectedModel,
-          prompt: userMessage.content,
-        };
-        // Send URL for image-to-image
-        if (attachmentUrl && attachmentType === "image") requestBody.image_url = attachmentUrl;
-      } else if (outputType === "video") {
-        endpoint = `${API_BASE}/v1/videos/generations`;
-        requestBody = {
-          model: selectedModel,
-          prompt: userMessage.content,
-        };
-        // Send URL for image-to-video
-        if (attachmentUrl && attachmentType === "image") requestBody.image_url = attachmentUrl;
-      } else if (outputType === "audio") {
-        endpoint = `${API_BASE}/v1/audio/speech`;
-        requestBody = {
-          model: selectedModel,
-          input: userMessage.content,
-        };
-        // Audio generation doesn't typically take attachments, but include for consistency
-        if (attachmentUrl && attachmentType === "audio") requestBody.audio_url = attachmentUrl;
-      } else if (outputType === "embedding") {
-        endpoint = `${API_BASE}/v1/embeddings`;
-        requestBody = {
-          model: selectedModel,
-          input: userMessage.content,
-        };
-        // Embeddings can process images for multimodal embedding models
-        if (attachmentUrl && attachmentType === "image") requestBody.image_url = attachmentUrl;
-      } else {
-        // Text/chat generation
-        endpoint = `${API_BASE}/v1/chat/completions`;
-        requestBody = {
-          model: selectedModel,
-          messages: [...messages.slice(conversationStartIndex), userMessage].map(({ role, content }) => ({ role, content })),
-          stream: true,
-        };
-        if (systemPrompt) {
-          (requestBody.messages as unknown[]).unshift({ role: "system", content: systemPrompt });
-        }
-        // Send URLs for vision/audio models
-        if (attachmentUrl && attachmentType === "image") {
-          requestBody.image_url = attachmentUrl;
-        } else if (attachmentUrl && attachmentType === "audio") {
-          requestBody.audio_url = attachmentUrl;
-        } else if (attachmentUrl && attachmentType === "video") {
-          requestBody.video_url = attachmentUrl;
-        }
-        // Add Google tools if any are enabled
-        if (activeTools) {
-          requestBody.tools = activeTools;
-        }
+      // UNIFIED: Route ALL models through chat completions endpoint
+      // Models decide what they can output based on their actual capabilities, not task type
+      const endpoint = `${API_BASE}/v1/chat/completions`;
+      const requestBody: Record<string, unknown> = {
+        model: selectedModel,
+        messages: [...messages.slice(conversationStartIndex), userMessage].map(({ role, content }) => ({ role, content })),
+        stream: true,
+      };
+      
+      if (systemPrompt) {
+        (requestBody.messages as unknown[]).unshift({ role: "system", content: systemPrompt });
+      }
+      
+      // Universal attachment support: ALL models can receive ANY file type
+      // The model will ignore formats it doesn't understand
+      if (attachmentUrl) {
+        requestBody[`${attachmentType}_url`] = attachmentUrl;
+      }
+      
+      // Add Google tools if any are enabled
+      if (activeTools) {
+        requestBody.tools = activeTools;
       }
 
       const response = await fetchWithPayment(endpoint, {
@@ -797,6 +760,7 @@ export default function PlaygroundPage() {
               variant="playground"
               showHeader={false}
               messages={messages}
+              setMessages={setMessages}
               inputValue={inputValue}
               onInputChange={setInputValue}
               onSend={handleSendMessage}
@@ -816,13 +780,14 @@ export default function PlaygroundPage() {
               scrollContainerRef={scrollContainerRef}
               messagesEndRef={messagesEndRef}
               height="h-full"
+              selectedModel={selectedModel}
               placeholder={
                 !sessionActive
                   ? "Start a session first"
                   : outputType === "image"
                     ? "Describe the image you want to generate..."
-                    : outputType === "audio"
-                      ? "Enter text to convert to speech..."
+                    : outputType === "audio" || selectedModel?.toLowerCase().includes("lyria")
+                      ? "Enter text to convert to speech or describe music to generate..."
                       : attachedFiles.length > 0
                         ? "Describe the uploaded file..."
                         : "Type your message..."
@@ -830,7 +795,7 @@ export default function PlaygroundPage() {
               emptyStateIcon={
                 outputType === "image" ? (
                   <ImageIcon className="h-12 w-12 mx-auto mb-4 opacity-50 text-zinc-500" />
-                ) : outputType === "audio" ? (
+                ) : outputType === "audio" || selectedModel?.toLowerCase().includes("lyria") ? (
                   <Music className="h-12 w-12 mx-auto mb-4 opacity-50 text-zinc-500" />
                 ) : (
                   <Bot className="h-12 w-12 mx-auto mb-4 opacity-50 text-zinc-500" />
@@ -839,8 +804,8 @@ export default function PlaygroundPage() {
               emptyStateText={
                 outputType === "image"
                   ? "Describe an image to generate"
-                  : outputType === "audio"
-                    ? "Enter text to convert to audio"
+                  : outputType === "audio" || selectedModel?.toLowerCase().includes("lyria")
+                    ? "Enter text to convert to audio or describe music to generate"
                     : `Start a conversation with ${selectedModelInfo?.name || "AI"}`
               }
               emptyStateSubtext={
