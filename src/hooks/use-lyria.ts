@@ -86,7 +86,8 @@ export interface UseLyriaWebSocketReturn {
 // Configuration
 // =============================================================================
 
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "ws://localhost:4004/lyria";
+// Use the configured socket URL from environment, append /lyria path
+const SOCKET_URL = `${import.meta.env.VITE_SOCKET_URL}/lyria`;
 
 // =============================================================================
 // Hook
