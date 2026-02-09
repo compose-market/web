@@ -53,6 +53,8 @@ import {
 import mermaid from "mermaid";
 import "katex/dist/katex.min.css";
 import { GenerationCanvas } from "@/components/blur";
+import { LyriaAudioPlayer } from "@/components/lyria-player";
+import { useLyriaWebSocket } from "@/hooks/use-lyria";
 
 // Initialize Mermaid with dark theme
 mermaid.initialize({
@@ -715,6 +717,10 @@ export interface MultimodalCanvasProps {
     scrollContainerRef?: React.RefObject<HTMLDivElement | null>;
     messagesEndRef?: React.RefObject<HTMLDivElement | null>;
     height?: string;
+    /** Selected model ID for Lyria detection */
+    selectedModel?: string;
+    /** Set messages for Lyria integration */
+    setMessages?: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
 }
 
 const canvasVariantConfig = {
@@ -778,15 +784,103 @@ export function MultimodalCanvas({
     scrollContainerRef,
     messagesEndRef,
     height = "h-64",
+    selectedModel,
+    setMessages,
 }: MultimodalCanvasProps) {
     const config = canvasVariantConfig[variant];
+
+    // ==========================================================================
+    // Lyria RealTime Integration
+    // ==========================================================================
+    const isLyriaModel = selectedModel?.toLowerCase().includes("lyria");
+    const lyria = useLyriaWebSocket();
+    const [lyriaMessageId, setLyriaMessageId] = useState<string | null>(null);
+
+    // Handle Lyria send - intercepts regular onSend for Lyria models
+    const handleSend = useCallback(() => {
+        if (isLyriaModel && setMessages) {
+            // Create user message
+            const userMessage: ChatMessage = {
+                id: crypto.randomUUID(),
+                role: "user",
+                content: inputValue.trim(),
+                timestamp: Date.now(),
+                type: "text",
+            };
+            setMessages((prev) => [...prev, userMessage]);
+
+            // Create assistant placeholder
+            const assistantId = crypto.randomUUID();
+            setLyriaMessageId(assistantId);
+            setMessages((prev) => [
+                ...prev,
+                {
+                    id: assistantId,
+                    role: "assistant",
+                    content: "🎵 Lyria RealTime Music Generation\n\nClick Play to start generating music...",
+                    timestamp: Date.now(),
+                    type: "audio",
+                },
+            ]);
+
+            // Connect and configure Lyria
+            if (lyria.state === "idle" || lyria.state === "closed" || lyria.state === "error") {
+                lyria.connect();
+            }
+            lyria.setPrompt(inputValue.trim() || "ambient electronic music");
+
+            // Clear input
+            onInputChange("");
+        } else {
+            // Regular send for non-Lyria models
+            onSend();
+        }
+    }, [isLyriaModel, setMessages, inputValue, onSend, onInputChange, lyria]);
+
+    // Update Lyria message status based on connection state
+    useEffect(() => {
+        if (!isLyriaModel || !lyriaMessageId || !setMessages) return;
+
+        let statusMessage = "";
+        switch (lyria.state) {
+            case "connecting":
+                statusMessage = "🎵 Connecting to Lyria RealTime...";
+                break;
+            case "connected":
+                statusMessage = "🎵 Connected! Waiting for session ready...";
+                break;
+            case "ready":
+                statusMessage = `🎵 Lyria RealTime Ready\n\nPrompt: "${inputValue}"\n\nClick Play to start generating music`;
+                break;
+            case "playing":
+                statusMessage = `🎵 Generating music...\n\n${lyria.audioQueue.length} audio chunks received`;
+                break;
+            case "paused":
+                statusMessage = "🎵 Music generation paused";
+                break;
+            case "error":
+                statusMessage = `🎵 Error: ${lyria.error || "Unknown error"}`;
+                break;
+            case "closed":
+                statusMessage = "🎵 Lyria session closed";
+                break;
+        }
+
+        if (statusMessage) {
+            setMessages((prev) =>
+                prev.map((m) =>
+                    m.id === lyriaMessageId ? { ...m, content: statusMessage } : m
+                )
+            );
+        }
+    }, [lyria.state, lyria.audioQueue.length, lyria.error, isLyriaModel, lyriaMessageId, setMessages, inputValue]);
 
     const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
         if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
-            onSend();
+            handleSend();
         }
-    }, [onSend]);
+    }, [handleSend]);
 
     const canSend = !sending && (inputValue.trim() || attachedFiles.length > 0);
     const isUploading = attachedFiles.some(f => f.uploading);
@@ -822,15 +916,39 @@ export function MultimodalCanvas({
                 ) : (
                     <div className="space-y-4">
                         {messages.map((msg) => (
-                            <ChatMessageItem
-                                key={msg.id}
-                                message={msg}
-                                variant={variant}
-                                showActions={showMessageActions}
-                                onCopy={onCopyMessage}
-                                onRetry={onRetryMessage}
-                                onDelete={onDeleteMessage}
-                            />
+                            <React.Fragment key={msg.id}>
+                                <ChatMessageItem
+                                    message={msg}
+                                    variant={variant}
+                                    showActions={showMessageActions}
+                                    onCopy={onCopyMessage}
+                                    onRetry={onRetryMessage}
+                                    onDelete={onDeleteMessage}
+                                />
+                                {/* Lyria Audio Player for Lyria messages */}
+                                {isLyriaModel && msg.id === lyriaMessageId && (
+                                    <LyriaAudioPlayer
+                                        audioQueue={lyria.audioQueue}
+                                        isPlaying={lyria.state === "playing"}
+                                        onPlay={lyria.play}
+                                        onPause={lyria.pause}
+                                        onStop={() => {
+                                            lyria.stop();
+                                            if (setMessages) {
+                                                setMessages((prev) =>
+                                                    prev.map((m) =>
+                                                        m.id === lyriaMessageId
+                                                            ? { ...m, content: "🎵 Music generation stopped" }
+                                                            : m
+                                                    )
+                                                );
+                                            }
+                                        }}
+                                        onClearQueue={lyria.clearAudioQueue}
+                                        config={lyria.currentConfig}
+                                    />
+                                )}
+                            </React.Fragment>
                         ))}
                         <div ref={messagesEndRef} />
                     </div>
@@ -931,7 +1049,7 @@ export function MultimodalCanvas({
                         disabled={sending}
                     />
 
-                    <Button onClick={onSend} disabled={!canSend || isUploading} className={config.sendButton}>
+                    <Button onClick={handleSend} disabled={!canSend || isUploading} className={config.sendButton}>
                         {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : variant === "manowar" ? <Play className="w-4 h-4" /> : <Send className="w-4 h-4" />}
                     </Button>
                 </div>
