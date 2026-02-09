@@ -209,7 +209,7 @@ const FEATURED_PROVIDERS: ProviderDisplay[] = [
         name: "WhatsApp",
         logo: "https://logos.composio.dev/api/whatsapp",
         color: "#25D366",
-        description: "Link your WhatsApp account",
+        description: "Scan QR to link your account",
         connectionType: "channel",
     },
 ];
@@ -813,13 +813,13 @@ export function BackpackDialog({
         return (
             <Fragment key={provider.slug}>
                 <div
-                    className={`flex items-center justify-between p-3 rounded-lg bg-background/50 border border-sidebar-border transition-colors hover:border-cyan-500/20 ${isDisabled ? "opacity-60" : ""
+                    className={`flex items-center justify-between p-3 rounded-lg bg-zinc-900/50 border border-zinc-800 ${isDisabled ? "opacity-60" : ""
                         }`}
                 >
                     <div className="flex items-center gap-3">
                         <div
                             className="w-10 h-10 rounded-lg flex items-center justify-center overflow-hidden"
-                            style={{ backgroundColor: `${provider.color}20` }}
+                            style={{ backgroundColor: `${provider.color}15` }}
                         >
                             <img
                                 src={provider.logo}
@@ -831,15 +831,15 @@ export function BackpackDialog({
                             />
                         </div>
                         <div className="min-w-0 flex-1">
-                            <div className="text-sm font-medium text-foreground truncate flex items-center gap-1.5">
+                            <div className="text-sm font-medium text-zinc-200 truncate flex items-center gap-1.5">
                                 {provider.name}
                                 {provider.badge && (
-                                    <Badge variant="outline" className="text-[10px] px-1 py-0 border-sidebar-border text-muted-foreground font-normal">
+                                    <Badge variant="outline" className="text-[10px] px-1 py-0 border-zinc-600 text-zinc-400 font-normal">
                                         {provider.badge}
                                     </Badge>
                                 )}
                             </div>
-                            <div className="text-xs text-muted-foreground truncate">
+                            <div className="text-xs text-zinc-500 truncate">
                                 {isConnected ? (
                                     <span className="flex items-center gap-1 text-green-400">
                                         <Check className="w-3 h-3" /> Connected
@@ -888,12 +888,8 @@ export function BackpackDialog({
                                 </>
                             ) : isChannel && provider.slug === "whatsapp" ? (
                                 <>
-                                    {isMobile ? (
-                                        <Smartphone className="w-3 h-3 mr-1" />
-                                    ) : (
-                                        <QrCode className="w-3 h-3 mr-1" />
-                                    )}
-                                    Connect
+                                    <QrCode className="w-3 h-3 mr-1" />
+                                    Scan QR
                                 </>
                             ) : isChannel ? (
                                 <>
@@ -927,11 +923,11 @@ export function BackpackDialog({
                 </DialogTrigger>
             )}
 
-            <DialogContent className="w-full max-w-[100vw] sm:max-w-lg max-h-[85vh] sm:max-h-[85vh] h-[100dvh] sm:h-auto overflow-hidden flex flex-col glass-panel border-cyan-500/20">
+            <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-hidden flex flex-col">
                 <DialogHeader>
-                    <DialogTitle className="flex items-center gap-2 font-display">
+                    <DialogTitle className="flex items-center gap-2">
                         <Backpack className="w-5 h-5 text-fuchsia-400" />
-                        <span className="neon-text">Your Backpack</span>
+                        Your Backpack
                     </DialogTitle>
                     <DialogDescription>
                         Manage permissions and connected accounts for AI agents.
@@ -944,7 +940,7 @@ export function BackpackDialog({
                         <Button
                             variant="ghost"
                             size="sm"
-                            className="self-start gap-1.5 text-muted-foreground hover:text-cyan-400 -ml-2"
+                            className="self-start gap-1.5 text-zinc-400 hover:text-zinc-200 -ml-2"
                             onClick={cancelWhatsApp}
                         >
                             <ArrowLeft className="w-4 h-4" />
@@ -963,8 +959,8 @@ export function BackpackDialog({
                                 />
                             </div>
                             <div>
-                                <h3 className="text-base font-semibold text-foreground">Connect WhatsApp</h3>
-                                <p className="text-xs text-muted-foreground">
+                                <h3 className="text-base font-semibold text-zinc-100">Connect WhatsApp</h3>
+                                <p className="text-xs text-zinc-400">
                                     {isMobile
                                         ? "Link your WhatsApp account"
                                         : "Scan with your phone to link"}
@@ -977,16 +973,16 @@ export function BackpackDialog({
                                 /* ===== Mobile: Phone pairing code ===== */
                                 whatsappPairingCode ? (
                                     <div className="flex flex-col items-center gap-4 py-4">
-                                        <div className="text-sm text-foreground/80 text-center">
+                                        <div className="text-sm text-zinc-300 text-center">
                                             Enter this code in WhatsApp to link:
                                         </div>
-                                        <div className="font-mono text-3xl font-bold tracking-[0.3em] text-green-400 bg-background px-6 py-4 rounded-xl border border-sidebar-border">
+                                        <div className="font-mono text-3xl font-bold tracking-[0.3em] text-green-400 bg-zinc-900 px-6 py-4 rounded-xl border border-zinc-700">
                                             {whatsappPairingCode}
                                         </div>
-                                        <p className="text-xs text-muted-foreground text-center">
+                                        <p className="text-xs text-zinc-500 text-center">
                                             WhatsApp → Linked Devices → Link a Device
                                         </p>
-                                        <div className="flex items-center gap-2 text-xs text-muted-foreground/70">
+                                        <div className="flex items-center gap-2 text-xs text-zinc-600">
                                             <Loader2 className="w-3 h-3 animate-spin" />
                                             Waiting for pairing...
                                         </div>
@@ -994,7 +990,7 @@ export function BackpackDialog({
                                 ) : whatsappQrLoading ? (
                                     <div className="flex flex-col items-center gap-3 py-8">
                                         <Loader2 className="w-10 h-10 animate-spin text-green-500" />
-                                        <span className="text-sm text-muted-foreground">Generating pairing code...</span>
+                                        <span className="text-sm text-zinc-400">Generating pairing code...</span>
                                     </div>
                                 ) : (
                                     <form
@@ -1008,17 +1004,17 @@ export function BackpackDialog({
                                             }
                                         }}
                                     >
-                                        <p className="text-xs text-muted-foreground text-center leading-relaxed">
-                                            Your number is only used to generate a one-time linking code.
+                                        <p className="text-xs text-zinc-500 text-center leading-relaxed">
+                                            Enter your full number with country code (no + or spaces).
+                                            It's only used to generate a one-time linking code.
                                             Compose never stores or shares your data.
-                                            On desktop, you can link via QR code instead.
                                         </p>
                                         <input
                                             type="tel"
-                                            placeholder="e.g. +1 415 555 1234"
+                                            placeholder="e.g. 14155551234"
                                             value={whatsappPhoneInput}
                                             onChange={(e) => setWhatsappPhoneInput(e.target.value)}
-                                            className="w-full px-4 py-2.5 rounded-lg bg-background border border-sidebar-border text-foreground text-center font-mono text-lg placeholder:text-muted-foreground focus:outline-none focus:border-green-500 transition-colors"
+                                            className="w-full px-4 py-2.5 rounded-lg bg-zinc-900 border border-zinc-700 text-zinc-100 text-center font-mono text-lg placeholder:text-zinc-600 focus:outline-none focus:border-green-500 transition-colors"
                                             autoFocus
                                         />
                                         <Button
@@ -1036,7 +1032,7 @@ export function BackpackDialog({
                                     {whatsappQrLoading ? (
                                         <div className="flex flex-col items-center gap-3 py-8">
                                             <Loader2 className="w-10 h-10 animate-spin text-green-500" />
-                                            <span className="text-sm text-muted-foreground">Generating QR code...</span>
+                                            <span className="text-sm text-zinc-400">Generating QR code...</span>
                                         </div>
                                     ) : whatsappQr ? (
                                         <>
@@ -1048,21 +1044,21 @@ export function BackpackDialog({
                                                 />
                                             </div>
                                             <div className="flex flex-col items-center gap-1.5">
-                                                <div className="flex items-center gap-2 text-sm text-foreground/80">
+                                                <div className="flex items-center gap-2 text-sm text-zinc-300">
                                                     <Smartphone className="w-4 h-4 text-green-400" />
                                                     Scan with WhatsApp
                                                 </div>
-                                                <p className="text-xs text-muted-foreground text-center">
+                                                <p className="text-xs text-zinc-500 text-center">
                                                     Open WhatsApp → Settings → Linked Devices → Link a Device
                                                 </p>
                                             </div>
-                                            <div className="flex items-center gap-2 text-xs text-muted-foreground/70 mt-2">
+                                            <div className="flex items-center gap-2 text-xs text-zinc-600 mt-2">
                                                 <Loader2 className="w-3 h-3 animate-spin" />
                                                 Waiting for scan...
                                             </div>
                                         </>
                                     ) : (
-                                        <div className="text-sm text-muted-foreground py-4">
+                                        <div className="text-sm text-zinc-400 py-4">
                                             QR code not available. Please try again.
                                         </div>
                                     )}
@@ -1098,14 +1094,14 @@ export function BackpackDialog({
                             {/* Permissions Tab */}
                             <TabsContent value="permissions" className="flex-1 overflow-y-auto mt-4 space-y-3">
                                 {PERMISSION_TYPES.map(perm => (
-                                    <div key={perm.type} className="flex items-center justify-between p-3 rounded-lg bg-background/50 border border-sidebar-border transition-colors hover:border-cyan-500/20">
+                                    <div key={perm.type} className="flex items-center justify-between p-3 rounded-lg bg-zinc-900/50 border border-zinc-800">
                                         <div className="flex items-center gap-3">
-                                            <div className="p-2 rounded-md bg-muted text-muted-foreground">
+                                            <div className="p-2 rounded-md bg-zinc-800 text-zinc-400">
                                                 {perm.icon}
                                             </div>
                                             <div>
-                                                <div className="text-sm font-medium text-foreground">{perm.label}</div>
-                                                <div className="text-xs text-muted-foreground">{perm.description}</div>
+                                                <div className="text-sm font-medium text-zinc-200">{perm.label}</div>
+                                                <div className="text-xs text-zinc-500">{perm.description}</div>
                                             </div>
                                         </div>
 
@@ -1132,18 +1128,18 @@ export function BackpackDialog({
                                 {/* Search + Refresh row */}
                                 <div className="flex items-center gap-2 mb-2">
                                     <div className="relative flex-1">
-                                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500" />
                                         <input
                                             type="text"
                                             placeholder="Search 870+ integrations..."
                                             value={searchQuery}
                                             onChange={(e) => setSearchQuery(e.target.value)}
-                                            className="w-full h-8 pl-8 pr-8 text-sm bg-background/50 border border-sidebar-border rounded-md text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-colors"
+                                            className="w-full h-8 pl-8 pr-8 text-sm bg-zinc-900/80 border border-zinc-700 rounded-md text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-fuchsia-500/50 focus:ring-1 focus:ring-fuchsia-500/20 transition-colors"
                                         />
                                         {searchQuery && (
                                             <button
                                                 onClick={() => setSearchQuery("")}
-                                                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                                className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
                                             >
                                                 <X className="w-3.5 h-3.5" />
                                             </button>
@@ -1152,7 +1148,7 @@ export function BackpackDialog({
                                     <Button
                                         variant="ghost"
                                         size="sm"
-                                        className="h-8 px-2 text-xs text-muted-foreground hover:text-cyan-400 shrink-0"
+                                        className="h-8 px-2 text-xs text-zinc-400 hover:text-zinc-200 shrink-0"
                                         onClick={fetchConnections}
                                         disabled={refreshing}
                                     >
@@ -1165,13 +1161,13 @@ export function BackpackDialog({
                                 {searchQuery.trim() && (
                                     <div className="space-y-2">
                                         {searching && (
-                                            <div className="flex items-center justify-center py-4 text-muted-foreground text-sm">
+                                            <div className="flex items-center justify-center py-4 text-zinc-500 text-sm">
                                                 <Loader2 className="w-4 h-4 animate-spin mr-2" />
                                                 Searching...
                                             </div>
                                         )}
                                         {!searching && filteredSearchResults.length === 0 && searchResults.length === 0 && (
-                                            <div className="text-center py-4 text-muted-foreground text-sm">
+                                            <div className="text-center py-4 text-zinc-500 text-sm">
                                                 No integrations found for "{searchQuery}"
                                             </div>
                                         )}
@@ -1179,7 +1175,7 @@ export function BackpackDialog({
                                             renderProviderCard(toolkitToProvider(tk))
                                         )}
                                         {filteredSearchResults.length > 0 && (
-                                            <div className="border-t border-sidebar-border my-3" />
+                                            <div className="border-t border-zinc-800 my-3" />
                                         )}
                                     </div>
                                 )}
@@ -1188,7 +1184,7 @@ export function BackpackDialog({
                                 {(!searchQuery.trim() || filteredSearchResults.length > 0 || searchResults.some(sr => featuredSlugs.has(sr.slug))) && (
                                     <>
                                         {searchQuery.trim() && (
-                                            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+                                            <div className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-2">
                                                 Popular
                                             </div>
                                         )}
@@ -1198,7 +1194,7 @@ export function BackpackDialog({
                                     </>
                                 )}
 
-                                <p className="text-xs text-muted-foreground text-center pt-4">
+                                <p className="text-xs text-zinc-500 text-center pt-4">
                                     Compose Market never sees or stores your tokens.
                                 </p>
                             </TabsContent>
