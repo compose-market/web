@@ -79,6 +79,7 @@ const TASK_COLORS: Record<string, { bg: string; text: string; border: string }> 
   "text-to-audio": { bg: "bg-violet-500/20", text: "text-violet-400", border: "border-violet-500/40" },
   "text-to-speech": { bg: "bg-amber-500/20", text: "text-amber-400", border: "border-amber-500/40" },
   "automatic-speech-recognition": { bg: "bg-yellow-500/20", text: "text-yellow-400", border: "border-yellow-500/40" },
+  "speech-to-text": { bg: "bg-yellow-600/20", text: "text-yellow-500", border: "border-yellow-600/40" },
   "feature-extraction": { bg: "bg-cyan-500/20", text: "text-cyan-400", border: "border-cyan-500/40" },
   "sentence-similarity": { bg: "bg-sky-500/20", text: "text-sky-400", border: "border-sky-500/40" },
   "text-classification": { bg: "bg-blue-500/20", text: "text-blue-400", border: "border-blue-500/40" },
