@@ -1005,8 +1005,9 @@ export function BackpackDialog({
                                         }}
                                     >
                                         <p className="text-xs text-zinc-500 text-center leading-relaxed">
-                                            <strong className="text-zinc-400">Important:</strong> Enter the exact phone number your WhatsApp is registered to (with country code, no + or spaces).
-                                            If you're unsure, check WhatsApp → Settings → tap your profile.
+                                            Enter your full number with country code (no + or spaces).
+                                            It's only used to generate a one-time linking code.
+                                            Compose never stores or shares your data.
                                         </p>
                                         <input
                                             type="tel"

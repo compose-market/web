@@ -194,7 +194,6 @@ export interface PluginTesterProps {
     sessionActive: boolean;
     budgetRemaining: number;
     formatBudget: (n: number) => string;
-    recordUsage: () => void;
     /** Initial source from URL params */
     initialSource?: PluginSource;
     /** Initial plugin/server from URL params */
@@ -209,7 +208,6 @@ export function PluginTester({
     sessionActive,
     budgetRemaining,
     formatBudget,
-    recordUsage,
     initialSource = "goat",
     initialPlugin = "",
 }: PluginTesterProps) {
@@ -381,7 +379,6 @@ export function PluginTester({
             };
 
             setPluginResults(prev => [...prev, result]);
-            if (data.success) recordUsage();
         } catch (err) {
             const errorMsg = err instanceof Error ? err.message : "Unknown error";
             setPluginError(errorMsg);
@@ -392,7 +389,7 @@ export function PluginTester({
         } finally {
             setExecutingPlugin(false);
         }
-    }, [selectedPlugin, selectedTool, toolArgs, executingPlugin, wallet, sessionActive, budgetRemaining, recordUsage]);
+    }, [selectedPlugin, selectedTool, toolArgs, executingPlugin, wallet, sessionActive, budgetRemaining]);
 
     // ==========================================================================
     // MCP Handlers
@@ -490,7 +487,6 @@ export function PluginTester({
             };
 
             setPluginResults(prev => [...prev, result]);
-            if (data.success) recordUsage();
         } catch (err) {
             const errorMsg = err instanceof Error ? err.message : "Unknown error";
             setPluginError(errorMsg);
@@ -501,7 +497,7 @@ export function PluginTester({
         } finally {
             setExecutingPlugin(false);
         }
-    }, [selectedMcpServer, selectedTool, toolArgs, executingPlugin, wallet, sessionActive, budgetRemaining, recordUsage]);
+    }, [selectedMcpServer, selectedTool, toolArgs, executingPlugin, wallet, sessionActive, budgetRemaining]);
 
     // ==========================================================================
     // Eliza Handlers
@@ -640,7 +636,6 @@ export function PluginTester({
             };
 
             setPluginResults(prev => [...prev, result]);
-            if (data.success) recordUsage();
         } catch (err) {
             const errorMsg = err instanceof Error ? err.message : "Unknown error";
             setPluginError(errorMsg);
@@ -651,7 +646,7 @@ export function PluginTester({
         } finally {
             setExecutingPlugin(false);
         }
-    }, [selectedElizaPlugin, selectedElizaAction, toolArgs, executingPlugin, wallet, sessionActive, budgetRemaining, recordUsage]);
+    }, [selectedElizaPlugin, selectedElizaAction, toolArgs, executingPlugin, wallet, sessionActive, budgetRemaining]);
 
     // ==========================================================================
     // Source Change Handler

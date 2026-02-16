@@ -253,10 +253,13 @@ function EmbeddingBlock({ content }: { content: string }) {
 
     return (
         <div className="border border-emerald-500/30 rounded-lg overflow-hidden bg-emerald-500/5">
-            <button
+            <div
                 onClick={() => setIsOpen(!isOpen)}
-                className="w-full flex items-center justify-between px-3 py-2 text-xs text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 transition-colors"
+                className="w-full flex items-center justify-between px-3 py-2 text-xs text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 transition-colors cursor-pointer"
                 title="Toggle Embedding Vector"
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
             >
                 <span className="flex items-center gap-2 font-medium">
                     <span className="text-emerald-500">📊</span>
@@ -267,12 +270,13 @@ function EmbeddingBlock({ content }: { content: string }) {
                         onClick={(e) => { e.stopPropagation(); handleCopy(); }}
                         className="p-1 rounded hover:bg-emerald-500/20 transition-colors"
                         title="Copy raw embedding"
+                        type="button"
                     >
                         {copied ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
                     </button>
                     {isOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                 </div>
-            </button>
+            </div>
             {isOpen && (
                 <div className="px-3 py-2 border-t border-emerald-500/20 bg-black/30 animate-in fade-in slide-in-from-top-1 duration-200">
                     <pre className="text-xs font-mono text-emerald-300/80 overflow-auto max-h-80 whitespace-pre leading-relaxed">
