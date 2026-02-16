@@ -26,6 +26,7 @@ import {
 import { useChain } from "@/contexts/ChainContext";
 import { SESSION_BUDGET_EVENT, SESSION_INVALID_EVENT } from "@/lib/payment";
 import { submitCronosTransaction, encodeContractCall } from "@/lib/cronos/aa";
+import { useWs } from "./use-websocket";
 import type { Address } from "viem";
 
 // Session storage key
@@ -154,6 +155,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const [session, setSession] = useState<SessionState>(defaultSession);
     const [isCreating, setIsCreating] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    useWs(session.isActive ? account?.address : undefined, paymentChainId);
 
     const clearSessionState = useCallback(() => {
         localStorage.removeItem(SESSION_KEY);
@@ -320,14 +323,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             void syncSessionFromBackend({ clearOnMissing: true });
         };
 
+        const handleSessionExpired = () => {
+            console.log("[session] Received session-expired event from WebSocket");
+            clearSessionState();
+        };
+
         window.addEventListener(SESSION_BUDGET_EVENT, handleBudgetEvent as EventListener);
         window.addEventListener(SESSION_INVALID_EVENT, handleInvalidEvent as EventListener);
+        window.addEventListener("session-expired", handleSessionExpired as EventListener);
 
         return () => {
             window.removeEventListener(SESSION_BUDGET_EVENT, handleBudgetEvent as EventListener);
             window.removeEventListener(SESSION_INVALID_EVENT, handleInvalidEvent as EventListener);
+            window.removeEventListener("session-expired", handleSessionExpired as EventListener);
         };
-    }, [account?.address, syncSessionFromBackend]);
+    }, [account?.address, syncSessionFromBackend, clearSessionState]);
 
     // Listen for storage changes from other tabs/windows
     useEffect(() => {
