@@ -207,6 +207,82 @@ export async function submitCronosTransaction(
 }
 
 // =============================================================================
+// Batched Transaction (Single UserOp for multiple calls)
+// =============================================================================
+
+export interface BatchCall {
+    to: Address;
+    value?: bigint;
+    data: Hex;
+}
+
+/**
+ * Submit multiple calls as a single batched transaction via Smart Account's executeBatch
+ * This reduces gas by combining multiple operations (e.g., approve + mint) into one UserOp
+ * 
+ * @example
+ * await submitCronosBatchTransaction({
+ *   account,
+ *   calls: [
+ *     { to: usdcAddress, data: approveData },
+ *     { to: manowarAddress, data: mintData },
+ *   ],
+ *   chainId: 338,
+ *   adminWallet,
+ * });
+ */
+export async function submitCronosBatchTransaction(params: {
+    account: Account;
+    calls: BatchCall[];
+    chainId: number;
+    adminAddress?: Address;
+    adminWallet?: Account;
+}): Promise<CronosTransactionResult> {
+    const { account, calls, chainId, adminAddress, adminWallet } = params;
+
+    if (!isCronosChain(chainId)) {
+        return {
+            success: false,
+            error: `Chain ${chainId} is not a Cronos chain.`,
+        };
+    }
+
+    console.log(`[cronos-aa] Submitting batched transaction with ${calls.length} calls`);
+
+    // Encode executeBatch(address[], uint256[], bytes[])
+    const batchData = encodeFunctionData({
+        abi: [{
+            name: "executeBatch",
+            type: "function",
+            inputs: [
+                { name: "_target", type: "address[]" },
+                { name: "_value", type: "uint256[]" },
+                { name: "_calldata", type: "bytes[]" },
+            ],
+            outputs: [],
+        }],
+        functionName: "executeBatch",
+        args: [
+            calls.map(c => c.to),
+            calls.map(c => c.value ?? BigInt(0)),
+            calls.map(c => c.data),
+        ],
+    });
+
+    // Submit as a single transaction to the Smart Account itself
+    // The Smart Account will execute all calls in sequence
+    return submitCronosTransaction({
+        account,
+        to: account.address as Address,
+        data: batchData,
+        value: BigInt(0),
+        chainId,
+        adminAddress,
+        adminWallet,
+    });
+}
+
+// =============================================================================
 // Helper: Encode Contract Call
 // =============================================================================
 
