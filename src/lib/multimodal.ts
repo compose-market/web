@@ -9,6 +9,7 @@
 import { uploadConversationFile } from "./pinata";
 import {
     API_BASE_URL,
+    TIMEOUT_CONFIG,
     type MultimodalResult,
     type MultimodalType,
     type VideoJobResponse,
@@ -16,6 +17,8 @@ import {
     parseJsonResponse,
     detectResponseType,
 } from "./api";
+
+type VideoStatusFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 // =============================================================================
 // Parse Any Response
@@ -37,6 +40,7 @@ export async function parseMultimodalResponse(
             onComplete: (url: string) => void;
             onError: (error: string) => void;
         };
+        videoStatusFetch?: VideoStatusFetch;
     }
 ): Promise<MultimodalResult> {
     const contentType = response.headers.get("content-type") || "";
@@ -69,6 +73,7 @@ export async function parseMultimodalResponse(
                 // Start polling in background, return immediately with polling status
                 pollVideoJob(result.jobId, options.onVideoPolling, {
                     conversationId: options.conversationId,
+                    fetcher: options.videoStatusFetch,
                 });
                 return result;
             }
@@ -239,11 +244,13 @@ export async function pollVideoJob(
         pollIntervalMs?: number;
         maxAttempts?: number;
         conversationId?: string;
+        fetcher?: VideoStatusFetch;
     }
 ): Promise<void> {
     const API_BASE = API_BASE_URL || "";
-    const pollInterval = options?.pollIntervalMs;
-    const maxAttempts = options?.maxAttempts || 120; // 10 minutes max
+    const pollInterval = options?.pollIntervalMs ?? TIMEOUT_CONFIG.VIDEO_POLL.INTERVAL_MS;
+    const maxAttempts = options?.maxAttempts ?? TIMEOUT_CONFIG.VIDEO_POLL.MAX_ATTEMPTS;
+    const statusFetch = options?.fetcher ?? fetch;
 
     let attempts = 0;
 
@@ -251,7 +258,7 @@ export async function pollVideoJob(
         attempts++;
 
         try {
-            const response = await fetch(`${API_BASE}/v1/videos/${encodeURIComponent(jobId)}`, {
+            const response = await statusFetch(`${API_BASE}/v1/videos/${encodeURIComponent(jobId)}`, {
                 method: "GET",
                 headers: { "Content-Type": "application/json" },
             });

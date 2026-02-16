@@ -235,6 +235,41 @@ export interface EmbeddingResponse {
   usage: { prompt_tokens: number; total_tokens: number };
 }
 
+// Responses API (canonical inference format)
+export interface ResponsesOutputItem {
+  type: string;
+  role?: "assistant";
+  text?: string;
+  content?: Array<{ type?: string; text?: string } | Record<string, unknown>>;
+  image_url?: string;
+  audio_url?: string;
+  video_url?: string;
+  embedding?: number[];
+  call_id?: string;
+  name?: string;
+  arguments?: string;
+}
+
+export interface ResponsesResponse {
+  id: string;
+  object: "response";
+  created_at: number;
+  status: "completed" | "in_progress" | "failed" | "cancelled";
+  model: string;
+  output?: ResponsesOutputItem[];
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+  };
+  error?: {
+    message?: string;
+    type?: string;
+    code?: string;
+  };
+  job_id?: string;
+}
+
 // =============================================================================
 // Unified Multimodal Result (for frontend consumption)
 // =============================================================================
@@ -285,19 +320,53 @@ export async function* parseSSEStream(
         if (data === "[DONE]") return;
 
         try {
-          const parsed = JSON.parse(data) as ChatCompletionChunk;
-          const delta = parsed.choices?.[0]?.delta;
-          if (delta?.content && typeof delta.content === "string") {
-            yield delta.content;
+          const parsed = JSON.parse(data) as Record<string, unknown>;
+          const chatChunk = parsed as unknown as ChatCompletionChunk;
+
+          // Chat Completions chunk
+          if (
+            Array.isArray(chatChunk.choices) &&
+            typeof chatChunk.choices?.[0]?.delta?.content === "string"
+          ) {
+            yield chatChunk.choices[0].delta.content as string;
+            continue;
+          }
+
+          // Responses stream chunk
+          if (parsed.type === "response.output_text.delta") {
+            if (typeof parsed.delta === "string") {
+              yield parsed.delta;
+              continue;
+            }
+            if (
+              parsed.delta &&
+              typeof parsed.delta === "object" &&
+              typeof (parsed.delta as { text?: unknown }).text === "string"
+            ) {
+              yield (parsed.delta as { text: string }).text;
+              continue;
+            }
+            continue;
+          }
+
+          // Generic text-bearing event payloads
+          if (typeof parsed.content === "string") {
+            yield parsed.content;
+            continue;
+          }
+          if (typeof parsed.text === "string") {
+            yield parsed.text;
+            continue;
           }
         } catch {
           // Attempt to handle custom events wrapped in data objects
           try {
             const parsed = JSON.parse(data);
-            if (parsed.content) yield parsed.content;
-            // Falls back to yielding raw data if complex object structure
+            if (typeof parsed?.content === "string") yield parsed.content;
+            else if (typeof parsed?.text === "string") yield parsed.text;
           } catch {
-            if (data) yield data;
+            // Only yield raw fallback for non-JSON payloads.
+            if (data && !data.startsWith("{") && !data.startsWith("[")) yield data;
           }
         }
       } else if (line.trim() && !line.startsWith(":")) {
@@ -359,6 +428,97 @@ export function parseJsonResponse(data: unknown): MultimodalResult {
       mimeType: data.mimeType,
       error: data.error,
     };
+  }
+
+  // Canonical Responses API response
+  if (isResponsesResponse(data)) {
+    if (data.error?.message) {
+      return { type: "text", success: false, error: data.error.message };
+    }
+
+    if (data.status === "failed") {
+      return { type: "text", success: false, error: data.error?.message || "Request failed" };
+    }
+
+    if (data.status === "cancelled") {
+      return { type: "text", success: false, error: "Request cancelled" };
+    }
+
+    const textParts: string[] = [];
+    let imageUrl: string | undefined;
+    let audioUrl: string | undefined;
+    let videoUrl: string | undefined;
+    let embedding: number[] | undefined;
+
+    const outputItems = Array.isArray(data.output) ? data.output : [];
+    for (const item of outputItems) {
+      if (item.type === "output_text" && typeof item.text === "string") {
+        textParts.push(item.text);
+        continue;
+      }
+      if (item.type === "output_text" && Array.isArray(item.content)) {
+        for (const part of item.content) {
+          if (
+            part &&
+            typeof part === "object" &&
+            typeof (part as { text?: unknown }).text === "string"
+          ) {
+            textParts.push((part as { text: string }).text);
+          }
+        }
+        continue;
+      }
+      if (item.type === "output_image" && typeof item.image_url === "string") {
+        imageUrl = item.image_url;
+        continue;
+      }
+      if (item.type === "output_audio" && typeof item.audio_url === "string") {
+        audioUrl = item.audio_url;
+        continue;
+      }
+      if (item.type === "output_video" && typeof item.video_url === "string") {
+        videoUrl = item.video_url;
+        continue;
+      }
+      if (item.type === "output_embedding" && Array.isArray(item.embedding)) {
+        embedding = item.embedding;
+      }
+    }
+
+    if (videoUrl) {
+      return { type: "video", success: true, url: videoUrl, mimeType: "video/mp4" };
+    }
+    if (imageUrl) {
+      return { type: "image", success: true, url: imageUrl, mimeType: "image/png" };
+    }
+    if (audioUrl) {
+      return { type: "audio", success: true, url: audioUrl, mimeType: "audio/mpeg" };
+    }
+    if (embedding) {
+      return {
+        type: "embedding",
+        success: true,
+        embeddings: embedding,
+        content: JSON.stringify(embedding),
+      };
+    }
+
+    const text = textParts.join("").trim();
+    if (text.length > 0) {
+      return { type: "text", success: true, content: text };
+    }
+
+    if (data.status === "in_progress" && typeof data.job_id === "string") {
+      return {
+        type: "video",
+        success: true,
+        jobId: data.job_id,
+        polling: true,
+        content: "Video generating... (in_progress)",
+      };
+    }
+
+    return { type: "text", success: true, content: "" };
   }
 
   // Chat completion
@@ -486,6 +646,13 @@ function isVideoJobResponse(data: unknown): data is VideoJobResponse {
     d.object === "video.generation";
 }
 
+function isResponsesResponse(data: unknown): data is ResponsesResponse {
+  if (!data || typeof data !== "object") return false;
+  const response = data as Record<string, unknown>;
+  return response.object === "response" &&
+    typeof response.id === "string";
+}
+
 function isEmbeddingResponse(data: unknown): data is EmbeddingResponse {
   return !!data && typeof data === "object" && "data" in data &&
     (data as EmbeddingResponse).object === "list";
@@ -522,3 +689,24 @@ function isManowarMultimodalResponse(data: unknown): data is {
   const validTypes: MultimodalType[] = ["text", "image", "audio", "video", "embedding"];
   return validTypes.includes(d.type as MultimodalType);
 }
+
+// =============================================================================
+// Global API Configuration - NO Frontend Timeouts (Always-on Pattern)
+// =============================================================================
+
+export const TIMEOUT_CONFIG = {
+  FETCH_TIMEOUT_MS: undefined as undefined,
+  VIDEO_POLL: {
+    INTERVAL_MS: 5000,
+    MAX_ATTEMPTS: parseInt(import.meta.env.VITE_VIDEO_POLL_MAX_ATTEMPTS || "900", 10),
+  },
+  SSE_RETRY: {
+    INITIAL_DELAY_MS: 1000,
+    MAX_DELAY_MS: 30000,
+    BACKOFF_MULTIPLIER: 2,
+  },
+  SESSION_POLL: {
+    INTERVAL_MS: 2000,
+    MAX_ATTEMPTS: 30,
+  },
+} as const;

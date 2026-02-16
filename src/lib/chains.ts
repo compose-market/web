@@ -78,7 +78,7 @@ export const USDC_ADDRESSES: Record<number, `0x${string}`> = {
     [CHAIN_IDS.avalancheFuji]: "0x5425890298aed601595a70AB815c96711a31Bc65",
     [CHAIN_IDS.avalanche]: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
     // BNB Chain
-    [CHAIN_IDS.bscTestnet]: "0x64544969ed7EBf5f083679233325356EbE738930",
+    [CHAIN_IDS.bscTestnet]: "0x64544969ed7ebf5f083679233325356ebe738930",
     [CHAIN_IDS.bsc]: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
 };
 

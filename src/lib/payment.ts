@@ -26,6 +26,8 @@ import { wrapFetchWithCronosPayment } from "./cronos/facilitator";
  * Currently disabled as modern SDK handles signatures correctly.
  */
 const ENABLE_SIGNATURE_NORMALIZATION = false;
+export const SESSION_BUDGET_EVENT = "compose:session-budget";
+export const SESSION_INVALID_EVENT = "compose:session-invalid";
 
 // =============================================================================
 // Signature Normalization (For ThirdWeb x402)
@@ -191,7 +193,7 @@ export function createPaymentFetch(params: PaymentFetchParams): (input: RequestI
 
   // SESSION BYPASS: Skip x402 entirely when we have a valid session token
   // This provides <100ms latency instead of ~2-3s for payment flow
-  if (sessionToken && sessionHeaders) {
+  if (sessionToken) {
     console.log(`[payment] Using session bypass for chain ${chainId}`);
     return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const headers = new Headers(init?.headers);
@@ -199,11 +201,61 @@ export function createPaymentFetch(params: PaymentFetchParams): (input: RequestI
       headers.set('Authorization', `Bearer ${sessionToken}`);
 
       // Add all session headers
-      for (const [key, value] of Object.entries(sessionHeaders)) {
-        headers.set(key, value);
+      if (sessionHeaders) {
+        for (const [key, value] of Object.entries(sessionHeaders)) {
+          headers.set(key, value);
+        }
       }
 
-      return fetch(input, { ...init, headers });
+      const response = await fetch(input, { ...init, headers });
+
+      // Emit authoritative session budget state from backend response headers.
+      // Header priority: session bypass headers → compose key headers → fallback
+      if (typeof window !== "undefined") {
+        const budgetRemainingHeader =
+          response.headers.get("x-session-budget-remaining") ??
+          response.headers.get("x-compose-key-budget-remaining") ??
+          response.headers.get("x-budget-remaining");
+        const budgetUsedHeader =
+          response.headers.get("x-session-budget-used") ??
+          response.headers.get("x-compose-key-budget-used");
+        const budgetLimitHeader =
+          response.headers.get("x-session-budget-limit") ??
+          response.headers.get("x-compose-key-budget-limit");
+
+        const budgetRemaining = budgetRemainingHeader ? Number.parseInt(budgetRemainingHeader, 10) : NaN;
+        const budgetUsed = budgetUsedHeader ? Number.parseInt(budgetUsedHeader, 10) : NaN;
+        const budgetLimit = budgetLimitHeader ? Number.parseInt(budgetLimitHeader, 10) : NaN;
+
+        if (Number.isFinite(budgetRemaining) && budgetRemaining >= 0) {
+          console.log(`[payment] Budget sync from headers: remaining=${budgetRemaining}, used=${budgetUsed}, limit=${budgetLimit}`);
+          window.dispatchEvent(
+            new CustomEvent(SESSION_BUDGET_EVENT, {
+              detail: {
+                budgetRemaining,
+                budgetUsed: Number.isFinite(budgetUsed) && budgetUsed >= 0 ? budgetUsed : undefined,
+                budgetLimit: Number.isFinite(budgetLimit) && budgetLimit >= 0 ? budgetLimit : undefined,
+              },
+            }),
+          );
+        } else {
+          console.warn(`[payment] No valid budget headers in response; headers:`, {
+            "x-session-budget-remaining": response.headers.get("x-session-budget-remaining"),
+            "x-compose-key-budget-remaining": response.headers.get("x-compose-key-budget-remaining"),
+            "x-budget-remaining": response.headers.get("x-budget-remaining"),
+          });
+        }
+
+        if (response.status === 401 || response.status === 402 || response.status === 403) {
+          window.dispatchEvent(
+            new CustomEvent(SESSION_INVALID_EVENT, {
+              detail: { status: response.status },
+            }),
+          );
+        }
+      }
+
+      return response;
     };
   }
 

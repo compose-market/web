@@ -1,7 +1,7 @@
 // Available AI models for the Manowar platform
 // Users can select any of these for their agents/workflows
-// Models are fetched dynamically from the /api/registry endpoints
-// to ensure consistency, deduplication, and valid inference providers.
+// Models are fetched dynamically from /v1/models (canonical) with
+// fallback to /api/registry/models/available for compatibility.
 
 /**
  * Model Provider Types:
@@ -77,15 +77,27 @@ export interface ModelRegistry {
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
 /**
- * Fetch available models from the backend registry
- * This endpoint returns deduplicated models with valid inference providers
- * 
- * Paginates through all pages (limit=500 per request) to load full dataset
+ * Fetch available models from canonical /v1/models endpoint.
+ * Falls back to /api/registry/models/available if needed.
  */
 export async function fetchAvailableModels(): Promise<AIModel[]> {
+  try {
+    const v1Res = await fetch(`${API_BASE}/v1/models`);
+    if (v1Res.ok) {
+      const data: OpenAIModelsResponse = await v1Res.json();
+      const models = (data.data || []).map(openAIModelToAIModel);
+      if (models.length > 0) {
+        console.log(`[models] Loaded ${models.length} models from /v1/models`);
+        return models;
+      }
+    }
+  } catch (error) {
+    console.warn("[models] Failed to fetch /v1/models, falling back to registry:", error);
+  }
+
   const allModels: AIModel[] = [];
   let page = 1;
-  const limit = 500; // Max allowed by backend
+  const limit = 500;
   let hasMore = true;
 
   try {
@@ -103,18 +115,16 @@ export async function fetchAvailableModels(): Promise<AIModel[]> {
       }));
 
       allModels.push(...models);
-
       hasMore = data.hasMore === true;
       page++;
 
-      // Safety: prevent infinite loops (max 150 pages = 75,000 models)
       if (page > 150) break;
     }
 
-    console.log(`[models] Loaded ${allModels.length} models from registry`);
+    console.log(`[models] Loaded ${allModels.length} models from /api/registry/models/available`);
     return allModels;
   } catch (error) {
-    console.error("[models] Failed to fetch available models:", error);
+    console.error("[models] Failed to fetch models from all sources:", error);
     return [];
   }
 }
@@ -145,6 +155,7 @@ export interface OpenAIModel {
   object: "model";
   created: number;
   owned_by: string;
+  provider?: string;
   name?: string;
   description?: string;
   context_window?: number;
@@ -221,11 +232,12 @@ export async function fetchOpenAIModel(modelId: string): Promise<OpenAIModel | n
  * Convert OpenAI model format to AIModel format
  */
 export function openAIModelToAIModel(model: OpenAIModel): AIModel {
+  const source = (model.provider || model.owned_by || "openai") as ModelProvider;
   return {
     id: model.id,
     name: model.name || model.id,
     ownedBy: model.owned_by,
-    source: (model.owned_by || "unknown") as ModelProvider,
+    source,
     task: model.task_type,
     description: model.description,
     available: true,
