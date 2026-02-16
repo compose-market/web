@@ -68,7 +68,7 @@ export default function AgentDetailPage() {
   const wallet = useActiveWallet();
   const account = useActiveAccount();
   const { paymentChainId } = useChain();
-  const { sessionActive, budgetRemaining, recordUsage, composeKeyToken } = useSession();
+  const { sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken } = useSession();
 
   // Build the A2A-compatible endpoint URL using wallet address (canonical identifier)
   const agentWallet = agent?.walletAddress;
@@ -182,6 +182,21 @@ export default function AgentDetailPage() {
       return;
     }
 
+    let activeComposeKeyToken = await ensureComposeKeyToken();
+    if (!activeComposeKeyToken) {
+      activeComposeKeyToken = composeKeyToken;
+    }
+
+    if (!activeComposeKeyToken) {
+      toast({
+        title: "Session Sync Required",
+        description: "Compose session key unavailable. Re-open your session and try again.",
+        variant: "destructive",
+      });
+      setShowSessionDialog(true);
+      return;
+    }
+
     const attached = attachedFiles[0];
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
@@ -205,6 +220,9 @@ export default function AgentDetailPage() {
     // Create assistant placeholder
     const assistantId = crypto.randomUUID();
     setMessages(prev => [...prev, { id: assistantId, role: "assistant", content: "", timestamp: Date.now() }]);
+    const composeRunId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    let resolvedThreadId: string | null = null;
+    const runStorageKey = `agent-active-run:${agentWallet || "unknown"}`;
 
     try {
       if (!agent) {
@@ -221,7 +239,7 @@ export default function AgentDetailPage() {
         wallet,
         maxValue: BigInt(inferencePriceWei), // $0.005
         // Session bypass: skip x402 wallet flow when session is active
-        sessionToken: sessionActive && budgetRemaining > 0 && composeKeyToken ? composeKeyToken : undefined,
+        sessionToken: sessionActive && budgetRemaining > 0 ? activeComposeKeyToken : undefined,
         sessionHeaders: sessionActive && budgetRemaining > 0 ? {
           'x-session-user-address': account.address,
           'x-session-active': 'true',
@@ -247,6 +265,7 @@ export default function AgentDetailPage() {
           threadId = `thread-${userAddress}-${agentWallet}-${crypto.randomUUID()}`;
           sessionStorage.setItem(threadKey, threadId);
         }
+        resolvedThreadId = threadId;
 
         const headers: Record<string, string> = {
           "Content-Type": "application/json",
@@ -268,8 +287,14 @@ export default function AgentDetailPage() {
         const requestBody: Record<string, unknown> = {
           message: userMessage.content,
           threadId: threadId,
+          composeRunId,
           grantedPermissions, // Pass to backend for proactive permission checks
         };
+        sessionStorage.setItem(runStorageKey, JSON.stringify({
+          runId: composeRunId,
+          threadId,
+          startedAt: Date.now(),
+        }));
 
         // Send Pinata URLs
         if (attachmentUrl && attachmentType) {
@@ -295,6 +320,18 @@ export default function AgentDetailPage() {
         if (registered) {
           // Wait a moment for backend to spin up the agent
           await new Promise(resolve => setTimeout(resolve, 1000));
+          response = await makeChatRequest();
+        }
+      }
+
+      // If runtime is still warming, retry once after bounded delay
+      if (response.status === 503) {
+        const warmupPayload = await response.clone().json().catch(() => null) as
+          | { code?: string; retryAfterMs?: number }
+          | null;
+        if (warmupPayload?.code === "AGENT_WARMING") {
+          const retryAfterMs = Math.min(Math.max(warmupPayload.retryAfterMs || 2000, 1000), 10000);
+          await new Promise((resolve) => setTimeout(resolve, retryAfterMs));
           response = await makeChatRequest();
         }
       }
@@ -334,7 +371,7 @@ export default function AgentDetailPage() {
           updateAssistantMessage(assistantId, { content: "No response received" });
         }
         // Record successful usage
-        recordUsage();
+        sessionStorage.removeItem(runStorageKey);
       } else {
         // Non-streaming response (image/audio/video/json) - use unified handler
         const { parseMultimodalResponse } = await import("@/lib/multimodal");
@@ -360,7 +397,6 @@ export default function AgentDetailPage() {
                   videoUrl: url,
                 } : m)
               );
-              recordUsage();
             },
             onError: (error) => {
               setMessages(prev =>
@@ -390,14 +426,23 @@ export default function AgentDetailPage() {
               videoUrl: result.type === "video" ? result.url : undefined,
             } : m)
           );
-          recordUsage();
+          sessionStorage.removeItem(runStorageKey);
         } else {
           throw new Error(result.error || "Request failed");
         }
       }
     } catch (err) {
+      // Silent return for user-initiated abort
+      if (err instanceof DOMException && err.name === "AbortError") {
+        return;
+      }
+      
       let errorMsg = err instanceof Error ? err.message : "Unknown error";
-
+      
+      // Note: Recovery loops removed - rely on backend Temporal state persistence
+      // Frontend simply displays errors immediately for better UX
+      // Backend handles state via Temporal workflows (resumable via run state endpoint)
+      
       // Check for CONSENT_REQUIRED error from agent
       try {
         const parsedError = JSON.parse(errorMsg);
@@ -464,7 +509,7 @@ export default function AgentDetailPage() {
       setSending(false);
       setChatStatus("idle");
     }
-  }, [inputValue, sending, agentWallet, wallet, toast, agent, autoRegisterAgent, recordUsage, attachedFiles]);
+  }, [inputValue, sending, agentWallet, wallet, account, toast, agent, autoRegisterAgent, attachedFiles, clearFiles, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, setShowSessionDialog, parseSSEStream, scheduleStreamUpdate, flushStreamContent, updateAssistantMessage, handleJsonResponse]);
 
   // Upload knowledge
   const handleUploadKnowledge = useCallback(async () => {

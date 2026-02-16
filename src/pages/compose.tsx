@@ -303,43 +303,12 @@ function MintManowarDialog({
 
       // Chain-aware transaction: Cronos uses our AA Paymaster, others use ThirdWeb
       if (isCronosChain(selectedChainId) && account) {
-        // Cronos: Use our custom AA Paymaster flow
+        // Cronos: Use our custom AA Paymaster flow with batched transactions
         const adminAddress = adminWallet?.getAccount()?.address as `0x${string}` | undefined;
         const adminAccount = adminWallet?.getAccount();
+        const usdcContractAddress = getUsdcAddress(selectedChainId);
 
-        // USDC approval if needed
-        if (totalAgentPrice > BigInt(0)) {
-          const usdcContractAddress = getUsdcAddress(selectedChainId);
-          const approvalData = encodeContractCall({
-            abi: [{
-              type: "function",
-              name: "approve",
-              inputs: [
-                { type: "address", name: "spender" },
-                { type: "uint256", name: "amount" },
-              ],
-              outputs: [{ type: "bool" }],
-            }],
-            functionName: "approve",
-            args: [manowarAddress, totalAgentPrice],
-          });
-
-          const approvalResult = await submitCronosTransaction({
-            account,
-            to: usdcContractAddress as `0x${string}`,
-            data: approvalData as `0x${string}`,
-            value: BigInt(0),
-            chainId: selectedChainId,
-            adminAddress,
-            adminWallet: adminAccount,
-          });
-
-          if (!approvalResult.success) {
-            throw new Error(approvalResult.error || "USDC approval failed");
-          }
-        }
-
-        // Mint Manowar
+        // Build mint calldata
         const mintData = encodeContractCall({
           abi: [{
             type: "function",
@@ -383,15 +352,49 @@ function MintManowarDialog({
           ],
         });
 
-        const result = await submitCronosTransaction({
-          account,
-          to: manowarAddress as `0x${string}`,
-          data: mintData as `0x${string}`,
-          value: BigInt(0),
-          chainId: selectedChainId,
-          adminAddress,
-          adminWallet: adminAccount,
-        });
+        let result;
+
+        // Use batched transaction if USDC payment is needed (approve + mint in one UserOp)
+        if (totalAgentPrice > BigInt(0)) {
+          const { submitCronosBatchTransaction } = await import("@/lib/cronos/aa");
+
+          const approvalData = encodeContractCall({
+            abi: [{
+              type: "function",
+              name: "approve",
+              inputs: [
+                { type: "address", name: "spender" },
+                { type: "uint256", name: "amount" },
+              ],
+              outputs: [{ type: "bool" }],
+            }],
+            functionName: "approve",
+            args: [manowarAddress, totalAgentPrice],
+          });
+
+          // Single batched transaction: approve + mint
+          result = await submitCronosBatchTransaction({
+            account,
+            calls: [
+              { to: usdcContractAddress as `0x${string}`, data: approvalData as `0x${string}` },
+              { to: manowarAddress as `0x${string}`, data: mintData as `0x${string}` },
+            ],
+            chainId: selectedChainId,
+            adminAddress,
+            adminWallet: adminAccount,
+          });
+        } else {
+          // No payment needed, just mint
+          result = await submitCronosTransaction({
+            account,
+            to: manowarAddress as `0x${string}`,
+            data: mintData as `0x${string}`,
+            value: BigInt(0),
+            chainId: selectedChainId,
+            adminAddress,
+            adminWallet: adminAccount,
+          });
+        }
 
         if (!result.success) {
           throw new Error(result.error || "Cronos transaction failed");

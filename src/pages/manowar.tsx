@@ -55,7 +55,7 @@ export default function ManowarPage() {
     const wallet = useActiveWallet();
     const account = useActiveAccount();
     const { paymentChainId } = useChain();
-    const { sessionActive, budgetRemaining, recordUsage, composeKeyToken } = useSession();
+    const { sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken } = useSession();
 
     // Chat state from shared hook (includes messages, attachments, and recording)
     const manowarWallet = manowar?.walletAddress;
@@ -193,6 +193,21 @@ export default function ManowarPage() {
             return;
         }
 
+        let activeComposeKeyToken = await ensureComposeKeyToken();
+        if (!activeComposeKeyToken) {
+            activeComposeKeyToken = composeKeyToken;
+        }
+
+        if (!activeComposeKeyToken) {
+            toast({
+                title: "Session Sync Required",
+                description: "Compose session key unavailable. Re-open your session and try again.",
+                variant: "destructive",
+            });
+            setShowSessionDialog(true);
+            return;
+        }
+
         const attached = attachedFiles[0];
         const userMessage: ChatMessage = {
             id: crypto.randomUUID(),
@@ -218,6 +233,10 @@ export default function ManowarPage() {
         // Create assistant placeholder
         const assistantId = crypto.randomUUID();
         setMessages(prev => [...prev, { id: assistantId, role: "assistant", content: "", timestamp: Date.now() }]);
+        const composeRunId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const runStorageKey = `manowar-active-run:${manowar.walletAddress}`;
+        let resolvedThreadId: string | null = null;
+        let replayEventIndex = 0;
 
         try {
             setChatStatus("waiting");
@@ -230,7 +249,7 @@ export default function ManowarPage() {
                 wallet,
                 maxValue: BigInt(10_000), // $0.01 - matches MANOWAR_PRICES.ORCHESTRATION
                 // Session bypass: skip x402 wallet flow when session is active
-                sessionToken: sessionActive && budgetRemaining > 0 && composeKeyToken ? composeKeyToken : undefined,
+                sessionToken: sessionActive && budgetRemaining > 0 ? activeComposeKeyToken : undefined,
                 sessionHeaders: sessionActive && budgetRemaining > 0 ? {
                     'x-session-user-address': account.address,
                     'x-session-active': 'true',
@@ -256,6 +275,7 @@ export default function ManowarPage() {
                     threadId = `manowar-${manowar.walletAddress}-user-${userAddress}-${crypto.randomUUID()}`;
                     sessionStorage.setItem(threadKey, threadId);
                 }
+                resolvedThreadId = threadId;
                 setActiveThreadId(threadId);
 
                 const headers: Record<string, string> = {
@@ -269,8 +289,16 @@ export default function ManowarPage() {
                 const requestBody: Record<string, unknown> = {
                     message: userMessage.content,
                     threadId: threadId,
+                    composeRunId,
+                    lastEventIndex: replayEventIndex,
                     continuous: continuousEnabled,
                 };
+                sessionStorage.setItem(runStorageKey, JSON.stringify({
+                    runId: composeRunId,
+                    threadId,
+                    lastEventIndex: replayEventIndex,
+                    startedAt: Date.now(),
+                }));
 
                 // Send Pinata URLs, not base64 data
                 if (attachmentUrl && attachmentType) {
@@ -316,68 +344,63 @@ export default function ManowarPage() {
 
                 setChatStatus("streaming");
                 const decoder = new TextDecoder();
-                let buffer = "";
+                let sseBuffer = "";
                 let finalOutput = "";
 
                 currentAssistantIdRef.current = assistantId;
                 streamedTextRef.current = "";
 
-                // Parse SSE events and use hook's streaming update
-                const processSSEBuffer = (rawBuffer: string) => {
-                    const lines = rawBuffer.split("\n");
-                    let currentEvent = "";
-                    let currentData = "";
+                const processSSEEvent = (eventName: string, dataPayload: string) => {
+                    try {
+                        const data = JSON.parse(dataPayload);
 
-                    for (const line of lines) {
-                        if (line.startsWith("event:")) {
-                            currentEvent = line.substring(6).trim();
-                        } else if (line.startsWith("data:")) {
-                            currentData = line.substring(5).trim();
+                        if (eventName === "start") {
+                            streamedTextRef.current = data.message || "Starting workflow...";
+                        } else if (eventName === "step" || eventName === "agent") {
+                            streamedTextRef.current = data.message || `Processing ${data.agentName || data.stepName}...`;
+                        } else if (eventName === "progress") {
+                            streamedTextRef.current = data.message || streamedTextRef.current || "Running...";
+                        } else if (eventName === "complete" || eventName === "done") {
+                            streamedTextRef.current = data.message || streamedTextRef.current || "Workflow complete!";
+                        } else if (eventName === "result") {
+                            // Final result - check if it's a multimodal JSON response
+                            finalOutput = data.output || "";
 
-                            // Process completed event
-                            if (currentEvent && currentData) {
-                                try {
-                                    const data = JSON.parse(currentData);
-
-                                    if (currentEvent === "start") {
-                                        streamedTextRef.current = data.message || "Starting workflow...";
-                                    } else if (currentEvent === "step" || currentEvent === "agent") {
-                                        streamedTextRef.current = data.message || `Processing ${data.agentName || data.stepName}...`;
-                                    } else if (currentEvent === "complete") {
-                                        streamedTextRef.current = data.message || "Workflow complete!";
-                                    } else if (currentEvent === "result") {
-                                        // Final result - check if it's a multimodal JSON response
-                                        finalOutput = data.output || "";
-
-                                        // Try to parse output as JSON to check for multimodal data
-                                        try {
-                                            const parsed = typeof finalOutput === "string" ? JSON.parse(finalOutput) : finalOutput;
-                                            // If it has type + url/data/base64, it's a multimodal response
-                                            if (parsed && (parsed.url || parsed.data || parsed.base64) && parsed.type) {
-                                                // Use handleJsonResponse to display properly (handles URL or uploads base64)
-                                                handleJsonResponse(assistantId, parsed);
-                                                streamedTextRef.current = `Generated ${parsed.type}...`;
-                                            } else if (parsed && parsed.success === false && parsed.error) {
-                                                streamedTextRef.current = `Error: ${parsed.error}`;
-                                            } else {
-                                                // Regular text output
-                                                streamedTextRef.current = finalOutput;
-                                            }
-                                        } catch {
-                                            // Not JSON, treat as regular text
-                                            streamedTextRef.current = finalOutput;
-                                        }
-                                    } else if (currentEvent === "error") {
-                                        streamedTextRef.current = `Error: ${data.error || "Unknown error"}`;
-                                    }
-
-                                    // Use hook's RAF-batched streaming update
-                                    scheduleStreamUpdate(streamedTextRef.current);
-                                } catch {
-                                    // Invalid JSON, ignore
+                            // Try to parse output as JSON to check for multimodal data
+                            try {
+                                const parsed = typeof finalOutput === "string" ? JSON.parse(finalOutput) : finalOutput;
+                                // If it has type + url/data/base64, it's a multimodal response
+                                if (parsed && (parsed.url || parsed.data || parsed.base64) && parsed.type) {
+                                    // Use handleJsonResponse to display properly (handles URL or uploads base64)
+                                    handleJsonResponse(assistantId, parsed);
+                                    streamedTextRef.current = `Generated ${parsed.type}...`;
+                                } else if (parsed && parsed.success === false && parsed.error) {
+                                    streamedTextRef.current = `Error: ${parsed.error}`;
+                                } else {
+                                    // Regular text output
+                                    streamedTextRef.current = finalOutput;
                                 }
+                            } catch {
+                                // Not JSON, treat as regular text
+                                streamedTextRef.current = finalOutput;
                             }
+                        } else if (eventName === "error") {
+                            streamedTextRef.current = `Error: ${data.error || "Unknown error"}`;
                         }
+
+                        // Use hook's RAF-batched streaming update
+                        scheduleStreamUpdate(streamedTextRef.current);
+                        replayEventIndex += 1;
+                        if (resolvedThreadId) {
+                            sessionStorage.setItem(runStorageKey, JSON.stringify({
+                                runId: composeRunId,
+                                threadId: resolvedThreadId,
+                                lastEventIndex: replayEventIndex,
+                                startedAt: Date.now(),
+                            }));
+                        }
+                    } catch {
+                        // Invalid JSON, ignore
                     }
                 };
 
@@ -386,8 +409,31 @@ export default function ManowarPage() {
                     if (done) break;
 
                     const chunk = decoder.decode(value, { stream: true });
-                    buffer += chunk;
-                    processSSEBuffer(buffer);
+                    sseBuffer += chunk;
+
+                    while (true) {
+                        const separatorIndex = sseBuffer.indexOf("\n\n");
+                        if (separatorIndex === -1) break;
+
+                        const rawEvent = sseBuffer.slice(0, separatorIndex);
+                        sseBuffer = sseBuffer.slice(separatorIndex + 2);
+                        if (!rawEvent.trim()) continue;
+
+                        let eventName = "message";
+                        const dataLines: string[] = [];
+
+                        for (const line of rawEvent.split("\n")) {
+                            if (line.startsWith("event:")) {
+                                eventName = line.substring(6).trim();
+                            } else if (line.startsWith("data:")) {
+                                dataLines.push(line.substring(5).trim());
+                            }
+                        }
+
+                        if (dataLines.length > 0) {
+                            processSSEEvent(eventName, dataLines.join("\n"));
+                        }
+                    }
                 }
 
                 // Final flush and update
@@ -403,7 +449,7 @@ export default function ManowarPage() {
                 if (!finalOutput && !streamedTextRef.current) {
                     updateAssistantMessage(assistantId, { content: "No response received" });
                 }
-                recordUsage();
+                sessionStorage.removeItem(runStorageKey);
             } else {
                 // Non-streaming response (image/audio/video/json) - use unified handler
                 const { parseMultimodalResponse } = await import("@/lib/multimodal");
@@ -429,7 +475,6 @@ export default function ManowarPage() {
                                     videoUrl: url,
                                 } : m)
                             );
-                            recordUsage();
                         },
                         onError: (error) => {
                             setMessages(prev =>
@@ -459,16 +504,23 @@ export default function ManowarPage() {
                             videoUrl: result.type === "video" ? result.url : undefined,
                         } : m)
                     );
-                    recordUsage();
+                    sessionStorage.removeItem(runStorageKey);
                 } else {
                     throw new Error(result.error || "Request failed");
                 }
             }
         } catch (err) {
+            // Silent return for user-initiated abort via stop button
             if (err instanceof DOMException && err.name === "AbortError") {
                 return;
             }
-            const errorMsg = err instanceof Error ? err.message : "Unknown error";
+            
+            let errorMsg = err instanceof Error ? err.message : "Unknown error";
+            
+            // Note: Recovery loops removed - rely on backend Temporal state persistence
+            // Frontend simply displays errors immediately for better UX
+            // Backend handles state via Temporal workflows (resumable via run state endpoint)
+            
             setChatError(errorMsg);
             setMessages(prev =>
                 prev.map(m => m.id === assistantId ? { ...m, content: `Error: ${errorMsg}` } : m)
@@ -478,7 +530,7 @@ export default function ManowarPage() {
             setChatStatus("idle");
             abortControllerRef.current = null;
         }
-    }, [inputValue, sending, manowar, wallet, toast, attachedFiles, autoRegisterManowar, recordUsage, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, setShowSessionDialog, continuousEnabled]);
+    }, [inputValue, sending, manowar, wallet, account, toast, attachedFiles, clearFiles, autoRegisterManowar, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, setShowSessionDialog, continuousEnabled, scheduleStreamUpdate, flushStreamContent, updateAssistantMessage, handleJsonResponse]);
 
     const handleStopExecution = useCallback(async () => {
         if (!manowar?.walletAddress || !activeThreadId) return;

@@ -108,7 +108,7 @@ const API_BASE = (import.meta.env.VITE_API_URL || "https://api.compose.market").
 export default function PlaygroundPage() {
   const wallet = useActiveWallet();
   const account = useActiveAccount();
-  const { sessionActive, budgetRemaining, formatBudget, recordUsage, composeKeyToken } = useSession();
+  const { sessionActive, budgetRemaining, formatBudget, composeKeyToken, ensureComposeKeyToken } = useSession();
   const { paymentChainId } = useChain();
   const { toast } = useToast();
 
@@ -324,7 +324,7 @@ export default function PlaygroundPage() {
   const modelSupportsReasoning = useMemo(() => selectedModelInfo?.capabilities?.includes("reasoning") ?? false, [selectedModelInfo]);
 
   // Build tools object for API request - only include enabled tools
-  const activeTools = useMemo(() => {
+  const activeGoogleTools = useMemo(() => {
     if (!isGoogleModel) return undefined;
     const tools: Record<string, unknown> = {};
     if (enableGoogleSearch && modelSupportsSearchGrounding) tools.googleSearch = true;
@@ -356,11 +356,6 @@ export default function PlaygroundPage() {
     }
 
     const attached = attachedFiles[0];
-
-    // Use Pinata URL (already uploaded by useChat hook) instead of re-converting to base64
-    // Lambda backend will fetch from URL when needed
-    const attachmentUrl = attached?.url;
-    const attachmentType = attached?.type;
 
     const userMessage = {
       id: crypto.randomUUID(),
@@ -395,6 +390,15 @@ export default function PlaygroundPage() {
         throw new Error("Connect wallet to use inference");
       }
 
+      let activeComposeKeyToken = await ensureComposeKeyToken();
+      if (!activeComposeKeyToken) {
+        activeComposeKeyToken = composeKeyToken;
+      }
+
+      if (sessionActive && budgetRemaining > 0 && !activeComposeKeyToken) {
+        throw new Error("Compose session key unavailable. Re-open your session and try again.");
+      }
+
       // Chain-aware payment: Cronos uses Cronos x402 V1, others use ThirdWeb x402 V2
       // When session is active, uses session bypass for instant <100ms latency
       const fetchWithPayment = createPaymentFetch({
@@ -403,7 +407,7 @@ export default function PlaygroundPage() {
         wallet,
         maxValue: BigInt(inferencePriceWei),
         // Session bypass: skip x402 wallet flow when session is active
-        sessionToken: sessionActive && budgetRemaining > 0 && composeKeyToken ? composeKeyToken : undefined,
+        sessionToken: sessionActive && budgetRemaining > 0 ? activeComposeKeyToken || undefined : undefined,
         sessionHeaders: sessionActive && budgetRemaining > 0 ? {
           'x-session-user-address': account.address,
           'x-session-active': 'true',
@@ -414,28 +418,66 @@ export default function PlaygroundPage() {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       // Note: Session headers are now handled by createPaymentFetch session bypass
 
-      // UNIFIED: Route ALL models through chat completions endpoint
-      // Models decide what they can output based on their actual capabilities, not task type
-      const endpoint = `${API_BASE}/v1/chat/completions`;
+      const toResponsesMessage = (message: typeof userMessage | typeof messages[number]) => {
+        const parts: Array<Record<string, unknown>> = [];
+        if (typeof message.content === "string" && message.content.trim().length > 0) {
+          parts.push({ type: "text", text: message.content });
+        }
+        if (message.imageUrl) {
+          parts.push({ type: "image_url", image_url: { url: message.imageUrl } });
+        }
+        if (message.audioUrl) {
+          parts.push({ type: "input_audio", input_audio: { url: message.audioUrl } });
+        }
+        if (message.videoUrl) {
+          parts.push({ type: "video_url", video_url: { url: message.videoUrl } });
+        }
+
+        if (parts.length === 0) {
+          return { role: message.role, content: "" };
+        }
+
+        if (parts.length === 1 && parts[0].type === "text") {
+          return { role: message.role, content: message.content };
+        }
+
+        return { role: message.role, content: parts };
+      };
+
+      const history = [...messages.slice(conversationStartIndex), userMessage];
+      const input: Array<{
+        role: "system" | "user" | "assistant";
+        content: string | Array<Record<string, unknown>>;
+      }> = history.map(toResponsesMessage);
+      if (systemPrompt.trim()) {
+        input.unshift({ role: "system", content: systemPrompt.trim() });
+      }
+
+      const modalities =
+        outputType === "image" ? ["image"] :
+        outputType === "audio" ? ["audio"] :
+        outputType === "video" ? ["video"] :
+        outputType === "embedding" ? ["embedding"] :
+        ["text"];
+
+      const endpoint = `${API_BASE}/v1/responses`;
       const requestBody: Record<string, unknown> = {
         model: selectedModel,
-        messages: [...messages.slice(conversationStartIndex), userMessage].map(({ role, content }) => ({ role, content })),
-        stream: true,
+        input,
+        modalities,
+        stream: outputType === "text",
       };
-      
-      if (systemPrompt) {
-        (requestBody.messages as unknown[]).unshift({ role: "system", content: systemPrompt });
+
+      if (selectedModelInfo?.source) {
+        requestBody.provider = selectedModelInfo.source;
       }
-      
-      // Universal attachment support: ALL models can receive ANY file type
-      // The model will ignore formats it doesn't understand
-      if (attachmentUrl) {
-        requestBody[`${attachmentType}_url`] = attachmentUrl;
+
+      if (activeGoogleTools) {
+        requestBody.google_tools = activeGoogleTools;
       }
-      
-      // Add Google tools if any are enabled
-      if (activeTools) {
-        requestBody.tools = activeTools;
+
+      if (Object.keys(paramValues).length > 0) {
+        Object.assign(requestBody, paramValues);
       }
 
       const response = await fetchWithPayment(endpoint, {
@@ -463,6 +505,7 @@ export default function PlaygroundPage() {
         },
         uploadToPinata: true,
         conversationId,
+        videoStatusFetch: fetchWithPayment,
         // Handle async video polling
         onVideoPolling: {
           onProgress: (status, progress) => {
@@ -478,7 +521,6 @@ export default function PlaygroundPage() {
               type: "video",
               videoUrl: url,
             });
-            recordUsage();
           },
           onError: (error) => {
             console.error(`[playground] Video error:`, error);
@@ -506,14 +548,14 @@ export default function PlaygroundPage() {
       }
 
       if (result.success) {
+        const content = result.content || (result.type === "text" ? "" : `Generated ${result.type}:`);
         updateAssistantMessage(assistantId, {
-          content: result.content || `Generated ${result.type}:`,
+          content,
           type: result.type,
           imageUrl: result.type === "image" ? result.url : undefined,
           audioUrl: result.type === "audio" ? result.url : undefined,
           videoUrl: result.type === "video" ? result.url : undefined,
         });
-        recordUsage();
       } else {
         throw new Error(result.error || "Request failed");
       }
@@ -526,7 +568,7 @@ export default function PlaygroundPage() {
     } finally {
       setStreaming(false);
     }
-  }, [inputValue, streaming, selectedModel, messages, systemPrompt, wallet, budgetRemaining, recordUsage, outputType, attachedFiles, clearFiles, sessionActive, activeTools, isGoogleModel, modelSupportsSearchGrounding, modelSupportsCodeExecution, paymentChainId, toast, setShowSessionDialog]);
+  }, [inputValue, streaming, selectedModel, selectedModelInfo, messages, systemPrompt, wallet, account, budgetRemaining, outputType, attachedFiles, clearFiles, sessionActive, composeKeyToken, ensureComposeKeyToken, activeGoogleTools, paymentChainId, paramValues, toast, setShowSessionDialog]);
 
   const handleClearChat = useCallback(() => {
     setMessages([]);
@@ -870,7 +912,6 @@ export default function PlaygroundPage() {
             sessionActive={sessionActive}
             budgetRemaining={budgetRemaining}
             formatBudget={formatBudget}
-            recordUsage={recordUsage}
             initialSource={initialPluginSource}
             initialPlugin={initialPlugin}
           />
