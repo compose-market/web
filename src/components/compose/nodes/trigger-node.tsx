@@ -56,10 +56,10 @@ export function TriggerNode({ data }: { data: TriggerNodeData }) {
 
     // Check which handles are connected
     const edges = getEdges();
-    const leftConnected = edges.some(e => e.target === nodeId && e.targetHandle?.includes("Left"));
-    const rightConnected = edges.some(e => e.source === nodeId && e.sourceHandle?.includes("Right"));
-    const topConnected = edges.some(e => e.target === nodeId && e.targetHandle?.includes("Top"));
-    const bottomConnected = edges.some(e => e.source === nodeId && e.sourceHandle?.includes("Bottom"));
+    const leftConnected = edges.some((e: any) => e.target === nodeId && e.targetHandle?.includes("Left"));
+    const rightConnected = edges.some((e: any) => e.source === nodeId && e.sourceHandle?.includes("Right"));
+    const topConnected = edges.some((e: any) => e.target === nodeId && e.targetHandle?.includes("Top"));
+    const bottomConnected = edges.some((e: any) => e.source === nodeId && e.sourceHandle?.includes("Bottom"));
 
     const typeIcon = trigger.type === "cron" ? <Calendar className="w-4 h-4 text-amber-400" /> : <Zap className="w-4 h-4 text-amber-400" />;
 

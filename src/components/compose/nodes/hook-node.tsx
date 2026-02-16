@@ -56,10 +56,10 @@ export function HookNode({ data }: { data: HookNodeData }) {
 
     // Check which handles are connected
     const edges = getEdges();
-    const leftConnected = edges.some(e => e.target === nodeId && e.targetHandle?.includes("Left"));
-    const rightConnected = edges.some(e => e.source === nodeId && e.sourceHandle?.includes("Right"));
-    const topConnected = edges.some(e => e.target === nodeId && e.targetHandle?.includes("Top"));
-    const bottomConnected = edges.some(e => e.source === nodeId && e.sourceHandle?.includes("Bottom"));
+    const leftConnected = edges.some((e: any) => e.target === nodeId && e.targetHandle?.includes("Left"));
+    const rightConnected = edges.some((e: any) => e.source === nodeId && e.sourceHandle?.includes("Right"));
+    const topConnected = edges.some((e: any) => e.target === nodeId && e.targetHandle?.includes("Top"));
+    const bottomConnected = edges.some((e: any) => e.source === nodeId && e.sourceHandle?.includes("Bottom"));
 
     // Icons based on hook.type (which is the HookType: pre-execution, post-step, on-error, etc.)
     const typeIcon: Record<string, React.ReactNode> = {
