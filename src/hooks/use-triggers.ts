@@ -105,8 +105,17 @@ export function useTriggers(options: UseTriggersOptions): UseTriggersReturn {
             result = result.filter((t) => t.type === filterType);
         }
 
-        // Sort by nextRun (soonest first)
-        result = [...result].sort((a, b) => (a.nextRun || 0) - (b.nextRun || 0));
+        // Temporal-backed triggers may omit nextRun; fall back to newest-first.
+        result = [...result].sort((a, b) => {
+            const aNext = a.nextRun;
+            const bNext = b.nextRun;
+            if (typeof aNext === "number" && typeof bNext === "number") {
+                return aNext - bNext;
+            }
+            if (typeof aNext === "number") return -1;
+            if (typeof bNext === "number") return 1;
+            return (b.createdAt || 0) - (a.createdAt || 0);
+        });
 
         return result;
     }, [triggers, filterEnabled, filterType]);

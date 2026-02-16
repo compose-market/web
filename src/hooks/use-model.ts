@@ -2,7 +2,7 @@
  * useModels - Central React Query hook for model fetching
  * 
  * Single source of truth for all model data in the frontend.
- * Fetches from /api/registry/models/available with 6-hour cache.
+ * Fetches from /v1/models (canonical) with registry fallback and 6-hour cache.
  * ALL DATA FETCHED DYNAMICALLY - NO HARDCODING.
  */
 
@@ -43,7 +43,7 @@ export interface UseModelsReturn {
 // =============================================================================
 
 const STALE_TIME = 6 * 60 * 60 * 1000; // 6 hours
-const CACHE_KEY = ["registry-models"];
+const CACHE_KEY = ["models-catalog"];
 
 // =============================================================================
 // Hook

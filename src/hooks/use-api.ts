@@ -13,6 +13,7 @@ import { createPaymentFetch } from "@/lib/payment";
 import { useChain } from "@/contexts/ChainContext";
 import { API_BASE_URL } from "@/lib/api";
 import { parseMultimodalResponse } from "@/lib/multimodal";
+import { useSession } from "@/hooks/use-session.tsx";
 import type { MultimodalResult } from "@/lib/api";
 
 // =============================================================================
@@ -62,6 +63,7 @@ export function useApi(): UseApiReturn {
     const wallet = useActiveWallet();
     const account = useActiveAccount();
     const { paymentChainId } = useChain();
+    const { sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken } = useSession();
     const isConnected = !!wallet && !!account;
 
     /**
@@ -79,7 +81,7 @@ export function useApi(): UseApiReturn {
             conversationId,
         } = options;
 
-        if (!wallet) {
+        if (!wallet || !account) {
             return { type: "text", success: false, error: "Wallet not connected" };
         }
 
@@ -88,24 +90,31 @@ export function useApi(): UseApiReturn {
             const baseUrl = endpoint === "playground" ? LAMBDA_URL : MANOWAR_URL;
             const fullUrl = `${baseUrl}${path}`;
 
+            let activeComposeKeyToken = composeKeyToken;
+            if (sessionActive && budgetRemaining > 0 && !activeComposeKeyToken) {
+                activeComposeKeyToken = await ensureComposeKeyToken();
+            }
+            const canUseSessionBypass = Boolean(sessionActive && budgetRemaining > 0 && activeComposeKeyToken);
+
+            const sessionHeaders: Record<string, string> = {};
+            if (canUseSessionBypass) {
+                sessionHeaders["x-session-active"] = "true";
+                sessionHeaders["x-session-budget-remaining"] = budgetRemaining.toString();
+                sessionHeaders["x-session-user-address"] = account.address;
+            }
+
             // Chain-aware payment: routes to Cronos x402 or ThirdWeb based on selected chain
             const fetchWithPayment = createPaymentFetch({
                 chainId: paymentChainId,
-                account: account!,
+                account,
                 wallet,
                 maxValue: price,
+                sessionToken: canUseSessionBypass ? activeComposeKeyToken || undefined : undefined,
+                sessionHeaders,
             });
 
-            // Add session headers if available
-            const sessionHeaders: Record<string, string> = {};
-            const budgetRemaining = sessionStorage.getItem("session_budget_remaining");
-            if (budgetRemaining && parseInt(budgetRemaining) > 0) {
-                sessionHeaders["x-session-active"] = "true";
-                sessionHeaders["x-session-budget-remaining"] = budgetRemaining;
-            }
-
             // Add user address for agent/manowar endpoints
-            if (endpoint !== "playground" && account?.address) {
+            if (endpoint !== "playground" && account.address) {
                 sessionHeaders["x-session-user-address"] = account.address;
             }
 
@@ -134,6 +143,7 @@ export function useApi(): UseApiReturn {
                 onStreamChunk,
                 uploadToPinata,
                 conversationId,
+                videoStatusFetch: fetchWithPayment,
             });
 
         } catch (err) {
@@ -143,7 +153,15 @@ export function useApi(): UseApiReturn {
                 error: err instanceof Error ? err.message : "Unknown error",
             };
         }
-    }, [wallet, account]);
+    }, [
+        wallet,
+        account,
+        paymentChainId,
+        sessionActive,
+        budgetRemaining,
+        composeKeyToken,
+        ensureComposeKeyToken,
+    ]);
 
     return {
         sendMessage,
@@ -162,5 +180,4 @@ export function buildAgentChatPath(agentWallet: string): string {
 export function buildManowarChatPath(manowarWallet: string): string {
     return `/manowar/${manowarWallet}/chat`;
 }
-
 
