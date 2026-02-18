@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { WalletConnector, useWalletAccount } from "@/components/connector";
 import { BackpackDialog } from "@/components/backpack";
 import { SessionIndicator } from "@/components/session";
+import { FaucetButton } from "@/components/faucet";
 import { useChain } from "@/contexts/ChainContext";
 import { CHAIN_CONFIG } from "@/lib/chains";
 import { NetworkSelector } from "@/components/ui/network-selector";
@@ -236,6 +237,7 @@ export function Layout({ children }: LayoutProps) {
 
         {/* Mobile Session Indicator + Connect Button */}
         <div className="flex items-center gap-2 shrink-0">
+          <FaucetButton />
           {isConnected && <SessionIndicator />}
           <WalletConnector compact />
         </div>
