@@ -8,7 +8,7 @@
  */
 
 import { createThirdwebClient, getContract, defineChain } from "thirdweb";
-import { avalancheFuji, avalanche, bscTestnet, bsc } from "thirdweb/chains";
+import { avalancheFuji, avalanche, arbitrumSepolia, arbitrum, bscTestnet, bsc } from "thirdweb/chains";
 import type { SmartWalletOptions } from "thirdweb/wallets";
 
 // =============================================================================
@@ -65,6 +65,8 @@ export const CHAIN_OBJECTS = {
     [CHAIN_IDS.cronos]: cronos,
     [CHAIN_IDS.avalancheFuji]: avalancheFuji,
     [CHAIN_IDS.avalanche]: avalanche,
+    [CHAIN_IDS.arbitrumTestnet]: arbitrumSepolia,
+    [CHAIN_IDS.arbitrum]: arbitrum,
     [CHAIN_IDS.bscTestnet]: bscTestnet,
     [CHAIN_IDS.bsc]: bsc,
 } as const;
@@ -122,6 +124,18 @@ export const CHAIN_CONFIG: Record<number, {
         explorer: "https://snowtrace.io",
         color: "red",
     },
+    [CHAIN_IDS.arbitrumTestnet]: {
+        name: "Arbitrum Sepolia",
+        isTestnet: true,
+        explorer: "https://sepolia.arbiscan.io",
+        color: "cyan",
+    },
+    [CHAIN_IDS.arbitrum]: {
+        name: "Arbitrum One",
+        isTestnet: false,
+        explorer: "https://arbiscan.io",
+        color: "cyan",
+    },
     [CHAIN_IDS.bscTestnet]: {
         name: "BNB Smart Chain Testnet",
         isTestnet: true,
@@ -169,6 +183,7 @@ export function getCronosNetworkString(chainId: number): "cronos-testnet" | "cro
 export const SUPPORTED_CHAINS = [
     { id: CHAIN_IDS.cronosTestnet, chain: cronosTestnet },
     { id: CHAIN_IDS.avalancheFuji, chain: avalancheFuji },
+    { id: CHAIN_IDS.arbitrumTestnet, chain: arbitrumSepolia },
 ] as const;
 
 // =============================================================================
@@ -178,35 +193,25 @@ export const SUPPORTED_CHAINS = [
 
 import type { Address } from "viem";
 
+// Deterministic Compose deployment uses the same contract addresses across supported chains.
+const SHARED_COMPOSE_CONTRACTS = {
+    AgentFactory: import.meta.env.VITE_AGENT_FACTORY_ADDRESS as Address,
+    Clone: import.meta.env.VITE_CLONE_ADDRESS as Address,
+    Warp: import.meta.env.VITE_WARP_ADDRESS as Address,
+    Manowar: import.meta.env.VITE_MANOWAR_ADDRESS as Address,
+    RFA: import.meta.env.VITE_RFA_ADDRESS as Address,
+    Lease: import.meta.env.VITE_LEASE_ADDRESS as Address,
+    Royalties: import.meta.env.VITE_ROYALTIES_ADDRESS as Address,
+    Distributor: import.meta.env.VITE_DISTRIBUTOR_ADDRESS as Address,
+    Delegation: import.meta.env.VITE_DELEGATION_ADDRESS as Address,
+    AgentManager: import.meta.env.VITE_AGENT_MANAGER_ADDRESS as Address,
+    Utils: import.meta.env.VITE_UTILS_ADDRESS as Address,
+} as const;
+
 export const CONTRACT_ADDRESSES = {
-    // Cronos Testnet
-    [CHAIN_IDS.cronosTestnet]: {
-        AgentFactory: (import.meta.env.VITE_CRONOSTEST_AGENT_FACTORY_CONTRACT) as Address,
-        Clone: (import.meta.env.VITE_CRONOSTEST_CLONE_CONTRACT) as Address,
-        Warp: (import.meta.env.VITE_CRONOSTEST_WARP_CONTRACT) as Address,
-        Manowar: (import.meta.env.VITE_CRONOSTEST_MANOWAR_CONTRACT) as Address,
-        RFA: (import.meta.env.VITE_CRONOSTEST_RFA_CONTRACT) as Address,
-        Lease: (import.meta.env.VITE_CRONOSTEST_LEASE_CONTRACT) as Address,
-        Royalties: (import.meta.env.VITE_CRONOSTEST_ROYALTIES_CONTRACT) as Address,
-        Distributor: (import.meta.env.VITE_CRONOSTEST_DISTRIBUTOR_CONTRACT) as Address,
-        Delegation: (import.meta.env.VITE_CRONOSTEST_DELEGATION_CONTRACT) as Address,
-        AgentManager: (import.meta.env.VITE_CRONOSTEST_AGENT_MANAGER_CONTRACT) as Address,
-        Utils: (import.meta.env.VITE_CRONOSTEST_UTILS_CONTRACT) as Address,
-    },
-    // Avalanche Fuji
-    [CHAIN_IDS.avalancheFuji]: {
-        AgentFactory: (import.meta.env.VITE_FUJI_AGENT_FACTORY_CONTRACT) as Address,
-        Clone: (import.meta.env.VITE_FUJI_CLONE_CONTRACT) as Address,
-        Warp: (import.meta.env.VITE_FUJI_WARP_CONTRACT) as Address,
-        Manowar: (import.meta.env.VITE_FUJI_MANOWAR_CONTRACT) as Address,
-        RFA: (import.meta.env.VITE_FUJI_RFA_CONTRACT) as Address,
-        Lease: (import.meta.env.VITE_FUJI_LEASE_CONTRACT) as Address,
-        Royalties: (import.meta.env.VITE_FUJI_ROYALTIES_CONTRACT) as Address,
-        Distributor: (import.meta.env.VITE_FUJI_DISTRIBUTOR_CONTRACT) as Address,
-        Delegation: (import.meta.env.VITE_FUJI_DELEGATION_CONTRACT) as Address,
-        AgentManager: (import.meta.env.VITE_FUJI_AGENT_MANAGER_CONTRACT) as Address,
-        Utils: (import.meta.env.VITE_FUJI_UTILS_CONTRACT) as Address,
-    },
+    [CHAIN_IDS.cronosTestnet]: { ...SHARED_COMPOSE_CONTRACTS },
+    [CHAIN_IDS.avalancheFuji]: { ...SHARED_COMPOSE_CONTRACTS },
+    [CHAIN_IDS.arbitrumTestnet]: { ...SHARED_COMPOSE_CONTRACTS },
 } as const;
 
 type ContractName = keyof typeof CONTRACT_ADDRESSES[typeof CHAIN_IDS.cronosTestnet];
@@ -214,8 +219,7 @@ type ContractName = keyof typeof CONTRACT_ADDRESSES[typeof CHAIN_IDS.cronosTestn
 export function getContractAddress(contract: ContractName, chainId: number = CHAIN_IDS.cronosTestnet): Address {
     const chainContracts = CONTRACT_ADDRESSES[chainId as keyof typeof CONTRACT_ADDRESSES];
     if (!chainContracts) {
-        console.warn(`Contract addresses not configured for chain ${chainId}, falling back to Cronos Testnet`);
-        return CONTRACT_ADDRESSES[CHAIN_IDS.cronosTestnet][contract];
+        throw new Error(`Contract addresses not configured for chain ${chainId}`);
     }
     return chainContracts[contract];
 }
