@@ -186,7 +186,7 @@ export interface AgentCard {
   walletTimestamp?: number; // Timestamp used in wallet derivation (backend needs this)
   chain: number;
   model: string;
-  framework?: "eliza" | "langchain"; // Agent runtime framework
+  framework?: "eliza" | "langchain" | "openclaw"; // Agent runtime framework
   licensePrice: string; // USDC in smallest unit (6 decimals) - cost to nest into Manowar
   licenses: number; // License supply cap (0 = infinite)
   cloneable: boolean;

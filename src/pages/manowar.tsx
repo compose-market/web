@@ -139,6 +139,7 @@ export default function ManowarPage() {
                                 agentCardUri: onchainAgent.agentCardUri, // From blockchain
                                 creator: onchainAgent.creator,
                                 model: onchainAgent.metadata?.model || agentCard.model,
+                                framework: onchainAgent.metadata?.framework || agentCard.framework || "langchain",
                                 plugins: onchainAgent.metadata?.plugins?.map((p) => p.registryId) || [],
                             }),
                         });

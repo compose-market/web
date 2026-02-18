@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
-import { useForm, type SubmitHandler } from "react-hook-form";
+import { useForm, type SubmitHandler, type ControllerRenderProps } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Link, useLocation, useSearch } from "wouter";
@@ -86,7 +86,7 @@ interface SelectedPlugin {
   origin: ServerOrigin;
 }
 
-type FrameworkType = "eliza" | "langchain";
+type FrameworkType = "eliza" | "langchain" | "openclaw";
 
 interface Framework {
   id: FrameworkType;
@@ -105,6 +105,13 @@ const FRAMEWORKS: Framework[] = [
     features: ["Memory", "RAG", "Tool Calling", "State Graphs"],
   },
   {
+    id: "openclaw",
+    name: "OpenClaw",
+    description: "Skills-based autonomous agents with infinite memory and Backpack integrations",
+    color: "emerald",
+    features: ["Infinite Memory", "Skills", "Tool Calling", "Backpack Connectors"],
+  },
+  {
     id: "eliza",
     name: "ElizaOS",
     description: "Agent framework with 200+ plugins for blockchain, social, AI",
@@ -116,7 +123,7 @@ const FRAMEWORKS: Framework[] = [
 const formSchema = z.object({
   name: z.string().min(2).max(50),
   description: z.string().min(10),
-  framework: z.enum(["eliza", "langchain"]),
+  framework: z.enum(["eliza", "langchain", "openclaw"]),
   model: z.string(),
   licensePrice: z.string(),
   endpoint: z.string().url().optional().or(z.literal("")),
@@ -561,7 +568,7 @@ export default function CreateAgent() {
       ),
     });
 
-    // Register with backend using wallet address as the primary identifier
+    // Register with backend using wallet address as the primary identifier.
     if (preparedTx && account?.address && walletAddress) {
       try {
         // Register with backend to spin up agent runtime
@@ -578,6 +585,7 @@ export default function CreateAgent() {
             agentCardUri: preparedTx.agentCardUri,
             creator: account.address,
             model: selectedHFModel?.id || values.model,
+            framework: values.framework,
             plugins: selectedPlugins.map(p => p.id),
           }),
         });
@@ -623,7 +631,7 @@ export default function CreateAgent() {
   };
 
   // Show confirmation before minting
-  const onSubmit: SubmitHandler<FormValues> = async (values) => {
+  const onSubmit: SubmitHandler<FormValues> = async (values: FormValues) => {
     setPendingValues(values);
     setShowConfirmDialog(true);
   };
@@ -911,7 +919,7 @@ export default function CreateAgent() {
                   <FormField
                     control={form.control}
                     name="name"
-                    render={({ field }) => (
+                    render={({ field }: { field: ControllerRenderProps<FormValues, "name"> }) => (
                       <FormItem>
                         <FormLabel className="font-mono text-foreground">Agent Name</FormLabel>
                         <FormControl>
@@ -924,7 +932,7 @@ export default function CreateAgent() {
                   <FormField
                     control={form.control}
                     name="description"
-                    render={({ field }) => (
+                    render={({ field }: { field: ControllerRenderProps<FormValues, "description"> }) => (
                       <FormItem>
                         <FormLabel className="font-mono text-foreground">Purpose & Capabilities</FormLabel>
                         <FormControl>
@@ -942,7 +950,7 @@ export default function CreateAgent() {
                     <FormField
                       control={form.control}
                       name="model"
-                      render={({ field }) => (
+                      render={({ field }: { field: ControllerRenderProps<FormValues, "model"> }) => (
                         <FormItem>
                           <FormLabel className="font-mono text-foreground text-sm">LLM Model</FormLabel>
                           {selectedHFModel ? (
@@ -990,7 +998,7 @@ export default function CreateAgent() {
                     <FormField
                       control={form.control}
                       name="endpoint"
-                      render={({ field }) => (
+                      render={({ field }: { field: ControllerRenderProps<FormValues, "endpoint"> }) => (
                         <FormItem>
                           <FormLabel className="font-mono text-foreground">
                             API Endpoint <span className="text-muted-foreground text-xs">(optional)</span>
@@ -1021,7 +1029,7 @@ export default function CreateAgent() {
                   <FormField
                     control={form.control}
                     name="framework"
-                    render={({ field }) => (
+                    render={({ field }: { field: ControllerRenderProps<FormValues, "framework"> }) => (
                       <FormItem>
                         <FormDescription className="text-xs mb-3">
                           Choose the runtime framework for your agent. Each includes built-in memory & RAG.
@@ -1236,7 +1244,7 @@ export default function CreateAgent() {
                     <FormField
                       control={form.control}
                       name="licensePrice"
-                      render={({ field }) => (
+                      render={({ field }: { field: ControllerRenderProps<FormValues, "licensePrice"> }) => (
                         <FormItem>
                           <FormLabel className="font-mono text-foreground text-sm">License Price (USDC)</FormLabel>
                           <FormControl>
@@ -1252,7 +1260,7 @@ export default function CreateAgent() {
                     <FormField
                       control={form.control}
                       name="licenses"
-                      render={({ field }) => (
+                      render={({ field }: { field: ControllerRenderProps<FormValues, "licenses"> }) => (
                         <FormItem>
                           <FormLabel className="font-mono text-foreground text-sm">License Supply</FormLabel>
                           <FormControl>
@@ -1270,7 +1278,7 @@ export default function CreateAgent() {
                   <FormField
                     control={form.control}
                     name="isCloneable"
-                    render={({ field }) => (
+                    render={({ field }: { field: ControllerRenderProps<FormValues, "isCloneable"> }) => (
                       <FormItem className="flex flex-row items-center justify-between rounded-sm border border-sidebar-border p-4 bg-background/30">
                         <div className="space-y-0.5">
                           <FormLabel className="text-base font-mono text-foreground">Allow Cloning?</FormLabel>
@@ -1526,8 +1534,17 @@ export default function CreateAgent() {
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Framework</span>
-                <span className={`font-mono ${pendingValues.framework === "langchain" ? "text-orange-400" : "text-fuchsia-400"}`}>
-                  {pendingValues.framework === "langchain" ? "LangChain" : "ElizaOS"}
+                <span className={`font-mono ${pendingValues.framework === "langchain"
+                  ? "text-orange-400"
+                  : pendingValues.framework === "openclaw"
+                    ? "text-emerald-400"
+                    : "text-fuchsia-400"
+                  }`}>
+                  {pendingValues.framework === "langchain"
+                    ? "LangChain"
+                    : pendingValues.framework === "openclaw"
+                      ? "OpenClaw"
+                      : "ElizaOS"}
                 </span>
               </div>
               <div className="flex justify-between text-sm">

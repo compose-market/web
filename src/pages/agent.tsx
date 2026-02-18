@@ -132,6 +132,7 @@ export default function AgentDetailPage() {
           agentCardUri: agent.agentCardUri,
           creator: agent.creator,
           model: metadata?.model,
+          framework: metadata?.framework || "langchain",
           plugins: metadata?.plugins?.map(p => p.registryId) || [],
         }),
       });
@@ -436,13 +437,13 @@ export default function AgentDetailPage() {
       if (err instanceof DOMException && err.name === "AbortError") {
         return;
       }
-      
+
       let errorMsg = err instanceof Error ? err.message : "Unknown error";
-      
+
       // Note: Recovery loops removed - rely on backend Temporal state persistence
       // Frontend simply displays errors immediately for better UX
       // Backend handles state via Temporal workflows (resumable via run state endpoint)
-      
+
       // Check for CONSENT_REQUIRED error from agent
       try {
         const parsedError = JSON.parse(errorMsg);
