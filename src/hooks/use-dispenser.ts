@@ -1,12 +1,12 @@
 /**
- * Faucet Hook
+ * Dispenser Hook
  *
- * React Query hooks for faucet operations:
- * - Check faucet status across chains
+ * React Query hooks for dispenser operations:
+ * - Check dispenser status across chains
  * - Check if address has claimed
- * - Claim USDC from faucet
+ * - Claim USDC from dispenser
  *
- * @module hooks/use-faucet
+ * @module hooks/use-dispenser
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -16,22 +16,22 @@ import { API_BASE_URL } from "@/lib/api";
 // Types
 // =============================================================================
 
-export interface FaucetStatus {
+export interface DispenserStatus {
     chainId: number;
     chainName: string;
     totalClaims: number;
     maxClaims: number;
     remainingClaims: number;
-    faucetBalance: string;
-    faucetBalanceFormatted: string;
+    dispenserBalance: string;
+    dispenserBalanceFormatted: string;
     isPaused: boolean;
-    faucetAddress: string;
+    dispenserAddress: string;
     usdcAddress: string;
     isConfigured: boolean;
 }
 
-export interface FaucetStatusResponse {
-    faucets: FaucetStatus[];
+export interface DispenserStatusResponse {
+    dispensers: DispenserStatus[];
     claimAmount: number;
     claimAmountFormatted: string;
     maxClaims: number;
@@ -61,24 +61,24 @@ export interface ClaimCheckResult {
 // API Functions
 // =============================================================================
 
-async function fetchFaucetStatus(): Promise<FaucetStatusResponse> {
-    const response = await fetch(`${API_BASE_URL}/api/faucet/status`);
+async function fetchDispenserStatus(): Promise<DispenserStatusResponse> {
+    const response = await fetch(`${API_BASE_URL}/api/dispenser/status`);
     if (!response.ok) {
-        throw new Error("Failed to fetch faucet status");
+        throw new Error("Failed to fetch dispenser status");
     }
     return response.json();
 }
 
-async function fetchFaucetCheck(address: string): Promise<ClaimCheckResult> {
-    const response = await fetch(`${API_BASE_URL}/api/faucet/check/${address}`);
+async function fetchDispenserCheck(address: string): Promise<ClaimCheckResult> {
+    const response = await fetch(`${API_BASE_URL}/api/dispenser/check/${address}`);
     if (!response.ok) {
-        throw new Error("Failed to check faucet status");
+        throw new Error("Failed to check dispenser status");
     }
     return response.json();
 }
 
-async function claimFaucetUSDC(address: string, chainId: number): Promise<ClaimResult> {
-    const response = await fetch(`${API_BASE_URL}/api/faucet/claim`, {
+async function claimDispenserUSDC(address: string, chainId: number): Promise<ClaimResult> {
+    const response = await fetch(`${API_BASE_URL}/api/dispenser/claim`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ address, chainId }),
@@ -90,10 +90,10 @@ async function claimFaucetUSDC(address: string, chainId: number): Promise<ClaimR
 // Query Keys
 // =============================================================================
 
-const faucetKeys = {
-    all: ["faucet"] as const,
-    status: () => [...faucetKeys.all, "status"] as const,
-    check: (address: string) => [...faucetKeys.all, "check", address.toLowerCase()] as const,
+const dispenserKeys = {
+    all: ["dispenser"] as const,
+    status: () => [...dispenserKeys.all, "status"] as const,
+    check: (address: string) => [...dispenserKeys.all, "check", address.toLowerCase()] as const,
 };
 
 // =============================================================================
@@ -101,45 +101,45 @@ const faucetKeys = {
 // =============================================================================
 
 /**
- * Get faucet status for all supported chains
+ * Get dispenser status for all supported chains
  */
-export function useFaucetStatus() {
+export function useDispenserStatus() {
     return useQuery({
-        queryKey: faucetKeys.status(),
-        queryFn: fetchFaucetStatus,
+        queryKey: dispenserKeys.status(),
+        queryFn: fetchDispenserStatus,
         staleTime: 60 * 1000,
         refetchInterval: 120 * 1000,
     });
 }
 
 /**
- * Check if an address has claimed from any faucet
+ * Check if an address has claimed from any dispenser
  */
-export function useFaucetCheck(address: string | undefined) {
+export function useDispenserCheck(address: string | undefined) {
     return useQuery({
-        queryKey: faucetKeys.check(address || ""),
-        queryFn: () => fetchFaucetCheck(address!),
+        queryKey: dispenserKeys.check(address || ""),
+        queryFn: () => fetchDispenserCheck(address!),
         enabled: !!address && address.startsWith("0x") && address.length === 42,
         staleTime: 30 * 1000,
     });
 }
 
 /**
- * Claim USDC from faucet
+ * Claim USDC from dispenser
  */
-export function useFaucetClaim() {
+export function useDispenserClaim() {
     const queryClient = useQueryClient();
 
     return useMutation({
         mutationFn: ({ address, chainId }: { address: string; chainId: number }) =>
-            claimFaucetUSDC(address, chainId),
+            claimDispenserUSDC(address, chainId),
         onSuccess: (data, variables) => {
             if (data.success) {
                 queryClient.invalidateQueries({
-                    queryKey: faucetKeys.check(variables.address),
+                    queryKey: dispenserKeys.check(variables.address),
                 });
                 queryClient.invalidateQueries({
-                    queryKey: faucetKeys.status(),
+                    queryKey: dispenserKeys.status(),
                 });
             }
         },
