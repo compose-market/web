@@ -178,7 +178,7 @@ export async function submitCronosTransaction(
                 chainId,
                 smartAccount: account.address,
                 signature,
-                userOp, // Include the prepared UserOp
+                preparedUserOp: userOp, // Backend expects "preparedUserOp" key
             }),
         });
 

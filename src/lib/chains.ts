@@ -26,6 +26,9 @@ export const CHAIN_IDS = {
     // Avalanche
     avalancheFuji: 43113,
     avalanche: 43114,
+    // Arbitrum
+    arbitrumTestnet: 421614,
+    arbitrum: 42161,
     // BNB Chain
     bscTestnet: 97,
     bsc: 56,
@@ -77,6 +80,9 @@ export const USDC_ADDRESSES: Record<number, `0x${string}`> = {
     // Avalanche
     [CHAIN_IDS.avalancheFuji]: "0x5425890298aed601595a70AB815c96711a31Bc65",
     [CHAIN_IDS.avalanche]: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
+    // Arbitrum
+    [CHAIN_IDS.arbitrumTestnet]: "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
+    [CHAIN_IDS.arbitrum]: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
     // BNB Chain
     [CHAIN_IDS.bscTestnet]: "0x64544969ed7ebf5f083679233325356ebe738930",
     [CHAIN_IDS.bsc]: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
