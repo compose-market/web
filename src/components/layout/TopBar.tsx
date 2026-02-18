@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { WalletConnector, useWalletAccount } from "@/components/connector";
 import { SessionIndicator } from "@/components/session";
-import { FaucetButton } from "@/components/faucet";
+import { DispenserButton } from "@/components/dispenser";
 import { cn } from "@/lib/utils";
 
 interface TopBarProps {
@@ -37,8 +37,8 @@ export function TopBar({ sidebarCollapsed = false }: TopBarProps) {
           <span className="absolute top-1.5 right-1.5 md:top-2 md:right-2 w-2 h-2 bg-fuchsia-500 rounded-full animate-ping" />
         </Button>
 
-        {/* Faucet button */}
-        <FaucetButton />
+        {/* Dispenser button */}
+        <DispenserButton />
 
         {/* Session budget indicator (only when connected) */}
         {isConnected && <SessionIndicator />}
