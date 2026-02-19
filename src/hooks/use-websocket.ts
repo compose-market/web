@@ -3,13 +3,19 @@
  * 
  * Connects to backend WebSocket for real-time session expiration notifications.
  * 
+ * Production: wss://ws.compose.market
+ * Development: ws://localhost:3000/ws (via Vite proxy)
+ * 
  * @module hooks/useWs
  */
 
 import { useEffect, useRef, useCallback } from "react";
 import { useToast } from "@/hooks/use-toast";
 
-const WS_URL = import.meta.env.VITE_WS_URL || "wss://api.compose.market";
+const WS_URL = import.meta.env.VITE_WS_LAMBDA_URL || 
+    (import.meta.env.PROD 
+        ? "wss://ws.compose.market" 
+        : "ws://localhost:3000/ws");
 
 export interface SessionExpiredEvent {
     action: "session-expired";
@@ -42,7 +48,7 @@ export function useWs(userAddress: string | undefined, chainId: number) {
         ws.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
-                
+
                 if (data.action === "session-expired") {
                     console.log("[ws] Session expired notification");
                     toast({
@@ -50,7 +56,7 @@ export function useWs(userAddress: string | undefined, chainId: number) {
                         description: data.message || "Session expired, create a new session to use our services",
                         variant: "destructive",
                     });
-                    
+
                     window.dispatchEvent(new CustomEvent("session-expired", { detail: data }));
                 }
             } catch (err) {
@@ -61,7 +67,7 @@ export function useWs(userAddress: string | undefined, chainId: number) {
         ws.onclose = () => {
             console.log("[ws] Disconnected");
             wsRef.current = null;
-            
+
             if (reconnectRef.current) {
                 clearTimeout(reconnectRef.current);
             }
