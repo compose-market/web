@@ -45,6 +45,16 @@ export default defineConfig(() => ({
   server: {
     port: CLIENT_PORT,
     strictPort: false,
+    proxy: {
+      "/api": {
+        target: "http://localhost:3000",
+        changeOrigin: true,
+      },
+      "/ws": {
+        target: "ws://localhost:3000",
+        ws: true,
+      },
+    },
   },
   preview: {
     port: 4173,
