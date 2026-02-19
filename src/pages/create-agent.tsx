@@ -67,6 +67,7 @@ import { prepareContractCall, type Hex } from "thirdweb";
 import { accountAbstraction } from "../lib/chains";
 import { getAgentFactoryContractForChain } from "@/lib/contracts";
 import { submitCronosTransaction, encodeContractCall } from "@/lib/cronos/aa";
+import { saveMintSuccessForShare } from "@/lib/share";
 
 const RUNTIME_URL = import.meta.env.VITE_RUNTIME_URL || "https://runtime.compose.market".replace(/\/+$/, "");
 const MANOWAR_URL = import.meta.env.VITE_MANOWAR_URL || "https://manowar.compose.market".replace(/\/+$/, "");
@@ -543,41 +544,35 @@ export default function CreateAgent() {
   };
 
   const handleMintSuccess = async (result: { transactionHash: string }) => {
-    const chainId = selectedChainId; // Use selected chain from context
+    const chainId = selectedChainId;
     const values = form.getValues();
 
-    // Wallet address is already computed in preparedTx from dnaHash (which includes timestamp)
-    // This is the SINGLE SOURCE OF TRUTH - no need to recompute with agentId
     const walletAddress = preparedTx?.walletAddress || null;
 
-    // Show initial success
-    toast({
-      title: "Agent Minted Successfully!",
-      description: (
-        <div className="space-y-1">
-          <p>{values.name} deployed to {CHAIN_CONFIG[chainId]?.name}.</p>
-          <a
-            href={`${CHAIN_CONFIG[chainId].explorer}/tx/${result.transactionHash}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-cyan-400 hover:underline text-xs flex items-center gap-1"
-          >
-            View transaction <ExternalLink className="w-3 h-3" />
-          </a>
-        </div>
-      ),
+    if (!walletAddress) {
+      toast({
+        title: "Minting Error",
+        description: "Could not determine wallet address",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    saveMintSuccessForShare({
+      type: 'agent',
+      name: values.name,
+      walletAddress,
+      txHash: result.transactionHash,
+      chainId,
     });
 
-    // Register with backend using wallet address as the primary identifier.
     if (preparedTx && account?.address && walletAddress) {
       try {
-        // Register with backend to spin up agent runtime
-        // Backend uses wallet address as the primary identifier
         const response = await fetch(`${MANOWAR_URL}/agent/register`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            walletAddress, // From IPFS metadata
+            walletAddress,
             walletTimestamp: preparedTx.walletTimestamp,
             dnaHash: preparedTx.dnaHash,
             name: values.name,
@@ -590,33 +585,15 @@ export default function CreateAgent() {
           }),
         });
 
-        if (response.ok) {
-          toast({
-            title: "Agent Runtime Activated",
-            description: (
-              <div className="space-y-1 text-xs">
-                <p>Wallet: <code className="text-cyan-400">{walletAddress.slice(0, 10)}...{walletAddress.slice(-8)}</code></p>
-                <p>Chat: <code className="text-cyan-400">{MANOWAR_URL}/agent/{walletAddress}/chat</code></p>
-              </div>
-            ),
-          });
-        } else {
+        if (!response.ok) {
           console.warn("Backend registration failed:", await response.text());
         }
       } catch (err) {
         console.error("Failed to register agent:", err);
-        // Non-fatal - agent is minted, just not registered with backend yet
       }
     }
 
-    // Reset form
-    form.reset();
-    setSelectedPlugins([]);
-    setSelectedHFModel(null);
-    setAvatarFile(null);
-    setAvatarPreview(null);
-    setPreparedTx(null);
-    setMintStep("idle");
+    setLocation("/my-assets");
   };
 
   const handleMintError = (error: Error) => {

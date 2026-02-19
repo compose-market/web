@@ -45,6 +45,7 @@ import { useActiveAccount, useActiveWallet, useSendTransaction, useAdminWallet }
 import { prepareContractCall } from "thirdweb";
 import { readContract } from "thirdweb";
 import { submitCronosTransaction, encodeContractCall } from "@/lib/cronos/aa";
+import { saveMintSuccessForShare } from "@/lib/share";
 import {
   getManowarContractForChain, getContractAddressForChain, getAgentFactoryContractForChain,
   weiToUsdc, computeManowarDnaHash, deriveManowarWalletAddress
@@ -118,6 +119,7 @@ function MintManowarDialog({
   agentPrices = new Map()
 }: MintManowarDialogProps) {
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const wallet = useActiveWallet();
   const account = useActiveAccount();
   const adminWallet = useAdminWallet();
@@ -400,27 +402,16 @@ function MintManowarDialog({
           throw new Error(result.error || "Cronos transaction failed");
         }
 
-        toast({
-          title: "Manowar Minted!",
-          description: (
-            <div className="space-y-1">
-              <p>{title} deployed to {CHAIN_CONFIG[selectedChainId]?.name || 'testnet'}.</p>
-              {totalAgentPrice > BigInt(0) && (
-                <p className="text-xs text-muted-foreground">
-                  ${totalAgentPriceFormatted} USDC paid to agent creators
-                </p>
-              )}
-              <a
-                href={`${CHAIN_CONFIG[selectedChainId].explorer}/tx/${result.txHash}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-cyan-400 hover:underline text-xs flex items-center gap-1"
-              >
-                View transaction <ExternalLink className="w-3 h-3" />
-              </a>
-            </div>
-          ),
+        saveMintSuccessForShare({
+          type: 'manowar',
+          name: title,
+          walletAddress,
+          txHash: result.txHash!,
+          chainId: selectedChainId,
         });
+
+        onOpenChange(false);
+        setLocation("/my-assets");
       } else {
         // Fuji/other chains: Use ThirdWeb sendTransaction with AA
         const manowarContract = getManowarContractForChain(selectedChainId);
@@ -453,29 +444,16 @@ function MintManowarDialog({
           await sendTransaction(approvalTx);
         }
         const result = await sendTransaction(mintTransaction);
-        toast({
-          title: "Manowar Minted!",
-          description: (
-            <div className="space-y-1">
-              <p>{title} deployed to {CHAIN_CONFIG[selectedChainId]?.name || 'testnet'}.</p>
-              {totalAgentPrice > BigInt(0) && (
-                <p className="text-xs text-muted-foreground">
-                  ${totalAgentPriceFormatted} USDC paid to agent creators
-                </p>
-              )}
-              <a
-                href={`${CHAIN_CONFIG[selectedChainId].explorer}/tx/${result.transactionHash}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-cyan-400 hover:underline text-xs flex items-center gap-1"
-              >
-                View transaction <ExternalLink className="w-3 h-3" />
-              </a>
-            </div>
-          ),
+        saveMintSuccessForShare({
+          type: 'manowar',
+          name: title,
+          walletAddress,
+          txHash: result.transactionHash,
+          chainId: selectedChainId,
         });
+        onOpenChange(false);
+        setLocation("/my-assets");
       }
-      onOpenChange(false);
     } catch (error) {
       toast({
         title: "Minting Failed",

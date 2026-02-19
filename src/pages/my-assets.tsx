@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,6 +36,8 @@ import { CHAIN_CONFIG, CHAIN_IDS } from "@/lib/chains";
 import { useChain } from "@/contexts/ChainContext";
 import { getContractAddress, getRFAContract, RFA_BOUNTY_LIMITS } from "@/lib/contracts";
 import { RFADetails } from "@/components/RFADetails";
+import { ShareSuccessDialog } from "@/components/share-dialog";
+import { getMintSuccessForShare, clearMintSuccessShare, type MintShareData } from "@/lib/share";
 
 export default function MyAssetsPage() {
   const { toast } = useToast();
@@ -50,6 +52,26 @@ export default function MyAssetsPage() {
   // RFA detail dialog state
   const [selectedRfaId, setSelectedRfaId] = useState<number | null>(null);
   const [showRFADetails, setShowRFADetails] = useState(false);
+
+  // Share success dialog state
+  const [showShareDialog, setShowShareDialog] = useState(false);
+  const [shareData, setShareData] = useState<MintShareData | null>(null);
+
+  useEffect(() => {
+    const data = getMintSuccessForShare();
+    if (data) {
+      setShareData(data);
+      setShowShareDialog(true);
+    }
+  }, []);
+
+  const handleCloseShareDialog = (open: boolean) => {
+    setShowShareDialog(open);
+    if (!open) {
+      clearMintSuccessShare();
+      setShareData(null);
+    }
+  };
 
   const copyAddress = (address: string) => {
     navigator.clipboard.writeText(address);
@@ -323,6 +345,13 @@ export default function MyAssetsPage() {
           />
         </TabsContent>
       </Tabs>
+
+      {/* Share Success Dialog */}
+      <ShareSuccessDialog
+        open={showShareDialog}
+        onOpenChange={handleCloseShareDialog}
+        data={shareData}
+      />
     </div>
   );
 }
