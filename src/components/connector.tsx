@@ -1,14 +1,15 @@
 "use client";
 
-import { ConnectButton, useActiveAccount, useActiveWallet } from "thirdweb/react";
+import { ConnectButton, useActiveAccount, useActiveWallet, useAdminWallet } from "thirdweb/react";
 import { createWallet, inAppWallet } from "thirdweb/wallets";
 import type { SmartWalletOptions } from "thirdweb/wallets";
 import { thirdwebClient, CHAIN_OBJECTS, USDC_ADDRESSES, CHAIN_CONFIG, paymentToken as defaultPaymentToken, CHAIN_IDS } from "@/lib/chains";
 import { useChain } from "@/contexts/ChainContext";
 import { useTotalBalance } from "@/hooks/use-multichain";
 import { cn } from "@/lib/utils";
-import { useState, useMemo } from "react";
-import { ChevronDown, LogOut, Copy, Check, ExternalLink } from "lucide-react";
+import { useState, useMemo, useEffect } from "react";
+import { ChevronDown, LogOut, Copy, Check, ExternalLink, AlertTriangle } from "lucide-react";
+import { registerOnCronos } from "@/lib/cronos/aa";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -60,6 +61,7 @@ interface WalletConnectorProps {
 export function WalletConnector({ className, compact = false }: WalletConnectorProps) {
   const account = useActiveAccount();
   const wallet = useActiveWallet();
+  const adminWallet = useAdminWallet();
   const { paymentChainId } = useChain();
   const { formatted: totalBalance, isLoading: balanceLoading } = useTotalBalance(account?.address);
   const [copied, setCopied] = useState(false);
@@ -84,10 +86,9 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
     factoryAddress: (import.meta.env.VITE_CRONOSTEST_ACCOUNT_FACTORY) as `0x${string}`,
     entrypointAddress: (import.meta.env.VITE_CRONOSTEST_ENTRYPOINT) as `0x${string}`,
   };
-
   // Build accountAbstraction config - use selected chain for bundler/paymaster
   // For Cronos Testnet, override with chain-specific factory and entrypoint addresses
-  const dynamicAccountAbstraction: SmartWalletOptions = useMemo(() => {
+  const dynamicAccountAbstraction = useMemo(() => {
     const config: SmartWalletOptions = {
       chain: smartAccountChain,
       sponsorGas: true,
@@ -101,7 +102,6 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
         entrypointAddress: CRONOS_TESTNET_AA_CONFIG.entrypointAddress,
       };
     }
-
     return config;
   }, [smartAccountChain, paymentChainId]);
 
@@ -137,7 +137,7 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
             hover:!bg-cyan-400
             !border-0 !rounded-sm
             ${className || ""}
-          `,
+        `,
           style: {
             fontFamily: "var(--font-display), Orbitron, sans-serif",
             textTransform: "uppercase",
