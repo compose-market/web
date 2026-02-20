@@ -374,6 +374,34 @@
     }
   }
 
+  /* Partner Badge Scanline Animation */
+  @keyframes partner-scanline {
+    0% {
+      transform: translateY(-100px);
+    }
+    100% {
+      transform: translateY(calc(100vh + 100px));
+    }
+  }
+
+  /* Partner Logo Carousel Animation */
+  @keyframes partner-carousel {
+    0% {
+      transform: translateX(0);
+    }
+    100% {
+      transform: translateX(-50%);
+    }
+  }
+
+  .animate-partner-carousel {
+    animation: partner-carousel 40s linear infinite;
+  }
+
+  .animate-partner-carousel:hover {
+    animation-play-state: paused;
+  }
+
   /* Shimmer Animation for GenerationCanvas */
   @keyframes shimmer {
     0% {
