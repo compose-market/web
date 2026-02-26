@@ -21,7 +21,7 @@ import type { MultimodalResult } from "@/lib/api";
 // =============================================================================
 
 // Backend URLs
-const LAMBDA_URL = API_BASE_URL || "";
+const LAMBDA_URL = API_BASE_URL;
 const MANOWAR_URL = import.meta.env.VITE_MANOWAR_URL
     ? import.meta.env.VITE_MANOWAR_URL.replace(/\/$/, "")
     : "https://manowar.compose.market";
@@ -180,4 +180,3 @@ export function buildAgentChatPath(agentWallet: string): string {
 export function buildManowarChatPath(manowarWallet: string): string {
     return `/manowar/${manowarWallet}/chat`;
 }
-

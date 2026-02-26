@@ -8,7 +8,6 @@ import { useMemo, useCallback } from "react";
 
 /**
  * Build the registry base URL
- * In development: Falls back to localhost:4001
  * The registry is on the connector server under /registry path.
  */
 function getRegistryBaseUrl(): string {
@@ -18,12 +17,7 @@ function getRegistryBaseUrl(): string {
     return `${connectorUrl.replace(/\/$/, "")}/registry`;
   }
 
-  if (typeof window !== "undefined" && window.location.hostname !== "localhost") {
-    return "https://services.compose.market/connector/registry";
-  }
-
-  // Development
-  return "http://localhost:4001/registry";
+  return "https://services.compose.market/connector/registry";
 }
 
 const REGISTRY_BASE = getRegistryBaseUrl();
@@ -399,4 +393,3 @@ export function formatToolCount(count: number): string {
   if (count === 1) return "1 tool";
   return `${count} tools`;
 }
-

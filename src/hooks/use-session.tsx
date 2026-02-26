@@ -324,7 +324,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         };
 
         const handleSessionExpired = () => {
-            console.log("[session] Received session-expired event from WebSocket");
+            console.log("[session] Received session-expired event from session stream");
             clearSessionState();
         };
 

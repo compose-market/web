@@ -2,7 +2,7 @@
  * Lyria RealTime WebSocket Hook
  * 
  * Handles real-time music generation via WebSocket connection to socket server.
- * Connects to ws://localhost:4004/lyria (or production socket server)
+ * Connects to the configured production socket server.
  * 
  * Protocol:
  * 1. Connect to WebSocket
