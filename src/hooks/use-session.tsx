@@ -26,7 +26,7 @@ import {
 import { useChain } from "@/contexts/ChainContext";
 import { SESSION_BUDGET_EVENT, SESSION_INVALID_EVENT } from "@/lib/payment";
 import { submitCronosTransaction, encodeContractCall } from "@/lib/cronos/aa";
-import { useWs } from "./use-websocket";
+import { useWs } from "./use-sse";
 import type { Address } from "viem";
 
 // Session storage key
