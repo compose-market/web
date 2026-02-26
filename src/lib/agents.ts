@@ -412,11 +412,7 @@ function getConnectorBaseUrl(): string {
     return connectorUrl.replace(/\/$/, "");
   }
 
-  if (typeof window !== "undefined" && window.location.hostname !== "localhost") {
-    return "https://services.compose.market/connector";
-  }
-
-  return "http://localhost:4001";
+  return "https://services.compose.market/connector";
 }
 
 /**
@@ -544,13 +540,130 @@ async function searchEliza(
 }
 
 /**
- * Search ManoWar registry (placeholder for future)
+ * Search ManoWar native agent registry
  */
 async function searchManowar(
-  _options: SearchAgentsOptions
+  options: SearchAgentsOptions
 ): Promise<{ agents: Agent[]; total: number; tags: string[]; categories: string[] }> {
-  // TODO: Implement when ManoWar registry is ready
-  return { agents: [], total: 0, tags: [], categories: [] };
+  type ManowarAgentCard = {
+    schemaVersion?: string;
+    name?: string;
+    description?: string;
+    skills?: string[];
+    image?: string;
+    avatar?: string;
+    dnaHash?: string;
+    walletAddress?: string;
+    chain?: number;
+    model?: string;
+    framework?: string;
+    licensePrice?: string;
+    licenses?: number;
+    cloneable?: boolean;
+    endpoint?: string;
+    protocols?: Array<{ name: string; version: string }>;
+    plugins?: Array<{ name?: string; registryId?: string; origin?: string }>;
+    createdAt?: string;
+    creator?: string;
+  };
+
+  try {
+    const response = await fetch(apiUrl("/agents"));
+    if (!response.ok) {
+      console.warn("Failed to fetch manowar agents:", response.status);
+      return { agents: [], total: 0, tags: [], categories: [] };
+    }
+
+    const data = await response.json() as { agents?: ManowarAgentCard[] };
+    const cards = Array.isArray(data.agents) ? data.agents : [];
+
+    let filtered = cards.filter((card) => typeof card.walletAddress === "string" && card.walletAddress.startsWith("0x"));
+
+    if (options.search) {
+      const q = options.search.toLowerCase();
+      filtered = filtered.filter((card) => {
+        const name = (card.name || "").toLowerCase();
+        const description = (card.description || "").toLowerCase();
+        const skills = (card.skills || []).join(" ").toLowerCase();
+        const model = (card.model || "").toLowerCase();
+        return name.includes(q) || description.includes(q) || skills.includes(q) || model.includes(q);
+      });
+    }
+
+    if (options.tags?.length) {
+      const required = options.tags.map((tag) => tag.toLowerCase());
+      filtered = filtered.filter((card) => {
+        const skillTags = (card.skills || []).map((tag) => tag.toLowerCase());
+        return required.some((tag) => skillTags.includes(tag));
+      });
+    }
+
+    if (options.category) {
+      const categoryQuery = options.category.toLowerCase();
+      filtered = filtered.filter((card) => {
+        const category = deriveCategory(card.skills || []).toLowerCase();
+        return category === categoryQuery || category.includes(categoryQuery);
+      });
+    }
+
+    const offset = Math.max(0, options.offset || 0);
+    const limit = Math.max(1, options.limit || 30);
+    const paged = filtered.slice(offset, offset + limit);
+
+    const agents: Agent[] = paged.map((card) => {
+      const protocolList = Array.isArray(card.protocols) ? card.protocols : [];
+      const protocols = protocolList.length > 0
+        ? protocolList
+        : [{ name: "x402", version: "1.0" }];
+      const tags = Array.from(new Set([
+        ...(card.skills || []),
+        ...(card.plugins || []).map((plugin) => plugin.origin || "").filter(Boolean),
+        "onchain",
+        "manowar",
+      ].map((tag) => tag.toLowerCase())));
+
+      const priceWei = Number(card.licensePrice || "0");
+      const pricePerRequest = Number.isFinite(priceWei) ? (priceWei / 1_000_000).toFixed(6) : "0.000000";
+
+      return {
+        id: card.walletAddress!,
+        address: card.walletAddress!,
+        name: card.name || "Unnamed Agent",
+        description: card.description || "",
+        registry: "manowar",
+        readme: card.description || "",
+        protocols,
+        avatarUrl: card.image || card.avatar || null,
+        totalInteractions: 0,
+        recentInteractions: 0,
+        rating: 5,
+        status: "active",
+        type: card.endpoint ? "hosted" : "local",
+        featured: false,
+        verified: true,
+        category: deriveCategory(tags),
+        tags,
+        owner: card.creator || card.walletAddress!,
+        createdAt: card.createdAt || new Date().toISOString(),
+        updatedAt: card.createdAt || new Date().toISOString(),
+        onchainAgentId: undefined,
+        pricePerRequest,
+      };
+    });
+
+    const allTags = Array.from(new Set(filtered.flatMap((card) => card.skills || []).map((tag) => tag.toLowerCase()))).sort();
+    const allCategories = Array.from(new Set(filtered.map((card) => deriveCategory(card.skills || [])))).sort();
+
+    return {
+      agents,
+      total: filtered.length,
+      tags: allTags,
+      categories: allCategories,
+    };
+  } catch (err) {
+    console.warn("Error fetching manowar agents:", err);
+    return { agents: [], total: 0, tags: [], categories: [] };
+  }
 }
 
 /**
@@ -764,4 +877,3 @@ export function getEnabledRegistries(): AgentRegistryId[] {
   return (Object.keys(AGENT_REGISTRIES) as AgentRegistryId[])
     .filter(id => AGENT_REGISTRIES[id].enabled);
 }
-

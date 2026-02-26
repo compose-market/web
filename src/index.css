@@ -379,27 +379,41 @@
     0% {
       transform: translateY(-100px);
     }
+
     100% {
       transform: translateY(calc(100vh + 100px));
     }
   }
 
-  /* Partner Logo Carousel Animation */
-  @keyframes partner-carousel {
+  /* Infinite Marquee for Partner Logos */
+  @keyframes marquee-scroll {
     0% {
       transform: translateX(0);
     }
+
     100% {
       transform: translateX(-50%);
     }
   }
 
-  .animate-partner-carousel {
-    animation: partner-carousel 40s linear infinite;
+  @keyframes marquee-scroll-reverse {
+    0% {
+      transform: translateX(-50%);
+    }
+
+    100% {
+      transform: translateX(0);
+    }
   }
 
-  .animate-partner-carousel:hover {
-    animation-play-state: paused;
+  .marquee-track {
+    animation: marquee-scroll linear infinite;
+    will-change: transform;
+  }
+
+  .marquee-track-reverse {
+    animation: marquee-scroll-reverse linear infinite;
+    will-change: transform;
   }
 
   /* Shimmer Animation for GenerationCanvas */

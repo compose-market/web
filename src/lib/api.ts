@@ -13,7 +13,7 @@
 
 export const API_BASE_URL = import.meta.env.VITE_API_URL
   ? import.meta.env.VITE_API_URL.replace(/\/$/, "")
-  : "";
+  : "https://api.compose.market";
 
 export function apiUrl(path: string): string {
   return API_BASE_URL ? `${API_BASE_URL}${path}` : path;

@@ -247,7 +247,7 @@ export async function pollVideoJob(
         fetcher?: VideoStatusFetch;
     }
 ): Promise<void> {
-    const API_BASE = API_BASE_URL || "";
+    const API_BASE = API_BASE_URL;
     const pollInterval = options?.pollIntervalMs ?? TIMEOUT_CONFIG.VIDEO_POLL.INTERVAL_MS;
     const maxAttempts = options?.maxAttempts ?? TIMEOUT_CONFIG.VIDEO_POLL.MAX_ATTEMPTS;
     const statusFetch = options?.fetcher ?? fetch;

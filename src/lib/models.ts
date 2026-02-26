@@ -74,7 +74,7 @@ export interface ModelRegistry {
   sources: string[];
 }
 
-const API_BASE = import.meta.env.VITE_API_URL || "";
+const API_BASE = (import.meta.env.VITE_API_URL || "https://api.compose.market").replace(/\/+$/, "");
 
 /**
  * Fetch available models from canonical /v1/models endpoint.

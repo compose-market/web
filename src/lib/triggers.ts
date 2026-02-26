@@ -5,7 +5,7 @@
  * Follows the same pattern as models.ts for consistency.
  */
 
-const API_BASE = import.meta.env.VITE_API_URL || "";
+const API_BASE = (import.meta.env.VITE_API_URL || "https://api.compose.market").replace(/\/+$/, "");
 
 // =============================================================================
 // Types (mirrored from backend for frontend use)

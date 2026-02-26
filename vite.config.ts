@@ -4,6 +4,8 @@ import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 
 const CLIENT_PORT = 5173;
+const API_PROXY_TARGET = process.env.VITE_DEV_PROXY_API_TARGET || "https://api.compose.market";
+const WS_PROXY_TARGET = process.env.VITE_DEV_PROXY_WS_TARGET || "wss://api.compose.market";
 
 export default defineConfig(() => ({
   plugins: [react(), tailwindcss()],
@@ -47,11 +49,11 @@ export default defineConfig(() => ({
     strictPort: false,
     proxy: {
       "/api": {
-        target: "http://localhost:3000",
+        target: API_PROXY_TARGET,
         changeOrigin: true,
       },
       "/ws": {
-        target: "ws://localhost:3000",
+        target: WS_PROXY_TARGET,
         ws: true,
       },
     },
