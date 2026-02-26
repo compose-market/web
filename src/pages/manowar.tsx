@@ -11,7 +11,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useParams } from "wouter";
 import { Link } from "wouter";
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
-import { inferencePriceWei, isCronosChain } from "@/lib/chains";
+import { CHAIN_CONFIG, inferencePriceWei, isCronosChain } from "@/lib/chains";
 import { createPaymentFetch } from "@/lib/payment";
 import { useChain } from "@/contexts/ChainContext";
 import { Button } from "@/components/ui/button";
@@ -118,20 +118,33 @@ export default function ManowarPage() {
 
                 // Also register each component agent so orchestrator can delegate to them
                 const agents = manowar.metadata?.agents || [];
+                const componentRegistrationErrors: string[] = [];
                 for (const agentCard of agents) {
                     if (!agentCard.walletAddress) continue;
                     try {
+                        const chainId = agentCard.chain;
+                        if (!Number.isInteger(chainId) || !CHAIN_CONFIG[chainId as number]) {
+                            throw new Error(`Invalid metadata.chain for agent ${agentCard.walletAddress}: ${String(chainId)}`);
+                        }
+
                         // Fetch the full on-chain agent data of the agentCardUri
                         const onchainAgent = await fetchAgentByWalletAddress(agentCard.walletAddress);
                         if (!onchainAgent) {
-                            console.warn(`[manowar] Component agent ${agentCard.walletAddress.slice(0, 10)}... not found on-chain`);
-                            continue;
+                            throw new Error(`Component agent ${agentCard.walletAddress} not found on-chain`);
+                        }
+
+                        const onchainMetadataChain = onchainAgent.metadata?.chain;
+                        if (!Number.isInteger(onchainMetadataChain) || onchainMetadataChain !== chainId) {
+                            throw new Error(
+                                `metadata.chain mismatch for ${agentCard.walletAddress}: card=${chainId}, onchain=${String(onchainMetadataChain)}`
+                            );
                         }
 
                         const agentRes = await fetch(`${MANOWAR_URL}/agent/register`, {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({
+                                chainId,
                                 walletAddress: onchainAgent.walletAddress,
                                 dnaHash: onchainAgent.dnaHash,
                                 name: onchainAgent.metadata?.name || agentCard.name || `Agent ${agentCard.walletAddress.slice(0, 8)}`,
@@ -143,12 +156,25 @@ export default function ManowarPage() {
                                 plugins: onchainAgent.metadata?.plugins?.map((p) => p.registryId) || [],
                             }),
                         });
-                        if (agentRes.ok || agentRes.status === 409) {
-                            console.log(`[manowar] Registered component agent ${agentCard.walletAddress.slice(0, 10)}...`);
+                        if (!agentRes.ok && agentRes.status !== 409) {
+                            throw new Error(`Registration failed with ${agentRes.status}: ${await agentRes.text()}`);
                         }
+                        console.log(`[manowar] Registered component agent ${agentCard.walletAddress.slice(0, 10)}...`);
                     } catch (err) {
+                        const message = err instanceof Error ? err.message : String(err);
+                        componentRegistrationErrors.push(message);
                         console.warn(`[manowar] Failed to register component agent:`, err);
                     }
+                }
+
+                if (componentRegistrationErrors.length > 0) {
+                    const firstError = componentRegistrationErrors[0];
+                    toast({
+                        title: "Component Agent Registration Failed",
+                        description: firstError,
+                        variant: "destructive",
+                    });
+                    return false;
                 }
 
                 return true;
@@ -160,7 +186,7 @@ export default function ManowarPage() {
             console.error(`[manowar] Auto-registration error:`, err);
             return false;
         }
-    }, [manowar]);
+    }, [manowar, toast]);
 
     // Pre-register manowar when page loads
     useEffect(() => {
@@ -515,13 +541,13 @@ export default function ManowarPage() {
             if (err instanceof DOMException && err.name === "AbortError") {
                 return;
             }
-            
+
             let errorMsg = err instanceof Error ? err.message : "Unknown error";
-            
+
             // Note: Recovery loops removed - rely on backend Temporal state persistence
             // Frontend simply displays errors immediately for better UX
             // Backend handles state via Temporal workflows (resumable via run state endpoint)
-            
+
             setChatError(errorMsg);
             setMessages(prev =>
                 prev.map(m => m.id === assistantId ? { ...m, content: `Error: ${errorMsg}` } : m)

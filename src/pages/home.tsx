@@ -1,68 +1,68 @@
 import { Button } from "@/components/ui/button";
 import { Link } from "wouter";
 import { ArrowRight, Cpu, Hexagon, Layers, ShieldCheck, Zap } from "lucide-react";
-import { ComposeLogo, GlitchText, WorkflowCube } from "@/components/brand/Logo";
+import { GlitchText, WorkflowCube } from "@/components/brand/Logo";
 import { PartnershipSection } from "@/components/partners";
 
 export default function Home() {
   return (
-    <div className="pb-20">
-      {/* Unified Above-the-Fold Section */}
-      <div className="flex flex-col items-center justify-center min-h-[calc(100vh-120px)] sm:min-h-[calc(100vh-160px)] px-2 border-b border-sidebar-border/30">
-        {/* Hero Section - Maximum Compactness */}
-        <section className="relative w-full flex flex-col items-center justify-center text-center space-y-4 sm:space-y-6 pt-4 sm:pt-6 pb-8 sm:pb-12">
+    <div>
+      {/* ── Above-the-Fold: Full Viewport ──────────────────────────── */}
+      <div className="flex min-h-[calc(100dvh-3.5rem)] flex-col justify-center items-center py-6 sm:py-8 md:py-10 snap-start snap-always overflow-hidden">
+        {/* Hero Section — vertically centered with partnership section */}
+        <section className="relative w-full flex flex-col items-center justify-center text-center gap-4 sm:gap-5 px-4 sm:px-6 pb-6 sm:pb-8">
           {/* Decorative floating cube */}
-          <div className="absolute top-0 right-0 w-32 sm:w-48 lg:w-64 h-32 sm:h-48 lg:h-64 opacity-10 pointer-events-none animate-[spin_60s_linear_infinite]">
+          <div className="absolute top-4 right-4 sm:top-8 sm:right-8 w-40 sm:w-56 lg:w-72 h-40 sm:h-56 lg:h-72 opacity-[0.06] pointer-events-none animate-[spin_60s_linear_infinite]">
             <WorkflowCube className="w-full h-full text-muted" />
           </div>
 
           <div className="relative z-10 space-y-3 sm:space-y-4 max-w-2xl">
-            <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-display font-black text-white leading-tight">
+            <h1 className="text-[clamp(2.2rem,5.5vw,4.5rem)] font-display font-black text-white leading-[0.95]">
               <GlitchText text="COMPOSE" className="text-white" /><br />
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-cyan-200 to-white">THE FUTURE</span>
             </h1>
 
-            <p className="text-sm sm:text-base lg:text-lg text-muted-foreground font-sans max-w-lg mx-auto">
-              The marketplace for autonomous agents. Create, lease, and compose AI workflows.
-              Powered by the <strong className="text-cyan-400">Manowar Framework</strong>.
+            <p className="text-[clamp(0.82rem,1.8vw,1.15rem)] text-muted-foreground font-sans max-w-xl mx-auto">
+              compose.market is marketplace for autonomous agents. Create, lease, and compose AI workflows.
+              Powered by the <a href="https://docs.compose.market/framework/framework"> <strong className="text-cyan-400">Manowar Framework</strong></a>.
             </p>
-            <p className="text-xs sm:text-sm text-muted-foreground/70 font-mono">
-              ERC8004 Identity & x402 Payments on Cronos
+            <p className="text-[clamp(0.65rem,1.2vw,0.88rem)] text-muted-foreground/70 font-mono">
+              ERC8004 Identity &amp; x402 Payments on Cronos
             </p>
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 w-full sm:w-auto px-4 sm:px-0">
+          <div className="relative z-10 flex flex-col sm:flex-row gap-3 sm:gap-4 w-full sm:w-auto px-4 sm:px-0">
             <Link href="/market" className="w-full sm:w-auto">
-              <Button size="lg" className="w-full sm:w-auto h-12 px-6 sm:px-8 text-sm sm:text-lg font-bold font-mono tracking-wider bg-cyan-500 text-black hover:bg-cyan-400 transition-colors shadow-[0_0_20px_rgba(6,182,212,0.4)]">
+              <Button size="lg" className="w-full sm:w-auto h-11 sm:h-12 md:h-13 px-6 sm:px-8 text-sm sm:text-base font-bold font-mono tracking-wider bg-cyan-500 text-black hover:bg-cyan-400 transition-colors shadow-[0_0_20px_rgba(6,182,212,0.4)]">
                 EXPLORE MARKET
                 <ArrowRight className="ml-2 w-4 h-4" />
               </Button>
             </Link>
             <Link href="/compose" className="w-full sm:w-auto">
-              <Button size="lg" variant="outline" className="w-full sm:w-auto h-12 px-6 sm:px-8 text-sm sm:text-lg font-bold font-mono tracking-wider border-sidebar-border text-foreground hover:border-fuchsia-500 hover:text-fuchsia-400 transition-colors">
+              <Button size="lg" variant="outline" className="w-full sm:w-auto h-11 sm:h-12 md:h-13 px-6 sm:px-8 text-sm sm:text-base font-bold font-mono tracking-wider border-sidebar-border text-foreground hover:border-fuchsia-500 hover:text-fuchsia-400 transition-colors">
                 START COMPOSING
               </Button>
             </Link>
           </div>
         </section>
 
-        {/* Partnership Section - Flush with Hero */}
-        <PartnershipSection className="mt-auto pb-4" />
+        {/* Partnership Section — pinned to bottom of fold */}
+        <PartnershipSection className="w-full shrink-0" />
       </div>
 
-      {/* Content Sections with proper spacing */}
+      {/* ── Content Sections ──────────────────────────────────────── */}
       <div className="mt-12 sm:mt-16 lg:mt-24 space-y-12 sm:space-y-16 lg:space-y-24 px-0">
 
         {/* Stats Dashboard */}
-        < section className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4" >
+        <section className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           <StatCard label="Total Agents" value="8,420" trend="+12%" icon={Cpu} />
           <StatCard label="Workflows Active" value="1,204" trend="+5%" icon={Layers} />
           <StatCard label="24h Volume" value="$2.4M" trend="+8%" icon={Zap} />
           <StatCard label="Network Load" value="42%" trend="-2%" icon={Hexagon} />
-        </section >
+        </section>
 
         {/* Features Grid */}
-        < section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6" >
+        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           <FeatureCard
             icon={ShieldCheck}
             title="ERC8004 Identity"
@@ -78,10 +78,10 @@ export default function Home() {
             title="Composable Workflows"
             description="Mint complex logic as Nested NFTs (ERC7401). Lease entire swarms with one click."
           />
-        </section >
+        </section>
 
         {/* Composable Workflow Teaser */}
-        < section className="relative rounded-lg border border-sidebar-border bg-sidebar-accent/50 p-4 sm:p-6 lg:p-8 overflow-hidden" >
+        <section className="relative rounded-lg border border-sidebar-border bg-sidebar-accent/50 p-4 sm:p-6 lg:p-8 overflow-hidden">
           <div className="absolute top-0 right-0 p-4 opacity-10 hidden sm:block">
             <Hexagon size={150} className="sm:w-[150px] lg:w-[200px]" strokeWidth={1} />
           </div>
@@ -118,9 +118,8 @@ export default function Home() {
               </Link>
             </div>
 
-            {/* Visual Representation of Composer - simplified on mobile */}
+            {/* Visual Representation of Composer */}
             <div className="relative h-48 sm:h-56 lg:h-64 bg-background border border-sidebar-border rounded-sm p-3 sm:p-4 glitch-border overflow-hidden">
-              {/* Mock Nodes - stacked vertically on mobile */}
               <div className="absolute top-3 left-3 sm:top-8 sm:left-8 w-24 sm:w-32 p-2 sm:p-3 bg-sidebar-accent border border-cyan-500/50 rounded-sm shadow-[0_0_15px_rgba(6,182,212,0.2)]">
                 <div className="text-[8px] sm:text-[10px] text-cyan-400 font-mono mb-0.5 sm:mb-1">INPUT_SOURCE</div>
                 <div className="font-bold text-xs sm:text-sm text-white truncate">Twitter_Stream</div>
@@ -136,17 +135,16 @@ export default function Home() {
                 <div className="font-bold text-xs sm:text-sm text-white truncate">Exec_Trade</div>
               </div>
 
-              {/* Connecting Lines (SVG) - hidden on mobile */}
               <svg className="absolute inset-0 w-full h-full pointer-events-none z-0 hidden sm:block">
                 <path d="M100 35 C 160 35, 120 95, 180 95" stroke="rgba(6,182,212,0.5)" strokeWidth="2" strokeDasharray="4 2" fill="none" />
                 <path d="M280 95 C 320 95, 280 160, 340 160" stroke="rgba(217,70,239,0.5)" strokeWidth="2" strokeDasharray="4 2" fill="none" />
               </svg>
             </div>
           </div>
-        </section >
+        </section>
 
         {/* CTA Section */}
-        < section className="relative rounded-lg overflow-hidden border border-primary/20" >
+        <section className="relative rounded-lg overflow-hidden border border-primary/20">
           <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/10 to-fuchsia-500/10" />
           <div className="relative z-10 p-6 sm:p-8 lg:p-12 flex flex-col items-center text-center md:text-left md:flex-row md:justify-between gap-6 sm:gap-8">
             <div className="space-y-2 sm:space-y-4">
@@ -160,11 +158,11 @@ export default function Home() {
               </Button>
             </Link>
           </div>
-        </section >
+        </section>
+      </div>
 
-        {/* Footer */}
-      </div >
-      <footer className="border-t border-sidebar-border pt-6 sm:pt-8 flex flex-col sm:flex-row justify-between items-center gap-4 text-muted-foreground font-mono text-[10px] sm:text-xs">
+      {/* Footer */}
+      <footer className="border-t border-sidebar-border pt-6 sm:pt-8 flex flex-col sm:flex-row justify-between items-center gap-4 text-muted-foreground font-mono text-[10px] sm:text-xs mt-12 sm:mt-16">
         <div className="flex gap-4 sm:gap-6">
           <a href="https://docs.compose.market" className="hover:text-cyan-400 transition-colors">DOCS</a>
           <a href="https://github.com/compose-market" className="hover:text-cyan-400 transition-colors">GITHUB</a>
@@ -175,7 +173,7 @@ export default function Home() {
           <span className="text-muted-foreground">COMPOSE.MARKET © 2025</span>
         </div>
       </footer>
-    </div >
+    </div>
   );
 }
 

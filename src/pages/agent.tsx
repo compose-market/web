@@ -11,7 +11,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useParams } from "wouter";
 import { Link } from "wouter";
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
-import { inferencePriceWei, isCronosChain } from "@/lib/chains";
+import { CHAIN_CONFIG, inferencePriceWei, isCronosChain } from "@/lib/chains";
 import { createPaymentFetch } from "@/lib/payment";
 import { useChain } from "@/contexts/ChainContext";
 import { Button } from "@/components/ui/button";
@@ -112,6 +112,19 @@ export default function AgentDetailPage() {
 
     try {
       const metadata = agent.metadata;
+      const chainId = metadata?.chain;
+
+      if (!Number.isInteger(chainId) || !CHAIN_CONFIG[chainId as number]) {
+        const errorMessage = `Agent metadata.chain is required and must be a supported chain ID. Received: ${String(chainId)}`;
+        console.error(`[agent] ${errorMessage}`, { walletAddress: agentWallet });
+        setChatError(errorMessage);
+        toast({
+          title: "Agent Metadata Error",
+          description: "Agent chain metadata is invalid. Registration blocked.",
+          variant: "destructive",
+        });
+        return false;
+      }
 
       // walletTimestamp is optional - agent works for chat without it
       // Only needed if agent needs to sign transactions
@@ -124,6 +137,7 @@ export default function AgentDetailPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          chainId,
           walletAddress: agentWallet,
           ...(walletTimestamp && { walletTimestamp }), // Optional - for signing capability
           dnaHash: agent.dnaHash,
@@ -149,7 +163,7 @@ export default function AgentDetailPage() {
       console.error(`[agent] Auto-registration error:`, err);
       return false;
     }
-  }, [agent, agentWallet]);
+  }, [agent, agentWallet, toast]);
 
   // Pre-register agent when page loads
   useEffect(() => {

@@ -431,6 +431,7 @@ export default function CreateAgent() {
 
   // Prepare transaction data for minting
   const [preparedTx, setPreparedTx] = useState<{
+    chainId: number;
     dnaHash: `0x${string}`;
     walletAddress: `0x${string}`;
     walletTimestamp: number;
@@ -443,8 +444,10 @@ export default function CreateAgent() {
   // Handle form validation and IPFS upload before minting
   // Returns prepared transaction data or null if failed
   const prepareForMint = async (values: FormValues): Promise<{
+    chainId: number;
     dnaHash: `0x${string}`;
     walletAddress: `0x${string}`;
+    walletTimestamp: number;
     licenses: bigint;
     licensePrice: bigint;
     cloneable: boolean;
@@ -517,6 +520,7 @@ export default function CreateAgent() {
       const licenses = values.licenses ? BigInt(values.licenses) : BigInt(0);
 
       const txData = {
+        chainId,
         dnaHash,
         walletAddress,
         walletTimestamp: timestamp,
@@ -544,15 +548,24 @@ export default function CreateAgent() {
   };
 
   const handleMintSuccess = async (result: { transactionHash: string }) => {
-    const chainId = selectedChainId;
-    const values = form.getValues();
-
-    const walletAddress = preparedTx?.walletAddress || null;
-
-    if (!walletAddress) {
+    if (!preparedTx) {
       toast({
         title: "Minting Error",
-        description: "Could not determine wallet address",
+        description: "Missing prepared mint transaction data",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const chainId = preparedTx.chainId;
+    const values = form.getValues();
+
+    const walletAddress = preparedTx.walletAddress || null;
+
+    if (!walletAddress || !Number.isInteger(chainId) || !CHAIN_CONFIG[chainId]) {
+      toast({
+        title: "Minting Error",
+        description: "Missing or invalid mint chain metadata",
         variant: "destructive",
       });
       return;
@@ -566,12 +579,13 @@ export default function CreateAgent() {
       chainId,
     });
 
-    if (preparedTx && account?.address && walletAddress) {
+    if (account?.address && walletAddress) {
       try {
         const response = await fetch(`${MANOWAR_URL}/agent/register`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            chainId,
             walletAddress,
             walletTimestamp: preparedTx.walletTimestamp,
             dnaHash: preparedTx.dnaHash,
