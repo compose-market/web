@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.107",
-    "@compose-market/theme": "file:../backend/services/packages/theme",
+    "@compose-market/theme": "0.0.1",
     "@crypto.com/facilitator-client": "^1.0.4",
     "@google/genai": "^1.43.0",
     "@hono/node-server": "^1.19.9",
