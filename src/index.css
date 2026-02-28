@@ -1,3 +1,4 @@
+@import "tailwindcss";
 @import "@compose-market/theme/css";
 @import "tw-animate-css";
 @import "@xyflow/react/dist/style.css";
