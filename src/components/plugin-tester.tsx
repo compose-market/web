@@ -345,7 +345,7 @@ export function PluginTester({
         setPluginError(null);
 
         try {
-            // Chain-aware payment: routes to Cronos x402 or ThirdWeb based on selected chain
+            // Chain-aware payment: routes to selected chain
             const fetchWithPayment = createPaymentFetch({
                 chainId: paymentChainId,
                 account: account!,
@@ -456,7 +456,7 @@ export function PluginTester({
         setPluginError(null);
 
         try {
-            // Chain-aware payment: routes to Cronos x402 or ThirdWeb based on selected chain
+            // Chain-aware payment: routes to selected chain
             const fetchWithPayment = createPaymentFetch({
                 chainId: paymentChainId,
                 account: account!,
@@ -604,7 +604,7 @@ export function PluginTester({
         setPluginError(null);
 
         try {
-            // Chain-aware payment: routes to Cronos x402 or ThirdWeb based on selected chain
+            // Chain-aware payment: routes to selected chain
             const fetchWithPayment = createPaymentFetch({
                 chainId: paymentChainId,
                 account: account!,

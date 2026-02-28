@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import "@compose-market/theme/css";
 @import "tw-animate-css";
 @import "@xyflow/react/dist/style.css";
 
@@ -60,45 +60,8 @@
   --animate-pulse-slow: pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
-/* COMPOSE.MARKET CYBERPUNK THEME - Based on rebranding.jsx */
+/* COMPOSE.MARKET CYBERPUNK THEME - Extended variables not in theme package */
 :root {
-  /* Base Colors - Deep Dark Blue-Black */
-  --background: 222 47% 3%;
-  /* #020617 equivalent */
-  --foreground: 210 40% 80%;
-  /* Slate-300 text */
-
-  --card: 222 40% 5%;
-  --card-foreground: 210 30% 75%;
-
-  --popover: 222 40% 4%;
-  --popover-foreground: 210 30% 75%;
-
-  /* Primary - Neon Cyan */
-  --primary: 188 95% 43%;
-  /* Cyan-400 */
-  --primary-foreground: 222 47% 3%;
-
-  /* Secondary - Deep Purple */
-  --secondary: 270 60% 20%;
-  --secondary-foreground: 270 80% 90%;
-
-  /* Muted - Dark Slate */
-  --muted: 217 33% 15%;
-  --muted-foreground: 215 16% 47%;
-
-  /* Accent - Hot Fuchsia/Magenta */
-  --accent: 292 85% 55%;
-  /* Fuchsia-500 */
-  --accent-foreground: 0 0% 100%;
-
-  --destructive: 0 90% 50%;
-  --destructive-foreground: 0 0% 100%;
-
-  --border: 217 33% 15%;
-  --input: 217 33% 10%;
-  --ring: 188 95% 43%;
-
   --radius: 0.25rem;
 
   --chart-1: 188 95% 43%;
@@ -106,15 +69,6 @@
   --chart-3: 270 80% 60%;
   --chart-4: 45 100% 55%;
   --chart-5: 190 100% 50%;
-
-  --sidebar: 222 47% 3%;
-  --sidebar-foreground: 210 30% 75%;
-  --sidebar-primary: 188 95% 43%;
-  --sidebar-primary-foreground: 222 47% 3%;
-  --sidebar-accent: 222 40% 8%;
-  --sidebar-accent-foreground: 210 40% 90%;
-  --sidebar-border: 217 33% 15%;
-  --sidebar-ring: 188 95% 43%;
 }
 
 @layer base {

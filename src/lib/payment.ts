@@ -2,9 +2,8 @@
  * x402 Payment Utilities
  * 
  * Chain-aware payment routing for multichain x402 support:
+ * - Use ThirdWeb x402 V2 via wrapFetchWithPayment
  * - Cronos chains (338, 25) use Cronos x402 V1 via wrapFetchWithCronosPayment
- * - Other EVM chains use ThirdWeb x402 V2 via wrapFetchWithPayment
- * 
  * This module is fully chain-agnostic - all chain configuration comes from @/lib/chains
  * 
  * @module lib/payment

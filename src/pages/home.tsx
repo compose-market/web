@@ -27,7 +27,7 @@ export default function Home() {
               Powered by the <a href="https://docs.compose.market/framework/framework"> <strong className="text-cyan-400">Manowar Framework</strong></a>.
             </p>
             <p className="text-[clamp(0.65rem,1.2vw,0.88rem)] text-muted-foreground/70 font-mono">
-              ERC8004 Identity &amp; x402 Payments on Cronos
+              ERC8004 Identity &amp; x402 Payments on Avalanche
             </p>
           </div>
 

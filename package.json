@@ -11,7 +11,8 @@
     "check": "tsc"
   },
   "dependencies": {
-    "@ai-sdk/react": "^3.0.106",
+    "@ai-sdk/react": "^3.0.107",
+    "@compose-market/theme": "file:../backend/services/packages/theme",
     "@crypto.com/facilitator-client": "^1.0.4",
     "@google/genai": "^1.43.0",
     "@hono/node-server": "^1.19.9",
@@ -54,7 +55,7 @@
     "@x402/evm": "^2.5.0",
     "@x402/hono": "^2.5.0",
     "@xyflow/react": "^12.10.1",
-    "ai": "^6.0.104",
+    "ai": "^6.0.105",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",

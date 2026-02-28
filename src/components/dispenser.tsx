@@ -3,7 +3,7 @@
  *
  * Dispenser UI for newcomers to claim 1 USDC.
  * Features:
- * - Multi-chain support (Cronos, Avalanche, Arbitrum)
+ * - Multi-chain support (Avalanche, Cronos, Arbitrum)
  * - Global claim tracking (one claim per address across all chains)
  * - Real-time status updates
  * - Transaction confirmation display

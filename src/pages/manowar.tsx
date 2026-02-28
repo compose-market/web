@@ -268,7 +268,7 @@ export default function ManowarPage() {
         try {
             setChatStatus("waiting");
 
-            // Chain-aware payment: routes to Cronos x402 or ThirdWeb based on selected chain
+            // Chain-aware payment: routes to selected chain
             // When session is active, uses session bypass for instant <100ms latency
             const fetchWithPayment = createPaymentFetch({
                 chainId: paymentChainId,

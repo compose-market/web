@@ -21,25 +21,30 @@ import Registry from "@/pages/registry";
 import MyAssets from "@/pages/my-assets";
 import Playground from "@/pages/playground";
 import Manowar from "@/pages/manowar";
+import ConnectDesktop from "@/pages/connect-desktop";
 
 function Router() {
   return (
-    <Layout>
-      <Switch>
-        <Route path="/" component={Home} />
-        <Route path="/market" component={Market} />
-        <Route path="/create-agent" component={CreateAgent} />
-        <Route path="/compose" component={Compose} />
-        <Route path="/models" component={Models} />
-        <Route path="/agents" component={Agents} />
-        <Route path="/agent/:id" component={AgentDetail} />
-        <Route path="/registry" component={Registry} />
-        <Route path="/my-assets" component={MyAssets} />
-        <Route path="/playground" component={Playground} />
-        <Route path="/manowar/:id" component={Manowar} />
-        <Route component={NotFound} />
-      </Switch>
-    </Layout>
+    <>
+      <Route path="/connect-desktop" component={ConnectDesktop} />
+      <Route path="/connect-desktop/:rest*" component={ConnectDesktop} />
+      <Layout>
+        <Switch>
+          <Route path="/" component={Home} />
+          <Route path="/market" component={Market} />
+          <Route path="/create-agent" component={CreateAgent} />
+          <Route path="/compose" component={Compose} />
+          <Route path="/models" component={Models} />
+          <Route path="/agents" component={Agents} />
+          <Route path="/agent/:id" component={AgentDetail} />
+          <Route path="/registry" component={Registry} />
+          <Route path="/my-assets" component={MyAssets} />
+          <Route path="/playground" component={Playground} />
+          <Route path="/manowar/:id" component={Manowar} />
+          <Route component={NotFound} />
+        </Switch>
+      </Layout>
+    </>
   );
 }
 

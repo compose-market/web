@@ -12,7 +12,7 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from "react"
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
 import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
-import { inferencePriceWei, isCronosChain } from "@/lib/chains";
+import { inferencePriceWei } from "@/lib/chains";
 import { createPaymentFetch } from "@/lib/payment";
 import { useChain } from "@/contexts/ChainContext";
 import { Button } from "@/components/ui/button";
@@ -399,7 +399,7 @@ export default function PlaygroundPage() {
         throw new Error("Compose session key unavailable. Re-open your session and try again.");
       }
 
-      // Chain-aware payment: Cronos uses Cronos x402 V1, others use ThirdWeb x402 V2
+      // Chain-aware payment: routes to selected chain
       // When session is active, uses session bypass for instant <100ms latency
       const fetchWithPayment = createPaymentFetch({
         chainId: paymentChainId,
@@ -455,10 +455,10 @@ export default function PlaygroundPage() {
 
       const modalities =
         outputType === "image" ? ["image"] :
-        outputType === "audio" ? ["audio"] :
-        outputType === "video" ? ["video"] :
-        outputType === "embedding" ? ["embedding"] :
-        ["text"];
+          outputType === "audio" ? ["audio"] :
+            outputType === "video" ? ["video"] :
+              outputType === "embedding" ? ["embedding", "feature-extraction"] :
+                ["text"];
 
       const endpoint = `${API_BASE}/v1/responses`;
       const requestBody: Record<string, unknown> = {

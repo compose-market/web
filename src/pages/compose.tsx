@@ -303,7 +303,7 @@ function MintManowarDialog({
       const manowarCardUri = getIpfsUri(metadataCid);
       const manowarAddress = getContractAddressForChain("Manowar", selectedChainId);
 
-      // Chain-aware transaction: Cronos uses our AA Paymaster, others use ThirdWeb
+      // Chain-aware transaction: routes to selected chain
       if (isCronosChain(selectedChainId) && account) {
         // Cronos: Use our custom AA Paymaster flow with batched transactions
         const adminAddress = adminWallet?.getAccount()?.address as `0x${string}` | undefined;
@@ -848,7 +848,7 @@ function ComposeFlow() {
         return updated;
       });
 
-      // Chain-aware payment: routes to Cronos x402 or ThirdWeb based on selected chain
+      // Chain-aware payment: routes to selected chain
       const fetchWithPayment = createPaymentFetch({
         chainId: paymentChainId,
         account: account!,

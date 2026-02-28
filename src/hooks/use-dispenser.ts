@@ -151,8 +151,8 @@ export function useDispenserClaim() {
  */
 export function getExplorerTxUrl(txHash: string, chainId: number): string {
     const explorers: Record<number, string> = {
-        338: "https://explorer.cronos.org/testnet",
         43113: "https://testnet.snowtrace.io",
+        338: "https://explorer.cronos.org/testnet",
         421614: "https://sepolia.arbiscan.io",
     };
     const baseUrl = explorers[chainId];

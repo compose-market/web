@@ -37,7 +37,7 @@ const STORAGE_KEY = "compose_selected_chain";
 // =============================================================================
 
 export function ChainProvider({ children }: { children: ReactNode }) {
-    // Default to Cronos Testnet
+    // Default to Avalanche Fuji
     const [selectedChainId, setSelectedChainIdState] = useState<number>(() => {
         if (typeof window !== "undefined") {
             const stored = localStorage.getItem(STORAGE_KEY);
@@ -49,7 +49,7 @@ export function ChainProvider({ children }: { children: ReactNode }) {
                 }
             }
         }
-        return CHAIN_IDS.cronosTestnet; // Default
+        return CHAIN_IDS.avalancheFuji; // Default
     });
 
     const [paymentChainId, setPaymentChainId] = useState<number>(selectedChainId);

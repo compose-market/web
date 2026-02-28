@@ -1,6 +1,6 @@
 /**
  * Manowar Protocol Contract Configuration
- * Multi-chain support with Cronos Testnet as default
+ * Multi-chain support with Avalanche Fuji as default
  * 
  * Contract addresses are defined in chains.ts (single source of truth)
  */

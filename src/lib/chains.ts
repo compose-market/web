@@ -17,15 +17,15 @@ import type { SmartWalletOptions } from "thirdweb/wallets";
 
 /**
  * Supported chain IDs (numeric)
- * Cronos is the default chain for x402 payments
+ * Avalanche is the default chain for x402 payments
  */
 export const CHAIN_IDS = {
-    // Cronos (default for x402 payments)
-    cronosTestnet: 338,
-    cronos: 25,
-    // Avalanche
+    // Avalanche (default for x402 payments)
     avalancheFuji: 43113,
     avalanche: 43114,
+    // Cronos
+    cronosTestnet: 338,
+    cronos: 25,
     // Arbitrum
     arbitrumTestnet: 421614,
     arbitrum: 42161,
@@ -61,10 +61,10 @@ export const cronos = defineChain({
 // =============================================================================
 
 export const CHAIN_OBJECTS = {
-    [CHAIN_IDS.cronosTestnet]: cronosTestnet,
-    [CHAIN_IDS.cronos]: cronos,
     [CHAIN_IDS.avalancheFuji]: avalancheFuji,
     [CHAIN_IDS.avalanche]: avalanche,
+    [CHAIN_IDS.cronosTestnet]: cronosTestnet,
+    [CHAIN_IDS.cronos]: cronos,
     [CHAIN_IDS.arbitrumTestnet]: arbitrumSepolia,
     [CHAIN_IDS.arbitrum]: arbitrum,
     [CHAIN_IDS.bscTestnet]: bscTestnet,
@@ -76,12 +76,12 @@ export const CHAIN_OBJECTS = {
 // =============================================================================
 
 export const USDC_ADDRESSES: Record<number, `0x${string}`> = {
-    // Cronos - devUSDC.e / USDC.e
-    [CHAIN_IDS.cronosTestnet]: "0xc01efAaF7C5C61bEbFAeb358E1161b537b8bC0e0",
-    [CHAIN_IDS.cronos]: "0xc21223249CA28397B4B6541dfFaEcC539BfF0c59",
     // Avalanche
     [CHAIN_IDS.avalancheFuji]: "0x5425890298aed601595a70AB815c96711a31Bc65",
     [CHAIN_IDS.avalanche]: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
+    // Cronos - devUSDC.e / USDC.e
+    [CHAIN_IDS.cronosTestnet]: "0xc01efAaF7C5C61bEbFAeb358E1161b537b8bC0e0",
+    [CHAIN_IDS.cronos]: "0xc21223249CA28397B4B6541dfFaEcC539BfF0c59",
     // Arbitrum
     [CHAIN_IDS.arbitrumTestnet]: "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
     [CHAIN_IDS.arbitrum]: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
@@ -100,18 +100,6 @@ export const CHAIN_CONFIG: Record<number, {
     explorer: string;
     color: string;
 }> = {
-    [CHAIN_IDS.cronosTestnet]: {
-        name: "Cronos Testnet",
-        isTestnet: true,
-        explorer: "https://explorer.cronos.org/testnet",
-        color: "blue",
-    },
-    [CHAIN_IDS.cronos]: {
-        name: "Cronos",
-        isTestnet: false,
-        explorer: "https://explorer.cronos.org",
-        color: "blue",
-    },
     [CHAIN_IDS.avalancheFuji]: {
         name: "Avalanche Fuji",
         isTestnet: true,
@@ -123,6 +111,18 @@ export const CHAIN_CONFIG: Record<number, {
         isTestnet: false,
         explorer: "https://snowtrace.io",
         color: "red",
+    },
+    [CHAIN_IDS.cronosTestnet]: {
+        name: "Cronos Testnet",
+        isTestnet: true,
+        explorer: "https://explorer.cronos.org/testnet",
+        color: "blue",
+    },
+    [CHAIN_IDS.cronos]: {
+        name: "Cronos",
+        isTestnet: false,
+        explorer: "https://explorer.cronos.org",
+        color: "blue",
     },
     [CHAIN_IDS.arbitrumTestnet]: {
         name: "Arbitrum Sepolia",
@@ -181,8 +181,8 @@ export function getCronosNetworkString(chainId: number): "cronos-testnet" | "cro
 // =============================================================================
 
 export const SUPPORTED_CHAINS = [
-    { id: CHAIN_IDS.cronosTestnet, chain: cronosTestnet },
     { id: CHAIN_IDS.avalancheFuji, chain: avalancheFuji },
+    { id: CHAIN_IDS.cronosTestnet, chain: cronosTestnet },
     { id: CHAIN_IDS.arbitrumTestnet, chain: arbitrumSepolia },
 ] as const;
 
@@ -209,14 +209,14 @@ const SHARED_COMPOSE_CONTRACTS = {
 } as const;
 
 export const CONTRACT_ADDRESSES = {
-    [CHAIN_IDS.cronosTestnet]: { ...SHARED_COMPOSE_CONTRACTS },
     [CHAIN_IDS.avalancheFuji]: { ...SHARED_COMPOSE_CONTRACTS },
+    [CHAIN_IDS.cronosTestnet]: { ...SHARED_COMPOSE_CONTRACTS },
     [CHAIN_IDS.arbitrumTestnet]: { ...SHARED_COMPOSE_CONTRACTS },
 } as const;
 
-type ContractName = keyof typeof CONTRACT_ADDRESSES[typeof CHAIN_IDS.cronosTestnet];
+type ContractName = keyof typeof CONTRACT_ADDRESSES[typeof CHAIN_IDS.avalancheFuji];
 
-export function getContractAddress(contract: ContractName, chainId: number = CHAIN_IDS.cronosTestnet): Address {
+export function getContractAddress(contract: ContractName, chainId: number = CHAIN_IDS.avalancheFuji): Address {
     const chainContracts = CONTRACT_ADDRESSES[chainId as keyof typeof CONTRACT_ADDRESSES];
     if (!chainContracts) {
         throw new Error(`Contract addresses not configured for chain ${chainId}`);
@@ -248,10 +248,9 @@ export const MAX_TOKENS_PER_CALL = 100_000;
 /** Session budget presets (in USDC wei - 6 decimals) */
 export const SESSION_BUDGET_PRESETS = [
     { label: "$1", value: 1_000_000 },
-    { label: "$5", value: 5_000_000 },
     { label: "$10", value: 10_000_000 },
-    { label: "$25", value: 25_000_000 },
     { label: "$50", value: 50_000_000 },
+    { label: "$100", value: 100_000_000 },
 ] as const;
 
 // =============================================================================
@@ -284,7 +283,7 @@ export const thirdwebClient = createThirdwebClient({
 // Payment Configuration
 // =============================================================================
 
-const defaultChainId = CHAIN_IDS.cronosTestnet;
+const defaultChainId = CHAIN_IDS.avalancheFuji;
 
 export const paymentChain = CHAIN_OBJECTS[defaultChainId];
 

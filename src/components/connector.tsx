@@ -54,9 +54,9 @@ interface WalletConnectorProps {
  * ARCHITECTURE:
  * - Smart Account creation uses Avalanche Fuji (bundler available at 43113.bundler.thirdweb.com)
  * - Smart Account address is universal (same on ALL EVM chains via CREATE2)
- * - Cronos Testnet is the default chain
+ * - Avalanche Fuji is the default chain
  * - User can select a specific supported chain (from ChainContext), then used for display, contracts, and x402 payments
- * - This allows users to pay on Cronos Testnet while using a bundler-created Smart Account
+ * - This allows users to pay on chains not supported by Thirdweb (e.g., Cronos) while using a bundler-created Smart Account
  */
 export function WalletConnector({ className, compact = false }: WalletConnectorProps) {
   const account = useActiveAccount();

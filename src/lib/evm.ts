@@ -91,8 +91,8 @@ export interface UnifiedPaymentFetchOptions extends RequestInit {
  * Unified payment-wrapped fetch that works across all supported chains
  * 
  * Automatically selects the correct payment handler:
+ * - Uses ThirdWeb on-chain facilitator contracts
  * - Cronos chains (338, 25): Uses Cronos Labs REST API facilitator
- * - Other EVM chains: Uses ThirdWeb on-chain facilitator contracts
  * 
  * Works seamlessly with account abstraction - no manual signatures.
  */
