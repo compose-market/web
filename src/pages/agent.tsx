@@ -48,6 +48,7 @@ import {
   Shield,
   Loader2,
   Upload,
+  Download,
   Plus,
   Link2,
   FileText,
@@ -647,10 +648,23 @@ export default function AgentDetailPage() {
           <span className="hidden sm:inline">Back</span>
         </Button>
 
-        <Badge className="bg-cyan-500/20 text-cyan-400 border-cyan-500/30 text-xs">
-          <Sparkles className="w-3 h-3 mr-1" />
-          Agent #{agent.id}
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Button
+            asChild
+            size="sm"
+            variant="outline"
+            className="h-7 px-2 text-xs border-cyan-500/40 text-cyan-300 hover:text-cyan-200"
+          >
+            <Link href={`/connect-desktop?agent_wallet=${encodeURIComponent(agentWallet || "")}`}>
+              <Download className="w-3 h-3 mr-1" />
+              Install on Desktop
+            </Link>
+          </Button>
+          <Badge className="bg-cyan-500/20 text-cyan-400 border-cyan-500/30 text-xs">
+            <Sparkles className="w-3 h-3 mr-1" />
+            Agent #{agent.id}
+          </Badge>
+        </div>
 
         {/* Mobile Card Button - only visible on mobile */}
         <Button
