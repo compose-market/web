@@ -1,6 +1,6 @@
 /**
  * Pinata IPFS Storage Utility
- * Used for storing agent avatars, agent cards, and Manowar metadata
+ * Used for storing agent avatars, agent cards, and Workflow metadata
  */
 
 const PINATA_JWT = import.meta.env.VITE_PINATA_JWT || "";
@@ -187,7 +187,7 @@ export interface AgentCard {
   chain: number;
   model: string;
   framework?: "eliza" | "langchain" | "openclaw"; // Agent runtime framework
-  licensePrice: string; // USDC in smallest unit (6 decimals) - cost to nest into Manowar
+  licensePrice: string; // USDC in smallest unit (6 decimals) - cost to nest into Workflow
   licenses: number; // License supply cap (0 = infinite)
   cloneable: boolean;
   endpoint?: string;
@@ -229,10 +229,10 @@ export async function uploadAgentCard(card: AgentCard): Promise<string> {
 }
 
 // =============================================================================
-// Manowar Metadata Types
+// Workflow Metadata Types
 // =============================================================================
 
-export interface ManowarMetadata {
+export interface WorkflowMetadata {
   schemaVersion: string;
   title: string;
   description: string;
@@ -272,27 +272,27 @@ export interface ManowarMetadata {
 }
 
 /**
- * Upload a Manowar banner and return the IPFS CID
+ * Upload a Workflow banner and return the IPFS CID
  */
-export async function uploadManowarBanner(file: File, title: string): Promise<string> {
+export async function uploadWorkflowBanner(file: File, title: string): Promise<string> {
   return uploadFile(file, {
     name: `${title}-banner`,
     keyvalues: {
-      type: "manowar-banner",
-      manowar: title,
+      type: "workflow-banner",
+      workflow: title,
     },
   });
 }
 
 /**
- * Upload Manowar metadata to IPFS and return the CID
+ * Upload Workflow metadata to IPFS and return the CID
  */
-export async function uploadManowarMetadata(metadata: ManowarMetadata): Promise<string> {
+export async function uploadWorkflowMetadata(metadata: WorkflowMetadata): Promise<string> {
   return uploadJSON(metadata, {
     name: `${metadata.title}-metadata`,
     keyvalues: {
-      type: "manowar-metadata",
-      manowar: metadata.title,
+      type: "workflow-metadata",
+      workflow: metadata.title,
     },
   });
 }

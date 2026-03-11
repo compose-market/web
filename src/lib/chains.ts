@@ -2,7 +2,7 @@
  * Chain Configuration
  * 
  * Single source of truth for all EVM chain configuration on the frontend.
- * Mirrors backend/lambda/shared/config/chains.ts structure.
+ * Mirrors backend/api/shared/config/chains.ts structure.
  * 
  * @module lib/chains
  */
@@ -198,7 +198,7 @@ const SHARED_COMPOSE_CONTRACTS = {
     AgentFactory: import.meta.env.VITE_AGENT_FACTORY_ADDRESS as Address,
     Clone: import.meta.env.VITE_CLONE_ADDRESS as Address,
     Warp: import.meta.env.VITE_WARP_ADDRESS as Address,
-    Manowar: import.meta.env.VITE_MANOWAR_ADDRESS as Address,
+    Workflow: import.meta.env.VITE_WORKFLOW_ADDRESS as Address,
     RFA: import.meta.env.VITE_RFA_ADDRESS as Address,
     Lease: import.meta.env.VITE_LEASE_ADDRESS as Address,
     Royalties: import.meta.env.VITE_ROYALTIES_ADDRESS as Address,

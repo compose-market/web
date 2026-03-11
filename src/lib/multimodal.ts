@@ -1,7 +1,7 @@
 /**
  * Multimodal Response Handler
  * 
- * - Parses responses from Lambda/Manowar into unified format
+ * - Parses responses into unified format
  * - Uploads base64 media to Pinata → IPFS URLs
  * - Handles binary blobs (audio, video, image)
  */
@@ -25,7 +25,7 @@ type VideoStatusFetch = (input: RequestInfo | URL, init?: RequestInit) => Promis
 // =============================================================================
 
 /**
- * Parse any Lambda/Manowar response into unified MultimodalResult
+ * Parse any response into unified MultimodalResult
  * Handles SSE, JSON, and binary responses
  */
 export async function parseMultimodalResponse(

@@ -1,7 +1,7 @@
 /**
  * API Configuration and Types
  * 
- * - Base URL configuration for Lambda API
+ * - Base URL configuration for API
  * - OpenAI-compatible response types (from backend)
  * - SSE stream parser
  * - Response handling utilities
@@ -24,7 +24,7 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
 }
 
 // =============================================================================
-// OpenAI-Compatible Types (from lambda/shared/api/openai/types.ts)
+// OpenAI-Compatible Types (from api/shared/inference/types.ts)
 // =============================================================================
 
 /** OpenAI API message format - for requests/responses */
@@ -403,7 +403,7 @@ export function detectResponseType(contentType: string): ResponseType {
 // =============================================================================
 
 /**
- * Parse JSON response from Lambda API into unified MultimodalResult
+ * Parse JSON response from API into unified MultimodalResult
  */
 export function parseJsonResponse(data: unknown): MultimodalResult {
   // Error response - handle first to catch errors early
@@ -418,8 +418,8 @@ export function parseJsonResponse(data: unknown): MultimodalResult {
     return { type: "text", success: true, content: data.output };
   }
 
-  // Manowar multimodal response: { success, type, url, mimeType }
-  if (isManowarMultimodalResponse(data)) {
+  // Workflow multimodal response: { success, type, url, mimeType }
+  if (isWorkflowMultimodalResponse(data)) {
     return {
       type: data.type,
       success: data.success,
@@ -672,7 +672,7 @@ function isAgentChatResponse(data: unknown): data is { output: string; messages?
     typeof (data as { output: unknown }).output === "string";
 }
 
-function isManowarMultimodalResponse(data: unknown): data is {
+function isWorkflowMultimodalResponse(data: unknown): data is {
   success: boolean;
   type: MultimodalType;
   url?: string;   // IPFS URL from Pinata upload

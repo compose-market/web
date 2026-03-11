@@ -5,7 +5,7 @@
  * Contract addresses are defined in chains.ts (single source of truth)
  */
 
-import { getContract } from "thirdweb";
+import { getContract, prepareContractCall } from "thirdweb";
 import {
   thirdwebClient,
   paymentChain,
@@ -88,8 +88,8 @@ export const AgentFactoryABI = [
     stateMutability: "view",
     inputs: [
       { name: "agentId", type: "uint256" },
-      { name: "manowarContract", type: "address" },
-      { name: "manowarId", type: "uint256" },
+      { name: "workflowContract", type: "address" },
+      { name: "workflowId", type: "uint256" },
     ],
     outputs: [{ name: "licensed", type: "bool" }],
   },
@@ -102,8 +102,8 @@ export const AgentFactoryABI = [
       name: "records",
       type: "tuple[]",
       components: [
-        { name: "manowarContract", type: "address" },
-        { name: "manowarId", type: "uint256" },
+        { name: "workflowContract", type: "address" },
+        { name: "workflowId", type: "uint256" },
         { name: "licensedAt", type: "uint256" },
       ],
     }],
@@ -157,20 +157,20 @@ export const AgentFactoryABI = [
     type: "event",
     inputs: [
       { name: "agentId", type: "uint256", indexed: true },
-      { name: "manowarContract", type: "address", indexed: true },
-      { name: "manowarId", type: "uint256", indexed: true },
+      { name: "workflowContract", type: "address", indexed: true },
+      { name: "workflowId", type: "uint256", indexed: true },
       { name: "licenseNumber", type: "uint256", indexed: false },
     ],
   },
 ] as const;
 
-export const ManowarABI = [
+export const WorkflowABI = [
   // Read functions
   {
-    name: "getManowarData",
+    name: "getWorkflowData",
     type: "function",
     stateMutability: "view",
-    inputs: [{ name: "manowarId", type: "uint256" }],
+    inputs: [{ name: "workflowId", type: "uint256" }],
     outputs: [{
       name: "data",
       type: "tuple",
@@ -178,7 +178,7 @@ export const ManowarABI = [
         { name: "title", type: "string" },
         { name: "description", type: "string" },
         { name: "banner", type: "string" },
-        { name: "manowarCardUri", type: "string" },
+        { name: "workflowCardUri", type: "string" },
         { name: "totalPrice", type: "uint256" },
         { name: "units", type: "uint256" },
         { name: "unitsMinted", type: "uint256" },
@@ -194,7 +194,7 @@ export const ManowarABI = [
     }],
   },
   {
-    name: "totalManowars",
+    name: "totalWorkflows",
     type: "function",
     stateMutability: "view",
     inputs: [],
@@ -211,54 +211,54 @@ export const ManowarABI = [
     name: "getAgents",
     type: "function",
     stateMutability: "view",
-    inputs: [{ name: "manowarId", type: "uint256" }],
+    inputs: [{ name: "workflowId", type: "uint256" }],
     outputs: [{ name: "agentIds", type: "uint256[]" }],
   },
   {
     name: "getAgentCount",
     type: "function",
     stateMutability: "view",
-    inputs: [{ name: "manowarId", type: "uint256" }],
+    inputs: [{ name: "workflowId", type: "uint256" }],
     outputs: [{ name: "count", type: "uint256" }],
   },
   {
     name: "isComplete",
     type: "function",
     stateMutability: "view",
-    inputs: [{ name: "manowarId", type: "uint256" }],
+    inputs: [{ name: "workflowId", type: "uint256" }],
     outputs: [{ name: "complete", type: "bool" }],
   },
   {
-    name: "getCompleteManowars",
+    name: "getCompleteWorkflows",
     type: "function",
     stateMutability: "view",
     inputs: [],
-    outputs: [{ name: "manowarIds", type: "uint256[]" }],
+    outputs: [{ name: "workflowIds", type: "uint256[]" }],
   },
   {
-    name: "getManowarsWithRFA",
+    name: "getWorkflowsWithRFA",
     type: "function",
     stateMutability: "view",
     inputs: [],
-    outputs: [{ name: "manowarIds", type: "uint256[]" }],
+    outputs: [{ name: "workflowIds", type: "uint256[]" }],
   },
   {
-    name: "getManowarsByCreator",
+    name: "getWorkflowsByCreator",
     type: "function",
     stateMutability: "view",
     inputs: [{ name: "creator", type: "address" }],
-    outputs: [{ name: "manowarIds", type: "uint256[]" }],
+    outputs: [{ name: "workflowIds", type: "uint256[]" }],
   },
   {
     name: "calculateTotalPrice",
     type: "function",
     stateMutability: "view",
-    inputs: [{ name: "manowarId", type: "uint256" }],
+    inputs: [{ name: "workflowId", type: "uint256" }],
     outputs: [{ name: "total", type: "uint256" }],
   },
   // Write functions
   {
-    name: "mintManowar",
+    name: "mintWorkflow",
     type: "function",
     stateMutability: "nonpayable",
     inputs: [
@@ -269,7 +269,7 @@ export const ManowarABI = [
           { name: "title", type: "string" },
           { name: "description", type: "string" },
           { name: "banner", type: "string" },
-          { name: "manowarCardUri", type: "string" },
+          { name: "workflowCardUri", type: "string" },
           { name: "units", type: "uint256" },
           { name: "leaseEnabled", type: "bool" },
           { name: "leaseDuration", type: "uint256" },
@@ -280,14 +280,14 @@ export const ManowarABI = [
       },
       { name: "agentIds", type: "uint256[]" },
     ],
-    outputs: [{ name: "manowarId", type: "uint256" }],
+    outputs: [{ name: "workflowId", type: "uint256" }],
   },
   {
     name: "addAgent",
     type: "function",
     stateMutability: "nonpayable",
     inputs: [
-      { name: "manowarId", type: "uint256" },
+      { name: "workflowId", type: "uint256" },
       { name: "agentId", type: "uint256" },
     ],
     outputs: [],
@@ -297,7 +297,7 @@ export const ManowarABI = [
     type: "function",
     stateMutability: "nonpayable",
     inputs: [
-      { name: "manowarId", type: "uint256" },
+      { name: "workflowId", type: "uint256" },
       { name: "hasCoordinator", type: "bool" },
       { name: "model", type: "string" },
     ],
@@ -308,7 +308,7 @@ export const ManowarABI = [
     type: "function",
     stateMutability: "nonpayable",
     inputs: [
-      { name: "manowarId", type: "uint256" },
+      { name: "workflowId", type: "uint256" },
       { name: "enabled", type: "bool" },
       { name: "duration", type: "uint256" },
       { name: "percent", type: "uint8" },
@@ -317,10 +317,10 @@ export const ManowarABI = [
   },
   // Events
   {
-    name: "ManowarMinted",
+    name: "WorkflowMinted",
     type: "event",
     inputs: [
-      { name: "manowarId", type: "uint256", indexed: true },
+      { name: "workflowId", type: "uint256", indexed: true },
       { name: "creator", type: "address", indexed: true },
       { name: "title", type: "string", indexed: false },
       { name: "x402Price", type: "uint256", indexed: false },
@@ -427,7 +427,7 @@ export const RFAABI = [
     type: "function",
     stateMutability: "nonpayable",
     inputs: [
-      { name: "manowarId", type: "uint256" },
+      { name: "workflowId", type: "uint256" },
       { name: "title", type: "string" },
       { name: "description", type: "string" },
       { name: "requiredSkills", type: "bytes32[]" },
@@ -464,7 +464,7 @@ export const RFAABI = [
       name: "data",
       type: "tuple",
       components: [
-        { name: "manowarId", type: "uint256" },
+        { name: "workflowId", type: "uint256" },
         { name: "title", type: "string" },
         { name: "description", type: "string" },
         { name: "requiredSkills", type: "bytes32[]" },
@@ -501,13 +501,26 @@ export const RFAABI = [
   },
 ] as const;
 
+function requireFunctionAbi<
+  TAbi extends readonly { name?: string; type?: string }[],
+>(abi: TAbi, name: string) {
+  const method = abi.find(
+    (item): item is Extract<TAbi[number], { name: string; type: "function" }> =>
+      item.type === "function" && item.name === name,
+  );
+  if (!method) {
+    throw new Error(`Missing function ABI for ${name}`);
+  }
+  return method;
+}
+
+const MINT_AGENT_METHOD = requireFunctionAbi(AgentFactoryABI, "mintAgent");
+const MINT_WORKFLOW_METHOD = requireFunctionAbi(WorkflowABI, "mintWorkflow");
+const WARP_AGENT_METHOD = requireFunctionAbi(WarpABI, "warpAgent");
+
 // =============================================================================
 // Contract Instances
 // =============================================================================
-
-// Contract getters WITHOUT ABI - allows full function signature strings in readContract/prepareContractCall
-// This is required because thirdweb's type system forces method names when ABI is provided,
-// but runtime encoding works better with explicit function signatures.
 
 export function getAgentFactoryContract() {
   return getContract({
@@ -517,9 +530,9 @@ export function getAgentFactoryContract() {
   });
 }
 
-export function getManowarContract() {
+export function getWorkflowContract() {
   return getContract({
-    address: getContractAddress("Manowar"),
+    address: getContractAddress("Workflow"),
     chain: paymentChain,
     client: thirdwebClient,
   });
@@ -560,11 +573,11 @@ export function getAgentFactoryContractForChain(chainId: number) {
   });
 }
 
-export function getManowarContractForChain(chainId: number) {
+export function getWorkflowContractForChain(chainId: number) {
   const chain = CHAIN_OBJECTS[chainId as keyof typeof CHAIN_OBJECTS];
   if (!chain) throw new Error(`Chain ${chainId} not configured`);
   return getContract({
-    address: getContractAddressForChain("Manowar", chainId),
+    address: getContractAddressForChain("Workflow", chainId),
     chain,
     client: thirdwebClient,
   });
@@ -587,6 +600,77 @@ export function getRFAContractForChain(chainId: number) {
     address: getContractAddressForChain("RFA", chainId),
     chain,
     client: thirdwebClient,
+  });
+}
+
+export function prepareMintAgentCall(
+  contract: ReturnType<typeof getAgentFactoryContractForChain>,
+  args: {
+    dnaHash: `0x${string}`;
+    licenses: bigint;
+    licensePrice: bigint;
+    cloneable: boolean;
+    agentCardUri: string;
+  },
+) {
+  return prepareContractCall({
+    contract,
+    method: MINT_AGENT_METHOD,
+    params: [
+      args.dnaHash,
+      args.licenses,
+      args.licensePrice,
+      args.cloneable,
+      args.agentCardUri,
+    ],
+  });
+}
+
+export function prepareWarpAgentCall(
+  contract: ReturnType<typeof getWarpContractForChain>,
+  args: {
+    originalAgentHash: `0x${string}`;
+    originalCreator: `0x${string}`;
+    licenses: bigint;
+    licensePrice: bigint;
+    agentCardUri: string;
+  },
+) {
+  return prepareContractCall({
+    contract,
+    method: WARP_AGENT_METHOD,
+    params: [
+      args.originalAgentHash,
+      args.originalCreator,
+      args.licenses,
+      args.licensePrice,
+      args.agentCardUri,
+    ],
+  });
+}
+
+export function prepareMintWorkflowCall(
+  contract: ReturnType<typeof getWorkflowContractForChain>,
+  args: {
+    params: {
+      title: string;
+      description: string;
+      banner: string;
+      workflowCardUri: string;
+      units: bigint;
+      leaseEnabled: boolean;
+      leaseDuration: bigint;
+      leasePercent: number;
+      hasCoordinator: boolean;
+      coordinatorModel: string;
+    };
+    agentIds: bigint[];
+  },
+) {
+  return prepareContractCall({
+    contract,
+    method: MINT_WORKFLOW_METHOD,
+    params: [args.params, args.agentIds],
   });
 }
 
@@ -701,48 +785,48 @@ export function computeExternalAgentHash(registry: string, address: string): `0x
 }
 
 /**
- * Compute Manowar DNA hash for unique identification
+ * Compute Workflow DNA hash for unique identification
  * 
- * This creates a unique identifier for a manowar workflow based on:
- * - The manowar contract address
+ * This creates a unique identifier for a Workflow based on:
+ * - The Workflow contract address
  * - The agent IDs included in the workflow
  * - A timestamp (for uniqueness even with same agents)
  * 
  * This hash is stored on-chain and in IPFS metadata at minting time.
  * Both frontend and backend fetch it from there - never duplicate derivation.
  */
-export function computeManowarDnaHash(
+export function computeWorkflowDnaHash(
   agentIds: number[],
   timestamp: number
 ): `0x${string}` {
-  const manowarContractAddress = getContractAddress("Manowar");
+  const workflowContractAddress = getContractAddress("Workflow");
   const sortedAgentIds = [...agentIds].sort((a, b) => a - b);
   const agentIdsStr = sortedAgentIds.join(",");
 
   return keccak256(
     encodePacked(
       ["address", "string", "uint256", "string"],
-      [manowarContractAddress, agentIdsStr, BigInt(timestamp), ":manowar:dna"]
+      [workflowContractAddress, agentIdsStr, BigInt(timestamp), ":workflow:dna"]
     )
   );
 }
 
 /**
- * Derive manowar wallet address from DNA hash + timestamp
+ * Derive workflow wallet address from DNA hash + timestamp
  * 
  * Similar to agent wallet derivation, this creates a unique wallet address
- * for the manowar workflow. This wallet can be used for:
+ * for the Workflow. This wallet can be used for:
  * - Receiving x402 payments
  * - Signing workflow-level transactions
  * - Unique identification in the system
  * 
  * The wallet address is stored in IPFS metadata as the single source of truth.
  */
-export function deriveManowarWalletAddress(dnaHash: `0x${string}`, timestamp: number): `0x${string}` {
+export function deriveWorkflowWalletAddress(dnaHash: `0x${string}`, timestamp: number): `0x${string}` {
   const derivationSeed = keccak256(
     encodePacked(
       ["bytes32", "uint256", "string"],
-      [dnaHash, BigInt(timestamp), ":manowar:wallet"]
+      [dnaHash, BigInt(timestamp), ":workflow:wallet"]
     )
   );
 
@@ -765,11 +849,11 @@ export interface AgentData {
   agentCardUri: string;
 }
 
-export interface ManowarData {
+export interface WorkflowData {
   title: string;
   description: string;
   banner: string;
-  manowarCardUri: string;
+  workflowCardUri: string;
   totalPrice: bigint;
   units: bigint;
   unitsMinted: bigint;
@@ -793,11 +877,11 @@ export interface MintAgentParams {
   agentCardUri: string;
 }
 
-export interface MintManowarParams {
+export interface MintWorkflowParams {
   title: string;
   description: string;
   banner: string;
-  manowarCardUri: string;
+  workflowCardUri: string;
   units: number; // 0 = infinite
   leaseEnabled: boolean;
   leaseDuration: number; // days
@@ -847,5 +931,3 @@ export const RFA_BOUNTY_LIMITS = {
   BASIC_BOUNTY: 0.10, // Basic form completion bounty
   README_BONUS_MAX: 0.90, // Maximum README bonus
 } as const;
-
-

@@ -23,7 +23,7 @@ export interface RecurrenceRule {
 
 export interface TriggerDefinition {
     id: string;
-    manowarWallet: string;
+    workflowWallet: string;
     name: string;
     type: TriggerType;
     nlDescription: string;
@@ -63,7 +63,7 @@ export interface HookAction {
 
 export interface HookDefinition {
     id: string;
-    manowarWallet: string;
+    workflowWallet: string;
     name: string;
     type: HookType;
     condition?: string;
@@ -149,7 +149,7 @@ export const HOOK_TEMPLATES: Record<string, Partial<HookDefinition>> = {
  */
 export async function parseNLToCron(nlDescription: string, timezone?: string): Promise<NLParseResult> {
     try {
-        const res = await fetch(`${API_BASE}/api/manowar/triggers/parse`, {
+        const res = await fetch(`${API_BASE}/api/workflow/triggers/parse`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ nlDescription, timezone }),
@@ -171,11 +171,11 @@ export async function parseNLToCron(nlDescription: string, timezone?: string): P
 }
 
 /**
- * Fetch triggers for a Manowar workflow
+ * Fetch triggers for a workflow
  */
-export async function fetchTriggers(manowarWallet: string): Promise<TriggerDefinition[]> {
+export async function fetchTriggers(workflowWallet: string): Promise<TriggerDefinition[]> {
     try {
-        const res = await fetch(`${API_BASE}/api/manowar/${manowarWallet}/triggers`);
+        const res = await fetch(`${API_BASE}/api/workflow/${workflowWallet}/triggers`);
         if (!res.ok) throw new Error(`Failed to fetch triggers: ${res.status}`);
         const data = await res.json();
         return data.triggers || [];
@@ -189,11 +189,11 @@ export async function fetchTriggers(manowarWallet: string): Promise<TriggerDefin
  * Create a new trigger
  */
 export async function createTrigger(
-    manowarWallet: string,
+    workflowWallet: string,
     trigger: Omit<TriggerDefinition, "id" | "createdAt" | "updatedAt" | "memoryId">
 ): Promise<TriggerDefinition | null> {
     try {
-        const res = await fetch(`${API_BASE}/api/manowar/${manowarWallet}/triggers`, {
+        const res = await fetch(`${API_BASE}/api/workflow/${workflowWallet}/triggers`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(trigger),
@@ -210,12 +210,12 @@ export async function createTrigger(
  * Update an existing trigger
  */
 export async function updateTrigger(
-    manowarWallet: string,
+    workflowWallet: string,
     triggerId: string,
     updates: Partial<TriggerDefinition>
 ): Promise<TriggerDefinition | null> {
     try {
-        const res = await fetch(`${API_BASE}/api/manowar/${manowarWallet}/triggers/${triggerId}`, {
+        const res = await fetch(`${API_BASE}/api/workflow/${workflowWallet}/triggers/${triggerId}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(updates),
@@ -231,9 +231,9 @@ export async function updateTrigger(
 /**
  * Delete a trigger
  */
-export async function deleteTrigger(manowarWallet: string, triggerId: string): Promise<boolean> {
+export async function deleteTrigger(workflowWallet: string, triggerId: string): Promise<boolean> {
     try {
-        const res = await fetch(`${API_BASE}/api/manowar/${manowarWallet}/triggers/${triggerId}`, {
+        const res = await fetch(`${API_BASE}/api/workflow/${workflowWallet}/triggers/${triggerId}`, {
             method: "DELETE",
         });
         return res.ok;
@@ -247,11 +247,11 @@ export async function deleteTrigger(manowarWallet: string, triggerId: string): P
  * Toggle trigger enabled state
  */
 export async function toggleTrigger(
-    manowarWallet: string,
+    workflowWallet: string,
     triggerId: string,
     enabled: boolean
 ): Promise<boolean> {
-    const result = await updateTrigger(manowarWallet, triggerId, { enabled });
+    const result = await updateTrigger(workflowWallet, triggerId, { enabled });
     return result !== null;
 }
 
@@ -259,12 +259,12 @@ export async function toggleTrigger(
  * Test a trigger (execute immediately)
  */
 export async function testTrigger(
-    manowarWallet: string,
+    workflowWallet: string,
     triggerId: string,
     inputOverride?: Record<string, unknown>
 ): Promise<{ success: boolean; executionId?: string; error?: string }> {
     try {
-        const res = await fetch(`${API_BASE}/api/manowar/${manowarWallet}/triggers/${triggerId}/test`, {
+        const res = await fetch(`${API_BASE}/api/workflow/${workflowWallet}/triggers/${triggerId}/test`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ input: inputOverride }),
@@ -286,11 +286,11 @@ export async function testTrigger(
 // =============================================================================
 
 /**
- * Fetch hooks for a Manowar workflow
+ * Fetch hooks for a workflow
  */
-export async function fetchHooks(manowarWallet: string): Promise<HookDefinition[]> {
+export async function fetchHooks(workflowWallet: string): Promise<HookDefinition[]> {
     try {
-        const res = await fetch(`${API_BASE}/api/manowar/${manowarWallet}/hooks`);
+        const res = await fetch(`${API_BASE}/api/workflow/${workflowWallet}/hooks`);
         if (!res.ok) throw new Error(`Failed to fetch hooks: ${res.status}`);
         const data = await res.json();
         return data.hooks || [];
@@ -304,11 +304,11 @@ export async function fetchHooks(manowarWallet: string): Promise<HookDefinition[
  * Create a new hook
  */
 export async function createHook(
-    manowarWallet: string,
+    workflowWallet: string,
     hook: Omit<HookDefinition, "id" | "createdAt">
 ): Promise<HookDefinition | null> {
     try {
-        const res = await fetch(`${API_BASE}/api/manowar/${manowarWallet}/hooks`, {
+        const res = await fetch(`${API_BASE}/api/workflow/${workflowWallet}/hooks`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(hook),
@@ -325,12 +325,12 @@ export async function createHook(
  * Update an existing hook
  */
 export async function updateHook(
-    manowarWallet: string,
+    workflowWallet: string,
     hookId: string,
     updates: Partial<HookDefinition>
 ): Promise<HookDefinition | null> {
     try {
-        const res = await fetch(`${API_BASE}/api/manowar/${manowarWallet}/hooks/${hookId}`, {
+        const res = await fetch(`${API_BASE}/api/workflow/${workflowWallet}/hooks/${hookId}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(updates),
@@ -346,9 +346,9 @@ export async function updateHook(
 /**
  * Delete a hook
  */
-export async function deleteHook(manowarWallet: string, hookId: string): Promise<boolean> {
+export async function deleteHook(workflowWallet: string, hookId: string): Promise<boolean> {
     try {
-        const res = await fetch(`${API_BASE}/api/manowar/${manowarWallet}/hooks/${hookId}`, {
+        const res = await fetch(`${API_BASE}/api/workflow/${workflowWallet}/hooks/${hookId}`, {
             method: "DELETE",
         });
         return res.ok;

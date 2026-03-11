@@ -2,7 +2,7 @@
  * Cronos Account Abstraction Client
  * 
  * Frontend utilities for gasless transactions on Cronos via ERC-4337.
- * Submits UserOperations through Lambda → EntryPoint → Paymaster flow.
+ * Submits UserOperations through api/ → EntryPoint → Paymaster flow.
  * 
  * @module lib/cronos-aa
  */
@@ -11,7 +11,7 @@ import type { Account } from "thirdweb/wallets";
 import { encodeFunctionData, type Hex, type Address } from "viem";
 import { isCronosChain } from "../chains";
 
-// Lambda API endpoint
+// api/ endpoint
 const API_BASE = (import.meta.env.VITE_API_URL || "https://api.compose.market").replace(/\/+$/, "");
 
 // =============================================================================
@@ -102,7 +102,7 @@ export async function signExecuteIntent(
  * 1. Call /api/aa/prepare to build UserOp and get UserOpHash
  * 2. User signs the UserOpHash with their admin wallet (signMessage)
  * 3. Call /api/aa/submit with the signature
- * 4. Lambda adds Paymaster data and submits to EntryPoint
+ * 4. api/ adds Paymaster data and submits to EntryPoint
  */
 export async function submitCronosTransaction(
     params: CronosTransactionParams
@@ -225,7 +225,7 @@ export interface BatchCall {
  *   account,
  *   calls: [
  *     { to: usdcAddress, data: approveData },
- *     { to: manowarAddress, data: mintData },
+ *     { to: workflowAddress, data: mintData },
  *   ],
  *   chainId: 338,
  *   adminWallet,

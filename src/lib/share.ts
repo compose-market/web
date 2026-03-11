@@ -1,5 +1,5 @@
 export interface MintShareData {
-  type: 'agent' | 'manowar';
+  type: 'agent' | 'workflow';
   name: string;
   walletAddress: string;
   txHash: string;
@@ -36,7 +36,7 @@ export function clearMintSuccessShare(): void {
   }
 }
 
-export function buildShareIntentUrl(name: string, type: 'agent' | 'manowar', walletAddress: string): string {
+export function buildShareIntentUrl(name: string, type: 'agent' | 'workflow', walletAddress: string): string {
   const text = `I've just built ${name} on compose.market! Come try it out`;
   const url = `https://compose.market/${type}/${walletAddress}`;
   const params = new URLSearchParams({

@@ -9,7 +9,6 @@
 
 // Service URLs from environment or defaults
 const CONNECTOR_URL = import.meta.env.VITE_CONNECTOR_URL || "https://services.compose.market/connector";
-const SANDBOX_URL = import.meta.env.VITE_SANDBOX_URL || "https://services.compose.market/sandbox";
 const EXPORTER_URL = import.meta.env.VITE_EXPORTER_URL || "https://services.compose.market/exporter";
 // API Gateway URL for x402 payment-gated routes
 const API_BASE = (import.meta.env.VITE_API_URL || "https://api.compose.market").replace(/\/+$/, "");
@@ -205,14 +204,14 @@ export async function fetchMcpServerTools(
 
 /**
  * Execute a spawned MCP server tool
- * Routes through Lambda (API_BASE) for x402 payment handling
+ * Routes through api/ (API_BASE) for x402 payment handling
  */
 export async function executeMcpServer(
   serverSlug: string,
   tool: string,
   args: Record<string, unknown>
 ): Promise<PluginExecutionResult> {
-  // Route through Lambda for x402 payment
+  // Route through api/ for x402 payment
   const res = await fetch(`${API_BASE}/api/mcp/servers/${encodeURIComponent(serverSlug)}/call`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -253,14 +252,14 @@ export const fetchMCPServerTools = fetchRemoteMcpServerTools;
 
 /**
  * Execute an MCP server tool (spawns on-demand via MCP spawner)
- * Routes through Lambda (API_BASE) for x402 payment handling
+ * Routes through api/ (API_BASE) for x402 payment handling
  */
 export async function executeRemoteMcpServer(
   serverSlug: string,
   tool: string,
   args: Record<string, unknown>
 ): Promise<PluginExecutionResult> {
-  // Route through Lambda for x402 payment
+  // Route through api/ for x402 payment
   const res = await fetch(`${API_BASE}/api/mcp/servers/${encodeURIComponent(serverSlug)}/call`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -327,7 +326,7 @@ export async function runWorkflow(
   workflow: WorkflowDefinition,
   input: Record<string, unknown> = {}
 ): Promise<WorkflowRunResult> {
-  const res = await fetch(`${SANDBOX_URL}/sandbox/run`, {
+  const res = await fetch(`sandbox/run`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ workflow, input }),
@@ -347,7 +346,7 @@ export async function runWorkflow(
 export async function validateWorkflow(
   workflow: WorkflowDefinition
 ): Promise<{ valid: boolean; errors: string[] }> {
-  const res = await fetch(`${SANDBOX_URL}/sandbox/validate`, {
+  const res = await fetch(`sandbox/validate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ workflow }),
@@ -365,7 +364,7 @@ export async function validateWorkflow(
  * Fetch connectors via sandbox proxy
  */
 export async function getSandboxConnectors(): Promise<ConnectorInfo[]> {
-  const res = await fetch(`${SANDBOX_URL}/sandbox/connectors`);
+  const res = await fetch(`sandbox/connectors`);
   if (!res.ok) {
     throw new Error(`Failed to fetch connectors: ${res.status}`);
   }
@@ -435,7 +434,7 @@ export async function checkConnectorHealth(): Promise<ServiceHealth> {
 
 export async function checkSandboxHealth(): Promise<ServiceHealth> {
   try {
-    const res = await fetch(`${SANDBOX_URL}/health`);
+    const res = await fetch(`sandbox/health`);
     return res.json();
   } catch (error) {
     return { status: "error", service: "sandbox", error: String(error) };
