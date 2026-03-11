@@ -20,14 +20,16 @@ import AgentDetail from "@/pages/agent";
 import Registry from "@/pages/registry";
 import MyAssets from "@/pages/my-assets";
 import Playground from "@/pages/playground";
-import Manowar from "@/pages/manowar";
+import Workflow from "@/pages/workflow";
 import ConnectDesktop from "@/pages/connect-desktop";
+import InstallDesktop from "@/pages/install-desktop";
 
 function Router() {
   return (
     <>
       <Route path="/connect-desktop" component={ConnectDesktop} />
       <Route path="/connect-desktop/:rest*" component={ConnectDesktop} />
+      <Route path="/install-desktop" component={InstallDesktop} />
       <Layout>
         <Switch>
           <Route path="/" component={Home} />
@@ -40,7 +42,7 @@ function Router() {
           <Route path="/registry" component={Registry} />
           <Route path="/my-assets" component={MyAssets} />
           <Route path="/playground" component={Playground} />
-          <Route path="/manowar/:id" component={Manowar} />
+          <Route path="/workflow/:id" component={Workflow} />
           <Route component={NotFound} />
         </Switch>
       </Layout>
