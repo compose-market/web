@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { CHAIN_CONFIG } from "@/lib/chains";
 import { getContractAddress } from "@/lib/contracts";
+import { API_BASE_URL } from "@/lib/api";
 
 export interface AgentCardProps {
     agent: OnchainAgent;
@@ -64,7 +65,7 @@ export function AgentCard({ agent, onCopyEndpoint }: AgentCardProps) {
 
     // API endpoint URL - direct path without double /api/
     const apiEndpoint = agent.walletAddress
-        ? `https://manowar.compose.market/agent/${agent.walletAddress}`
+        ? `${API_BASE_URL}/agent/${agent.walletAddress}`
         : null;
 
     const handleCopyEndpoint = () => {

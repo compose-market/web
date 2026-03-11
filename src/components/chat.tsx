@@ -6,7 +6,7 @@
  * - ChatMessageItem (message bubbles with actions)
  * - MarkdownRenderer (rich content with Mermaid, LaTeX, code)
  * 
- * Used by: agent.tsx, manowar.tsx, playground.tsx
+ * Used by: agent.tsx, workflow.tsx, playground.tsx
  */
 import React, { useState, useEffect, memo, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
@@ -551,7 +551,7 @@ export const MarkdownRenderer = memo(MarkdownRendererInner);
 
 export interface ChatMessageItemProps {
     message: ChatMessage;
-    variant?: "agent" | "manowar" | "playground";
+    variant?: "agent" | "workflow" | "playground";
     showActions?: boolean;
     onCopy?: (content: string) => void;
     onRetry?: (content: string) => void;
@@ -566,7 +566,7 @@ const messageVariantStyles = {
         assistant: "bg-sidebar-accent text-foreground",
         assistantAvatar: "bg-cyan-500/20 text-cyan-400",
     },
-    manowar: {
+    workflow: {
         user: "bg-cyan-500/20 text-cyan-100",
         userAvatar: "bg-cyan-500/20 text-cyan-400",
         assistant: "bg-sidebar-accent text-foreground font-mono text-sm",
@@ -691,7 +691,7 @@ export interface MultimodalCanvasProps {
     onInputChange: (value: string) => void;
     onSend: () => void;
     sending: boolean;
-    variant?: "agent" | "manowar" | "playground";
+    variant?: "agent" | "workflow" | "playground";
     title?: string;
     icon?: React.ReactNode;
     emptyStateText?: string;
@@ -736,7 +736,7 @@ const canvasVariantConfig = {
         sendButton: "bg-cyan-500 hover:bg-cyan-600 text-black",
         accentColor: "cyan",
     },
-    manowar: {
+    workflow: {
         border: "border-fuchsia-500/30",
         headerBg: "bg-fuchsia-500/5",
         headerText: "text-fuchsia-400",
@@ -893,7 +893,7 @@ export function MultimodalCanvas({
         <div className={cn(
             "border rounded-lg bg-background/50 overflow-hidden flex flex-col",
             config.border,
-            variant === "manowar" && "shadow-[0_0_30px_-5px_hsl(292_85%_55%/0.1)]",
+            variant === "workflow" && "shadow-[0_0_30px_-5px_hsl(292_85%_55%/0.1)]",
             !showHeader && "border-0 rounded-none bg-transparent",
             height
         )}>
@@ -909,7 +909,7 @@ export function MultimodalCanvas({
             <div ref={scrollContainerRef} className="flex-1 min-h-0 p-4 overflow-y-auto">
                 {messages.length === 0 ? (
                     <div className="text-center text-muted-foreground text-sm py-8">
-                        {emptyStateIcon || (variant === "manowar" ? (
+                        {emptyStateIcon || (variant === "workflow" ? (
                             <Play className={cn("w-12 h-12 mx-auto mb-4 opacity-50", config.headerText)} />
                         ) : (
                             <Bot className="w-8 h-8 mx-auto mb-2 opacity-50" />
@@ -1044,17 +1044,17 @@ export function MultimodalCanvas({
                     )}
 
                     <Textarea
-                        placeholder={placeholder || (variant === "manowar" ? "Enter workflow parameters or instruction..." : "Type your message...")}
+                        placeholder={placeholder || (variant === "workflow" ? "Enter workflow parameters or instruction..." : "Type your message...")}
                         value={inputValue}
                         onChange={(e) => onInputChange(e.target.value)}
                         onKeyDown={handleKeyDown}
                         rows={1}
-                        className={cn("resize-none flex-1", variant === "manowar" && "font-mono text-sm")}
+                        className={cn("resize-none flex-1", variant === "workflow" && "font-mono text-sm")}
                         disabled={sending}
                     />
 
                     <Button onClick={handleSend} disabled={!canSend || isUploading} className={config.sendButton}>
-                        {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : variant === "manowar" ? <Play className="w-4 h-4" /> : <Send className="w-4 h-4" />}
+                        {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : variant === "workflow" ? <Play className="w-4 h-4" /> : <Send className="w-4 h-4" />}
                     </Button>
                 </div>
 

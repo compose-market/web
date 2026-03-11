@@ -36,7 +36,7 @@ export function ShareSuccessDialog({ open, onOpenChange, data }: ShareSuccessDia
         <DialogHeader>
           <DialogTitle className="font-display text-lg sm:text-xl flex items-center gap-2">
             <span className="text-cyan-400">✓</span>
-            {isAgent ? 'Agent Minted!' : 'Manowar Minted!'}
+            {isAgent ? 'Agent Minted!' : 'Workflow Minted!'}
           </DialogTitle>
           <DialogDescription>
             <span className="font-mono text-foreground">{name}</span> has been deployed to {CHAIN_CONFIG[chainId]?.name || 'blockchain'}.
@@ -50,7 +50,7 @@ export function ShareSuccessDialog({ open, onOpenChange, data }: ShareSuccessDia
                 className="flex-1 bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white font-bold"
                 onClick={() => onOpenChange(false)}
               >
-                See {isAgent ? 'Agent' : 'Manowar'}
+                See {isAgent ? 'Agent' : 'Workflow'}
               </Button>
             </Link>
             <Button

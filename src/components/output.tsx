@@ -1,7 +1,7 @@
 /**
  * Workflow Output Panel - Display multimodal workflow execution results
  * 
- * This component shows the output from Manowar workflow executions in compose.tsx,
+ * This component shows the output from Workflow executions in compose.tsx,
  * supporting images, audio, video, text, and step-by-step results.
  * 
  * Uses fuchsia brand color (Manowar theme) for consistency.
