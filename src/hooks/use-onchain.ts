@@ -7,23 +7,23 @@ import { useQuery } from "@tanstack/react-query";
 import { readContract } from "thirdweb";
 import {
   getAgentFactoryContract,
-  getManowarContract,
+  getWorkflowContract,
   getWarpContract,
   getRFAContract,
   getAgentFactoryContractForChain,
-  getManowarContractForChain,
+  getWorkflowContractForChain,
   getWarpContractForChain,
   AgentFactoryABI,
-  ManowarABI,
+  WorkflowABI,
   WarpABI,
   formatUsdcPrice,
   weiToUsdc,
   type AgentData,
-  type ManowarData,
+  type WorkflowData,
 } from "@/lib/contracts";
 import { SUPPORTED_CHAINS } from "@/lib/chains";
 import { getIpfsUrl } from "@/lib/pinata";
-import type { AgentCard, ManowarMetadata } from "@/lib/pinata";
+import type { AgentCard, WorkflowMetadata } from "@/lib/pinata";
 
 // =============================================================================
 // Types
@@ -49,12 +49,12 @@ export interface OnchainAgent {
   isWarped: boolean;
 }
 
-export interface OnchainManowar {
+export interface OnchainWorkflow {
   id: number;
   title: string;
   description: string;
   image: string; // Standard NFT metadata field (gateway URL)
-  manowarCardUri: string;
+  workflowCardUri: string;
   totalPrice: string;
   units: number;
   unitsMinted: number;
@@ -70,9 +70,9 @@ export interface OnchainManowar {
   dnaHash?: string;
   walletAddress?: string;
   // Resolved metadata
-  metadata?: ManowarMetadata;
+  metadata?: WorkflowMetadata;
   agentIds?: number[];
-  // Chain where this manowar was minted
+  // Chain where this workflow was minted
   chainId?: number;
 }
 
@@ -211,23 +211,23 @@ export async function fetchAgentByWalletAddress(walletAddress: string): Promise<
   return null;
 }
 
-async function fetchManowarData(manowarId: number, chainId?: number): Promise<OnchainManowar | null> {
+async function fetchWorkflowData(workflowId: number, chainId?: number): Promise<OnchainWorkflow | null> {
   try {
     const contract = chainId
-      ? getManowarContractForChain(chainId)
-      : getManowarContract();
+      ? getWorkflowContractForChain(chainId)
+      : getWorkflowContract();
     const data = await readContract({
       contract,
-      method: "function getManowarData(uint256 manowarId) view returns ((string title, string description, string banner, string manowarCardUri, uint256 totalPrice, uint256 units, uint256 unitsMinted, address creator, bool leaseEnabled, uint256 leaseDuration, uint8 leasePercent, bool hasCoordinator, string coordinatorModel, bool hasActiveRfa, uint256 rfaId))",
-      params: [BigInt(manowarId)],
-    }) as ManowarData;
+      method: "function getWorkflowData(uint256 workflowId) view returns ((string title, string description, string banner, string workflowCardUri, uint256 totalPrice, uint256 units, uint256 unitsMinted, address creator, bool leaseEnabled, uint256 leaseDuration, uint8 leasePercent, bool hasCoordinator, string coordinatorModel, bool hasActiveRfa, uint256 rfaId))",
+      params: [BigInt(workflowId)],
+    }) as WorkflowData;
 
     return {
-      id: manowarId,
+      id: workflowId,
       title: data.title,
       description: data.description,
       image: data.banner, // Contract still uses 'banner' field name
-      manowarCardUri: data.manowarCardUri,
+      workflowCardUri: data.workflowCardUri,
       totalPrice: weiToUsdc(data.totalPrice),
       units: Number(data.units),
       unitsMinted: Number(data.unitsMinted),
@@ -242,26 +242,26 @@ async function fetchManowarData(manowarId: number, chainId?: number): Promise<On
       chainId,
     };
   } catch (error) {
-    console.error(`Failed to fetch manowar ${manowarId} on chain ${chainId}:`, error);
+    console.error(`Failed to fetch workflow ${workflowId} on chain ${chainId}:`, error);
     return null;
   }
 }
 
-async function fetchManowarMetadata(manowar: OnchainManowar, chainId?: number): Promise<OnchainManowar> {
+async function fetchWorkflowMetadata(workflow: OnchainWorkflow, chainId?: number): Promise<OnchainWorkflow> {
   try {
     // Fetch metadata via tokenURI (standard ERC721)
     const contract = chainId
-      ? getManowarContractForChain(chainId)
-      : getManowarContract();
+      ? getWorkflowContractForChain(chainId)
+      : getWorkflowContract();
     const tokenUri = await readContract({
       contract,
       method: "function tokenURI(uint256 tokenId) view returns (string)",
-      params: [BigInt(manowar.id)],
+      params: [BigInt(workflow.id)],
     }) as string;
 
     if (!tokenUri) {
-      console.warn(`[use-onchain] No tokenURI for manowar ${manowar.id}`);
-      return manowar;
+      console.warn(`[use-onchain] No tokenURI for workflow ${workflow.id}`);
+      return workflow;
     }
 
     // Handle IPFS URIs
@@ -273,19 +273,19 @@ async function fetchManowarMetadata(manowar: OnchainManowar, chainId?: number): 
 
     const response = await fetch(metadataUrl);
     if (!response.ok) throw new Error("Failed to fetch metadata");
-    const metadata = await response.json() as ManowarMetadata;
+    const metadata = await response.json() as WorkflowMetadata;
 
     // walletAddress and dnaHash come from IPFS metadata - this is the SINGLE SOURCE OF TRUTH
     // Chain info comes from nested agents[0].chain
     return {
-      ...manowar,
+      ...workflow,
       metadata,
       dnaHash: metadata.dnaHash,
       walletAddress: metadata.walletAddress,
     };
   } catch (error) {
-    console.error(`Failed to fetch metadata for manowar ${manowar.id}:`, error);
-    return manowar;
+    console.error(`Failed to fetch metadata for workflow ${workflow.id}:`, error);
+    return workflow;
   }
 }
 
@@ -417,60 +417,60 @@ export function useAgentsByCreator(creator: string | undefined) {
 }
 
 /**
- * Fetch all on-chain manowars from ALL supported chains
+ * Fetch all on-chain workflows from ALL supported chains
  * Chain info comes from nested agents[0].chain in metadata
  */
-export function useOnchainManowars(options?: {
+export function useOnchainWorkflows(options?: {
   includeRFA?: boolean;
   onlyComplete?: boolean;
 }) {
   const { includeRFA = false, onlyComplete = true } = options || {};
 
   return useQuery({
-    queryKey: ["onchain-manowars", "all-chains", includeRFA, onlyComplete],
+    queryKey: ["onchain-workflows", "all-chains", includeRFA, onlyComplete],
     queryFn: async () => {
       // Fetch from all supported chains in parallel
       const chainPromises = SUPPORTED_CHAINS.map(async ({ id: chainId }) => {
         try {
-          const contract = getManowarContractForChain(chainId);
+          const contract = getWorkflowContractForChain(chainId);
 
-          // Get total manowars count for this chain
+          // Get total workflows count for this chain
           const total = await readContract({
             contract,
-            method: "function totalManowars() view returns (uint256)",
+            method: "function totalWorkflows() view returns (uint256)",
             params: [],
           }) as bigint;
 
           const totalNum = Number(total);
           if (totalNum === 0) return [];
 
-          // Fetch all manowars from this chain (IDs start at 1)
-          const manowarPromises = Array.from({ length: totalNum }, (_, i) =>
-            fetchManowarData(i + 1, chainId)
+          // Fetch all workflows from this chain (IDs start at 1)
+          const workflowPromises = Array.from({ length: totalNum }, (_, i) =>
+            fetchWorkflowData(i + 1, chainId)
           );
 
-          let manowars = (await Promise.all(manowarPromises)).filter((m): m is OnchainManowar => m !== null);
+          let workflows = (await Promise.all(workflowPromises)).filter((m): m is OnchainWorkflow => m !== null);
 
-          // Fetch metadata for each manowar (to get walletAddress from IPFS)
-          manowars = await Promise.all(manowars.map(m => fetchManowarMetadata(m, chainId)));
+          // Fetch metadata for each workflow (to get walletAddress from IPFS)
+          workflows = await Promise.all(workflows.map(m => fetchWorkflowMetadata(m, chainId)));
 
           // Filter based on options
           if (onlyComplete && !includeRFA) {
-            manowars = manowars.filter(m => !m.hasActiveRfa);
+            workflows = workflows.filter(m => !m.hasActiveRfa);
           } else if (includeRFA && !onlyComplete) {
-            manowars = manowars.filter(m => m.hasActiveRfa);
+            workflows = workflows.filter(m => m.hasActiveRfa);
           }
 
-          return manowars;
+          return workflows;
         } catch (error) {
-          console.warn(`Failed to fetch manowars from chain ${chainId}:`, error);
+          console.warn(`Failed to fetch workflows from chain ${chainId}:`, error);
           return [];
         }
       });
 
-      // Merge all manowars from all chains
-      const chainsManowars = await Promise.all(chainPromises);
-      return chainsManowars.flat();
+      // Merge all workflows from all chains
+      const chainsWorkflows = await Promise.all(chainPromises);
+      return chainsWorkflows.flat();
     },
     staleTime: 30 * 1000,
     gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
@@ -479,101 +479,101 @@ export function useOnchainManowars(options?: {
 }
 
 /**
- * Fetch manowars owned by a specific address
+ * Fetch workflows owned by a specific address
  */
-export function useManowarsByCreator(creator: string | undefined) {
-  const { data: allManowars, ...rest } = useOnchainManowars({ onlyComplete: false });
+export function useWorkflowsByCreator(creator: string | undefined) {
+  const { data: allWorkflows, ...rest } = useOnchainWorkflows({ onlyComplete: false });
 
   return {
     ...rest,
-    data: allManowars?.filter(m =>
+    data: allWorkflows?.filter(m =>
       m.creator.toLowerCase() === creator?.toLowerCase()
     ),
   };
 }
 
 /**
- * Fetch manowars with active RFAs (for marketplace RFA tab)
+ * Fetch workflows with active RFAs (for marketplace RFA tab)
  */
-export function useManowarsWithRFA() {
-  return useOnchainManowars({ includeRFA: true, onlyComplete: false });
+export function useWorkflowsWithRFA() {
+  return useOnchainWorkflows({ includeRFA: true, onlyComplete: false });
 }
 
 
 
 /**
- * Fetch a single manowar by ID (with IPFS metadata)
+ * Fetch a single workflow by ID (with IPFS metadata)
  */
-export function useOnchainManowar(manowarId: number | null) {
+export function useOnchainWorkflow(workflowId: number | null) {
   return useQuery({
-    queryKey: ["onchain-manowar", manowarId],
+    queryKey: ["onchain-workflow", workflowId],
     queryFn: async () => {
-      if (!manowarId) return null;
-      const manowar = await fetchManowarData(manowarId);
-      if (!manowar) return null;
-      return fetchManowarMetadata(manowar);
+      if (!workflowId) return null;
+      const workflow = await fetchWorkflowData(workflowId);
+      if (!workflow) return null;
+      return fetchWorkflowMetadata(workflow);
     },
-    enabled: !!manowarId,
+    enabled: !!workflowId,
     staleTime: 30 * 1000,
     gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
   });
 }
 
 /**
- * Find a manowar by its wallet address (stored in IPFS metadata)
- * Searches across all supported chains to find the manowar
+ * Find a workflow by its wallet address (stored in IPFS metadata)
+ * Searches across all supported chains to find the workflow
  */
-async function fetchManowarByWalletAddress(walletAddress: string): Promise<OnchainManowar | null> {
+async function fetchWorkflowByWalletAddress(walletAddress: string): Promise<OnchainWorkflow | null> {
   const normalizedSearch = walletAddress.toLowerCase();
 
   // Search across all supported chains
   for (const { id: chainId } of SUPPORTED_CHAINS) {
     try {
-      const contract = getManowarContractForChain(chainId);
+      const contract = getWorkflowContractForChain(chainId);
 
-      // Get total manowars count for this chain
+      // Get total workflows count for this chain
       const total = await readContract({
         contract,
-        method: "function totalManowars() view returns (uint256)",
+        method: "function totalWorkflows() view returns (uint256)",
         params: [],
       }) as bigint;
 
       const totalNum = Number(total);
       if (totalNum === 0) continue;
 
-      // Search through all manowars on this chain (most recent first for efficiency)
-      // Manowar IDs start at 1, not 0
+      // Search through all workflows on this chain (most recent first for efficiency)
+      // Workflow IDs start at 1, not 0
       for (let i = totalNum; i >= 1; i--) {
-        const manowar = await fetchManowarData(i, chainId);
-        if (!manowar) continue;
+        const workflow = await fetchWorkflowData(i, chainId);
+        if (!workflow) continue;
 
         // Fetch metadata to get the wallet address (source of truth)
-        const manowarWithMeta = await fetchManowarMetadata(manowar, chainId);
+        const workflowWithMeta = await fetchWorkflowMetadata(workflow, chainId);
 
-        if (manowarWithMeta.walletAddress && manowarWithMeta.walletAddress.toLowerCase() === normalizedSearch) {
-          return manowarWithMeta;
+        if (workflowWithMeta.walletAddress && workflowWithMeta.walletAddress.toLowerCase() === normalizedSearch) {
+          return workflowWithMeta;
         }
       }
     } catch (error) {
-      console.warn(`Failed to search manowars on chain ${chainId}:`, error);
+      console.warn(`Failed to search workflows on chain ${chainId}:`, error);
       // Continue to next chain
     }
   }
 
-  console.error(`Manowar with wallet ${walletAddress} not found on any chain`);
+  console.error(`Workflow with wallet ${walletAddress} not found on any chain`);
   return null;
 }
 
 /**
- * Fetch a single manowar by wallet address
+ * Fetch a single workflow by wallet address
  * This is the preferred method since wallet address is the canonical identifier
  */
-export function useOnchainManowarByWallet(walletAddress: string | null) {
+export function useOnchainWorkflowByWallet(walletAddress: string | null) {
   return useQuery({
-    queryKey: ["onchain-manowar-wallet", walletAddress?.toLowerCase()],
+    queryKey: ["onchain-workflow-wallet", walletAddress?.toLowerCase()],
     queryFn: async () => {
       if (!walletAddress) return null;
-      return fetchManowarByWalletAddress(walletAddress);
+      return fetchWorkflowByWalletAddress(walletAddress);
     },
     enabled: !!walletAddress && walletAddress.startsWith("0x"),
     staleTime: 30 * 1000,
@@ -582,18 +582,18 @@ export function useOnchainManowarByWallet(walletAddress: string | null) {
 }
 
 /**
- * Fetch a single manowar by either ID or wallet address
+ * Fetch a single workflow by either ID or wallet address
  * Automatically detects the identifier type
  */
-export function useOnchainManowarByIdentifier(identifier: string | null) {
+export function useOnchainWorkflowByIdentifier(identifier: string | null) {
   // Determine if identifier is a wallet address (0x...) or numeric ID
   // Wallet address = 0x + 40 hex chars = 42 total
   const isWalletAddress = identifier?.startsWith("0x") && identifier.length === 42;
   const numericId = !isWalletAddress && identifier ? parseInt(identifier) : null;
   const walletAddress = isWalletAddress ? identifier : null;
 
-  const byIdQuery = useOnchainManowar(!isWalletAddress ? numericId : null);
-  const byWalletQuery = useOnchainManowarByWallet(isWalletAddress ? walletAddress : null);
+  const byIdQuery = useOnchainWorkflow(!isWalletAddress ? numericId : null);
+  const byWalletQuery = useOnchainWorkflowByWallet(isWalletAddress ? walletAddress : null);
 
   if (isWalletAddress) {
     return byWalletQuery;
@@ -611,7 +611,7 @@ export type RFAStatus = 'None' | 'Open' | 'Fulfilled' | 'Cancelled';
 /** On-chain RFA data */
 export interface OnchainRFA {
   id: number;
-  manowarId: number;
+  workflowId: number;
   title: string;
   description: string;
   requiredSkills: string[]; // bytes32[] decoded to strings
@@ -633,7 +633,7 @@ export interface RFASubmission {
 
 /** Contract RFA data structure */
 interface ContractRFAData {
-  manowarId: bigint;
+  workflowId: bigint;
   title: string;
   description: string;
   requiredSkills: `0x${string}`[];
@@ -669,7 +669,7 @@ function parseRFAData(id: number, data: ContractRFAData): OnchainRFA {
 
   return {
     id,
-    manowarId: Number(data.manowarId),
+    workflowId: Number(data.workflowId),
     title: data.title,
     description: data.description,
     requiredSkills: data.requiredSkills.map(s => s), // Keep as hex for now
@@ -689,7 +689,7 @@ async function fetchRFAData(rfaId: number): Promise<OnchainRFA | null> {
     const contract = getRFAContract();
     const data = await readContract({
       contract,
-      method: "function getRFAData(uint256 rfaId) view returns ((uint256 manowarId, string title, string description, bytes32[] requiredSkills, uint256 offerAmount, address publisher, uint256 createdAt, uint8 status, uint256 fulfilledByAgentId, address agentCreator))",
+      method: "function getRFAData(uint256 rfaId) view returns ((uint256 workflowId, string title, string description, bytes32[] requiredSkills, uint256 offerAmount, address publisher, uint256 createdAt, uint8 status, uint256 fulfilledByAgentId, address agentCreator))",
       params: [BigInt(rfaId)],
     }) as ContractRFAData;
 
@@ -813,19 +813,19 @@ export function useRFAsByPublisher(publisher: string | undefined) {
 }
 
 /**
- * Fetch RFAs for a specific Manowar
+ * Fetch RFAs for a specific Workflow
  */
-export function useRFAsForManowar(manowarId: number | null) {
+export function useRFAsForWorkflow(workflowId: number | null) {
   return useQuery({
-    queryKey: ["rfa", "by-manowar", manowarId],
+    queryKey: ["rfa", "by-workflow", workflowId],
     queryFn: async () => {
-      if (!manowarId) return [];
+      if (!workflowId) return [];
 
       const contract = getRFAContract();
       const rfaIds = await readContract({
         contract,
-        method: "function getRFAsForManowar(uint256 manowarId) view returns (uint256[])",
-        params: [BigInt(manowarId)],
+        method: "function getRFAsForWorkflow(uint256 workflowId) view returns (uint256[])",
+        params: [BigInt(workflowId)],
       }) as bigint[];
 
       if (rfaIds.length === 0) return [];
@@ -835,7 +835,7 @@ export function useRFAsForManowar(manowarId: number | null) {
 
       return rfas.filter((r): r is OnchainRFA => r !== null);
     },
-    enabled: !!manowarId && manowarId > 0,
+    enabled: !!workflowId && workflowId > 0,
     staleTime: 30 * 1000,
     gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
   });

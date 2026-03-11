@@ -29,7 +29,7 @@ import {
 // =============================================================================
 
 export interface UseTriggersOptions {
-    manowarWallet: string | null;
+    workflowWallet: string | null;
     enabled?: boolean;
     filterEnabled?: boolean; // only show enabled triggers
     filterType?: TriggerDefinition["type"];
@@ -46,7 +46,7 @@ export interface UseTriggersReturn {
 }
 
 export interface UseHooksOptions {
-    manowarWallet: string | null;
+    workflowWallet: string | null;
     enabled?: boolean;
     filterEnabled?: boolean;
     filterType?: HookDefinition["type"];
@@ -67,18 +67,18 @@ export interface UseHooksReturn {
 // =============================================================================
 
 const STALE_TIME = 5 * 60 * 1000; // 5 minutes (triggers update more frequently than models)
-const TRIGGERS_KEY = "manowar-triggers";
-const HOOKS_KEY = "manowar-hooks";
+const TRIGGERS_KEY = "workflow-triggers";
+const HOOKS_KEY = "workflow-hooks";
 
 // =============================================================================
 // Trigger Hooks
 // =============================================================================
 
 export function useTriggers(options: UseTriggersOptions): UseTriggersReturn {
-    const { manowarWallet, enabled = true, filterEnabled, filterType } = options;
+    const { workflowWallet, enabled = true, filterEnabled, filterType } = options;
     const queryClient = useQueryClient();
 
-    const queryKey = [TRIGGERS_KEY, manowarWallet];
+    const queryKey = [TRIGGERS_KEY, workflowWallet];
 
     const {
         data: triggers = [],
@@ -88,10 +88,10 @@ export function useTriggers(options: UseTriggersOptions): UseTriggersReturn {
         dataUpdatedAt,
     } = useQuery<TriggerDefinition[], Error>({
         queryKey,
-        queryFn: () => fetchTriggers(manowarWallet!),
+        queryFn: () => fetchTriggers(workflowWallet!),
         staleTime: STALE_TIME,
         gcTime: STALE_TIME * 2,
-        enabled: enabled && manowarWallet !== null,
+        enabled: enabled && workflowWallet !== null,
     });
 
     const filteredTriggers = useMemo(() => {
@@ -138,10 +138,10 @@ export function useTriggers(options: UseTriggersOptions): UseTriggersReturn {
 }
 
 export function useTrigger(
-    manowarWallet: string | null,
+    workflowWallet: string | null,
     triggerId: string | null
 ): TriggerDefinition | null {
-    const { triggers } = useTriggers({ manowarWallet, enabled: !!manowarWallet && !!triggerId });
+    const { triggers } = useTriggers({ workflowWallet, enabled: !!workflowWallet && !!triggerId });
     return useMemo(() => {
         if (!triggerId) return null;
         return triggers.find((t) => t.id === triggerId) || null;
@@ -152,61 +152,61 @@ export function useTrigger(
 // Trigger Mutations
 // =============================================================================
 
-export function useCreateTrigger(manowarWallet: string) {
+export function useCreateTrigger(workflowWallet: string) {
     const queryClient = useQueryClient();
-    const queryKey = [TRIGGERS_KEY, manowarWallet];
+    const queryKey = [TRIGGERS_KEY, workflowWallet];
 
     return useMutation({
         mutationFn: (trigger: Omit<TriggerDefinition, "id" | "createdAt" | "updatedAt" | "memoryId">) =>
-            createTrigger(manowarWallet, trigger),
+            createTrigger(workflowWallet, trigger),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey });
         },
     });
 }
 
-export function useUpdateTrigger(manowarWallet: string) {
+export function useUpdateTrigger(workflowWallet: string) {
     const queryClient = useQueryClient();
-    const queryKey = [TRIGGERS_KEY, manowarWallet];
+    const queryKey = [TRIGGERS_KEY, workflowWallet];
 
     return useMutation({
         mutationFn: ({ triggerId, updates }: { triggerId: string; updates: Partial<TriggerDefinition> }) =>
-            updateTrigger(manowarWallet, triggerId, updates),
+            updateTrigger(workflowWallet, triggerId, updates),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey });
         },
     });
 }
 
-export function useDeleteTrigger(manowarWallet: string) {
+export function useDeleteTrigger(workflowWallet: string) {
     const queryClient = useQueryClient();
-    const queryKey = [TRIGGERS_KEY, manowarWallet];
+    const queryKey = [TRIGGERS_KEY, workflowWallet];
 
     return useMutation({
-        mutationFn: (triggerId: string) => deleteTrigger(manowarWallet, triggerId),
+        mutationFn: (triggerId: string) => deleteTrigger(workflowWallet, triggerId),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey });
         },
     });
 }
 
-export function useToggleTrigger(manowarWallet: string) {
+export function useToggleTrigger(workflowWallet: string) {
     const queryClient = useQueryClient();
-    const queryKey = [TRIGGERS_KEY, manowarWallet];
+    const queryKey = [TRIGGERS_KEY, workflowWallet];
 
     return useMutation({
         mutationFn: ({ triggerId, enabled }: { triggerId: string; enabled: boolean }) =>
-            toggleTrigger(manowarWallet, triggerId, enabled),
+            toggleTrigger(workflowWallet, triggerId, enabled),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey });
         },
     });
 }
 
-export function useTestTrigger(manowarWallet: string) {
+export function useTestTrigger(workflowWallet: string) {
     return useMutation({
         mutationFn: ({ triggerId, input }: { triggerId: string; input?: Record<string, unknown> }) =>
-            testTrigger(manowarWallet, triggerId, input),
+            testTrigger(workflowWallet, triggerId, input),
     });
 }
 
@@ -225,10 +225,10 @@ export function useParseNLToCron() {
 // =============================================================================
 
 export function useHooks(options: UseHooksOptions): UseHooksReturn {
-    const { manowarWallet, enabled = true, filterEnabled, filterType } = options;
+    const { workflowWallet, enabled = true, filterEnabled, filterType } = options;
     const queryClient = useQueryClient();
 
-    const queryKey = [HOOKS_KEY, manowarWallet];
+    const queryKey = [HOOKS_KEY, workflowWallet];
 
     const {
         data: hooks = [],
@@ -238,10 +238,10 @@ export function useHooks(options: UseHooksOptions): UseHooksReturn {
         dataUpdatedAt,
     } = useQuery<HookDefinition[], Error>({
         queryKey,
-        queryFn: () => fetchHooks(manowarWallet!),
+        queryFn: () => fetchHooks(workflowWallet!),
         staleTime: STALE_TIME,
         gcTime: STALE_TIME * 2,
-        enabled: enabled && manowarWallet !== null,
+        enabled: enabled && workflowWallet !== null,
     });
 
     const filteredHooks = useMemo(() => {
@@ -279,10 +279,10 @@ export function useHooks(options: UseHooksOptions): UseHooksReturn {
 }
 
 export function useHook(
-    manowarWallet: string | null,
+    workflowWallet: string | null,
     hookId: string | null
 ): HookDefinition | null {
-    const { hooks } = useHooks({ manowarWallet, enabled: !!manowarWallet && !!hookId });
+    const { hooks } = useHooks({ workflowWallet, enabled: !!workflowWallet && !!hookId });
     return useMemo(() => {
         if (!hookId) return null;
         return hooks.find((h) => h.id === hookId) || null;
@@ -293,38 +293,38 @@ export function useHook(
 // Hook Mutations
 // =============================================================================
 
-export function useCreateHook(manowarWallet: string) {
+export function useCreateHook(workflowWallet: string) {
     const queryClient = useQueryClient();
-    const queryKey = [HOOKS_KEY, manowarWallet];
+    const queryKey = [HOOKS_KEY, workflowWallet];
 
     return useMutation({
         mutationFn: (hook: Omit<HookDefinition, "id" | "createdAt">) =>
-            createHook(manowarWallet, hook),
+            createHook(workflowWallet, hook),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey });
         },
     });
 }
 
-export function useUpdateHook(manowarWallet: string) {
+export function useUpdateHook(workflowWallet: string) {
     const queryClient = useQueryClient();
-    const queryKey = [HOOKS_KEY, manowarWallet];
+    const queryKey = [HOOKS_KEY, workflowWallet];
 
     return useMutation({
         mutationFn: ({ hookId, updates }: { hookId: string; updates: Partial<HookDefinition> }) =>
-            updateHook(manowarWallet, hookId, updates),
+            updateHook(workflowWallet, hookId, updates),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey });
         },
     });
 }
 
-export function useDeleteHook(manowarWallet: string) {
+export function useDeleteHook(workflowWallet: string) {
     const queryClient = useQueryClient();
-    const queryKey = [HOOKS_KEY, manowarWallet];
+    const queryKey = [HOOKS_KEY, workflowWallet];
 
     return useMutation({
-        mutationFn: (hookId: string) => deleteHook(manowarWallet, hookId),
+        mutationFn: (hookId: string) => deleteHook(workflowWallet, hookId),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey });
         },

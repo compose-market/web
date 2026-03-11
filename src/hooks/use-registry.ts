@@ -1,7 +1,7 @@
 /**
  * MCP Registry Hooks
  * React Query hooks for the MCP registry API.
- * Registry runs on the connector server (port 4001), not the lambda API server.
+ * Registry runs on the services/connector (port 4001), not the API server.
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useCallback } from "react";

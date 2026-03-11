@@ -5,7 +5,7 @@
  * URL params take precedence over sessionStorage for direct link support.
  * 
  * Usage:
- *   const [activeTab, setActiveTab] = useTabs("market", "manowars");
+ *   const [activeTab, setActiveTab] = useTabs("market", "workflows");
  */
 import { useCallback, useEffect, useState } from "react";
 import { useSearch } from "wouter";

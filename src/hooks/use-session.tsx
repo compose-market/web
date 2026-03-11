@@ -30,7 +30,7 @@ import { useWs } from "./use-sse";
 import type { Address } from "viem";
 
 // Session storage key
-const SESSION_KEY = "manowar_session";
+const SESSION_KEY = "compose_session";
 
 // API endpoint for Compose Keys
 const API_BASE = (import.meta.env.VITE_API_URL || "https://api.compose.market").replace(/\/+$/, "");
@@ -425,7 +425,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
                 if (useCronosAA) {
                     // ===========================================================
-                    // CRONOS PATH: Use Lambda AA endpoints (no bundler)
+                    // CRONOS PATH: Use API AA endpoints (no bundler)
                     // ===========================================================
                     console.log("[Session] Using Cronos AA for session creation");
 

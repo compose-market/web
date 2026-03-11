@@ -8,34 +8,34 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useCallback } from "react";
-import { fetchAvailableModels, type AIModel } from "@/lib/models";
+import {
+    buildTypeCategories,
+    fetchAvailableModels,
+    getModelTypeValues,
+    type CatalogModel,
+    type ModelCategory,
+} from "@/lib/models";
 
 // =============================================================================
 // Types
 // =============================================================================
 
 export interface UseModelsOptions {
-    task?: string;
-    source?: string;
+    type?: string;
+    provider?: string;
     search?: string;
     enabled?: boolean;
 }
 
-export interface TaskCategory {
-    id: string;
-    label: string;
-    count: number;
-}
-
 export interface UseModelsReturn {
-    models: AIModel[];
-    filteredModels: AIModel[];
+    models: CatalogModel[];
+    filteredModels: CatalogModel[];
     isLoading: boolean;
     isRefetching: boolean;
     error: Error | null;
     forceRefresh: () => Promise<void>;
     lastUpdated: Date | null;
-    taskCategories: TaskCategory[];
+    typeCategories: ModelCategory[];
 }
 
 // =============================================================================
@@ -50,7 +50,7 @@ const CACHE_KEY = ["models-catalog"];
 // =============================================================================
 
 export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
-    const { task, source, search, enabled = true } = options;
+    const { type, provider, search, enabled = true } = options;
     const queryClient = useQueryClient();
 
     const {
@@ -59,7 +59,7 @@ export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
         isFetching,
         error,
         dataUpdatedAt,
-    } = useQuery<AIModel[], Error>({
+    } = useQuery<CatalogModel[], Error>({
         queryKey: CACHE_KEY,
         queryFn: fetchAvailableModels,
         staleTime: STALE_TIME,
@@ -71,56 +71,28 @@ export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
     const filteredModels = useMemo(() => {
         let result = models;
 
-        if (task && task !== "all") {
-            result = result.filter((m) => m.task === task);
+        if (type && type !== "all") {
+            result = result.filter((model) => getModelTypeValues(model).includes(type));
         }
 
-        if (source && source !== "all") {
-            result = result.filter((m) => m.source === source);
+        if (provider && provider !== "all") {
+            result = result.filter((model) => model.provider === provider);
         }
 
         if (search?.trim()) {
             const query = search.toLowerCase().trim();
             result = result.filter(
-                (m) =>
-                    m.id.toLowerCase().includes(query) ||
-                    m.name.toLowerCase().includes(query) ||
-                    m.ownedBy?.toLowerCase().includes(query)
+                (model) =>
+                    model.modelId.toLowerCase().includes(query) ||
+                    (model.name || "").toLowerCase().includes(query) ||
+                    model.provider.toLowerCase().includes(query)
             );
         }
 
         return result;
-    }, [models, task, source, search]);
+    }, [models, type, provider, search]);
 
-    // Compute task categories dynamically from model data - NO HARDCODING
-    const taskCategories = useMemo(() => {
-        const counts = new Map<string, number>();
-
-        for (const model of models) {
-            const taskType = model.task || "text-generation";
-            counts.set(taskType, (counts.get(taskType) || 0) + 1);
-        }
-
-        const categories: TaskCategory[] = [];
-
-        categories.push({
-            id: "all",
-            label: "All Models",
-            count: models.length,
-        });
-
-        // Sort by count and use task value directly as label (formatted)
-        const sortedTasks = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
-        for (const [taskId, count] of sortedTasks) {
-            categories.push({
-                id: taskId,
-                label: taskId.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" "),
-                count,
-            });
-        }
-
-        return categories;
-    }, [models]);
+    const typeCategories = useMemo(() => buildTypeCategories(models), [models]);
 
     // Manual refresh - named distinctly to avoid collision with query.refetch
     const forceRefresh = useCallback(async () => {
@@ -137,7 +109,7 @@ export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
         error: error || null,
         forceRefresh,
         lastUpdated,
-        taskCategories,
+        typeCategories,
     };
 }
 
@@ -145,20 +117,20 @@ export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
 // Convenience Hooks
 // =============================================================================
 
-export function useModel(modelId: string | null): AIModel | null {
+export function useModel(modelId: string | null): CatalogModel | null {
     const { models } = useModels({ enabled: !!modelId });
     return useMemo(() => {
         if (!modelId) return null;
-        return models.find((m) => m.id === modelId) || null;
+        return models.find((model) => model.modelId === modelId) || null;
     }, [models, modelId]);
 }
 
-export function useModelsByTask(task: string): AIModel[] {
-    const { filteredModels } = useModels({ task });
+export function useModelsByType(type: string): CatalogModel[] {
+    const { filteredModels } = useModels({ type });
     return filteredModels;
 }
 
-export function useModelsBySource(source: string): AIModel[] {
-    const { filteredModels } = useModels({ source });
+export function useModelsByProvider(provider: string): CatalogModel[] {
+    const { filteredModels } = useModels({ provider });
     return filteredModels;
 }
