@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertTriangle, Check, Monitor, Loader2, Shield, X, Download } from "lucide-react";
 import { API_BASE_URL } from "@/lib/api";
+import { createSignedDesktopInstallDeepLink, resolveAgentCardCid } from "@/lib/desktop-install";
 import { useChain } from "@/contexts/ChainContext";
 
 const WEB_APP_URL = "https://compose.market";
@@ -50,7 +51,7 @@ function parseQueryParams(): {
 }
 
 export default function ConnectDesktopPage() {
-  const { isConnected, address } = useWalletAccount();
+  const { isConnected, address, account } = useWalletAccount();
   const { paymentChainId } = useChain();
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const [mode, setMode] = useState<ConnectMode>("web-first");
@@ -93,6 +94,36 @@ export default function ConnectDesktopPage() {
     setError(null);
 
     try {
+      const signedInstallEnabled = (import.meta.env.VITE_SIGNED_DEEPLINK_INSTALL || "1") === "1";
+      if (signedInstallEnabled) {
+        if (!account) {
+          throw new Error("Wallet signer unavailable for signed desktop install");
+        }
+        const installAgentWallet = (agentWallet || address).toLowerCase() as `0x${string}`;
+        const agentCardCid = await resolveAgentCardCid(installAgentWallet);
+        const signed = await createSignedDesktopInstallDeepLink({
+          account,
+          signer: address.toLowerCase() as `0x${string}`,
+          agentWallet: installAgentWallet,
+          agentCardCid,
+          chainId: paymentChainId,
+        });
+
+        setSuccess(true);
+        setDeepLinkUrl(signed.deepLinkUrl);
+        window.location.href = signed.deepLinkUrl;
+
+        if (mode === "web-first") {
+          window.setTimeout(() => {
+            const params = new URLSearchParams();
+            params.set("install", signed.deepLinkUrl.split("install=")[1] || "");
+            if (agentWallet) params.set("agent_wallet", agentWallet);
+            window.location.href = `${FALLBACK_INSTALL_PATH}?${params.toString()}`;
+          }, 1800);
+        }
+        return;
+      }
+
       const response = await fetch(`${API_BASE_URL}/api/desktop/link-token`, {
         method: "POST",
         headers: {
@@ -133,7 +164,7 @@ export default function ConnectDesktopPage() {
       setError(err instanceof Error ? err.message : "Authorization failed");
       setIsAuthorizing(false);
     }
-  }, [address, agentWallet, deviceId, mode, paymentChainId]);
+  }, [account, address, agentWallet, deviceId, mode, paymentChainId]);
 
   const shortAddress = useMemo(() => (
     address ? `${address.slice(0, 6)}...${address.slice(-4)}` : ""

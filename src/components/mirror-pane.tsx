@@ -1,21 +1,9 @@
-/**
- * Mirror Pane Component
- *
- * Side panel displaying model configuration, Google AI tools, and settings.
- * Designed to appear alongside the canvas as a permanent visible panel.
- * Follows styling patterns from agent-card.tsx and manowar-card.tsx.
- * 
- * Features tabbed interface:
- * - Model Card: Model identity, capabilities, pricing, system prompt
- * - Optional Params: Dynamic parameters for image/video models
- */
 import React, { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import {
     Select,
@@ -32,60 +20,40 @@ import {
 } from "@/components/ui/tooltip";
 import {
     Cpu,
-    DollarSign,
-    Layers,
     Search,
     Code2,
     MapPin,
     Link,
-    Sparkles,
-    Settings2,
-    ChevronDown,
-    ChevronRight,
-    Sliders,
     LayoutGrid,
     Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-export interface ModelInfo {
-    id: string;
-    name: string;
-    source: string;
-    ownedBy?: string;
-    task?: string;
-    description?: string;
-    contextLength?: number;
-    maxOutputTokens?: number;
-    pricing?: {
-        input: number;    // USD per million tokens
-        output: number;   // USD per million tokens
-        provider?: string;
-    };
-    // Model capabilities from backend - array of capability names (e.g., ["tools", "vision"])
-    // Only positive/affirmative capabilities are included
-    capabilities?: string[];
-    inputModalities?: string[];
-    outputModalities?: string[];
-}
+import {
+    formatModelTypeLabel,
+    getDefaultModelPricingSections,
+    getModelContextWindowEntries,
+    getOptionalModelPricingSections,
+    getModelTypeValues,
+    getModelValueList,
+    type CatalogModel,
+} from "@/lib/models";
 
 export interface GoogleToolsState {
     enableGoogleSearch: boolean;
-    setEnableGoogleSearch: (v: boolean) => void;
+    setEnableGoogleSearch: (value: boolean) => void;
     enableCodeExecution: boolean;
-    setEnableCodeExecution: (v: boolean) => void;
+    setEnableCodeExecution: (value: boolean) => void;
     enableMapsGrounding: boolean;
-    setEnableMapsGrounding: (v: boolean) => void;
+    setEnableMapsGrounding: (value: boolean) => void;
     urlContextUrls: string;
-    setUrlContextUrls: (v: string) => void;
+    setUrlContextUrls: (value: string) => void;
 }
 
-// Model parameter schema (from backend paramsHandler)
 export interface ParamDefinition {
     type: "string" | "integer" | "number" | "boolean" | "array";
     required: boolean;
     default?: string | number | boolean;
-    options?: (string | number)[];
+    options?: Array<string | number>;
     description?: string;
 }
 
@@ -98,15 +66,68 @@ export interface ModelParamsSchema {
 
 export interface MirrorPaneProps {
     selectedModel: string;
-    modelInfo: ModelInfo | null;
+    modelInfo: CatalogModel | null;
     isGoogleModel: boolean;
     systemPrompt: string;
     onSystemPromptChange: (value: string) => void;
     googleTools?: GoogleToolsState;
-    // Optional model params (for image/video models)
     modelParams?: ModelParamsSchema | null;
     paramValues?: Record<string, unknown>;
     onParamValuesChange?: (values: Record<string, unknown>) => void;
+}
+
+function renderParamInput(
+    key: string,
+    definition: ParamDefinition,
+    value: unknown,
+    onChange: (nextValue: unknown) => void,
+) {
+    if (definition.options && definition.options.length > 0) {
+        const stringValue = value === undefined ? "" : String(value);
+        return (
+            <Select value={stringValue} onValueChange={onChange as (value: string) => void}>
+                <SelectTrigger className="bg-background/50 border-sidebar-border">
+                    <SelectValue placeholder={`Select ${key}`} />
+                </SelectTrigger>
+                <SelectContent>
+                    {definition.options.map((option) => (
+                        <SelectItem key={`${key}-${option}`} value={String(option)}>
+                            {String(option)}
+                        </SelectItem>
+                    ))}
+                </SelectContent>
+            </Select>
+        );
+    }
+
+    if (definition.type === "boolean") {
+        return (
+            <div className="flex items-center justify-between rounded-sm border border-sidebar-border bg-background/30 px-3 py-2">
+                <span className="text-xs text-muted-foreground">{definition.description || key}</span>
+                <Switch checked={Boolean(value)} onCheckedChange={onChange as (checked: boolean) => void} />
+            </div>
+        );
+    }
+
+    return (
+        <Input
+            type={definition.type === "integer" || definition.type === "number" ? "number" : "text"}
+            value={value === undefined ? "" : String(value)}
+            onChange={(event) => {
+                const rawValue = event.target.value;
+                if (definition.type === "integer") {
+                    onChange(rawValue === "" ? undefined : Number.parseInt(rawValue, 10));
+                    return;
+                }
+                if (definition.type === "number") {
+                    onChange(rawValue === "" ? undefined : Number.parseFloat(rawValue));
+                    return;
+                }
+                onChange(rawValue);
+            }}
+            className="bg-background/50 border-sidebar-border"
+        />
+    );
 }
 
 export function MirrorPane({
@@ -120,13 +141,14 @@ export function MirrorPane({
     paramValues = {},
     onParamValuesChange,
 }: MirrorPaneProps) {
-    // Tab state: 'model-card' or 'optional-params'
-    const [activeTab, setActiveTab] = useState<"model-card" | "optional-params">("model-card");
-    // Collapsible state for optional params section (legacy, kept for backwards compat)
-    const [paramsExpanded, setParamsExpanded] = useState(true);
-
-    // Check if we have optional params to show
-    const hasOptionalParams = modelParams && Object.keys(modelParams.params).length > 0;
+    const [activeTab, setActiveTab] = useState<"details" | "settings">("details");
+    const typeValues = modelInfo ? getModelTypeValues(modelInfo) : [];
+    const hasOptionalParams = Boolean(modelParams && Object.keys(modelParams.params).length > 0);
+    const inputValues = modelInfo ? getModelValueList(modelInfo.input) : [];
+    const outputValues = modelInfo ? getModelValueList(modelInfo.output) : [];
+    const contextEntries = modelInfo ? getModelContextWindowEntries(modelInfo) : [];
+    const pricingSections = modelInfo ? getDefaultModelPricingSections(modelInfo) : [];
+    const optionalPricingSections = modelInfo ? getOptionalModelPricingSections(modelInfo) : [];
 
     if (!selectedModel) {
         return (
@@ -134,7 +156,7 @@ export function MirrorPane({
                 <Card className="glass-panel border-cyan-500/30 h-full flex flex-col overflow-hidden">
                     <CardContent className="p-4 sm:p-5 flex flex-col items-center justify-center flex-1 text-center">
                         <Cpu className="w-10 h-10 text-zinc-600 mb-3" />
-                        <p className="text-sm text-zinc-500">Select a model to configure</p>
+                        <p className="text-sm text-zinc-500">Select a model to inspect pricing, limits, and settings</p>
                     </CardContent>
                 </Card>
             </TooltipProvider>
@@ -144,388 +166,264 @@ export function MirrorPane({
     return (
         <TooltipProvider>
             <Card className="glass-panel border-cyan-500/30 h-full flex flex-col overflow-hidden">
-                {/* Icon-only Tab Bar */}
                 <div className="shrink-0 flex items-center gap-1 p-2 border-b border-sidebar-border bg-background/30">
                     <Tooltip>
                         <TooltipTrigger asChild>
                             <button
-                                onClick={() => setActiveTab("model-card")}
+                                onClick={() => setActiveTab("details")}
                                 className={cn(
                                     "p-2 rounded-md transition-colors",
-                                    activeTab === "model-card"
+                                    activeTab === "details"
                                         ? "bg-cyan-500/20 text-cyan-400"
-                                        : "text-muted-foreground hover:text-white hover:bg-zinc-800"
+                                        : "text-muted-foreground hover:text-white hover:bg-zinc-800",
                                 )}
-                                aria-label="Model Card"
+                                aria-label="Details"
                             >
                                 <LayoutGrid className="w-4 h-4" />
                             </button>
                         </TooltipTrigger>
-                        <TooltipContent side="bottom">Model Card</TooltipContent>
+                        <TooltipContent side="bottom">Details</TooltipContent>
                     </Tooltip>
                     <Tooltip>
                         <TooltipTrigger asChild>
                             <button
-                                onClick={() => setActiveTab("optional-params")}
+                                onClick={() => setActiveTab("settings")}
                                 className={cn(
                                     "p-2 rounded-md transition-colors",
-                                    activeTab === "optional-params"
+                                    activeTab === "settings"
                                         ? "bg-fuchsia-500/20 text-fuchsia-400"
-                                        : "text-muted-foreground hover:text-white hover:bg-zinc-800"
+                                        : "text-muted-foreground hover:text-white hover:bg-zinc-800",
                                 )}
-                                aria-label="Optional Params"
+                                aria-label="Settings"
                             >
                                 <Settings className="w-4 h-4" />
                             </button>
                         </TooltipTrigger>
-                        <TooltipContent side="bottom">Optional Params</TooltipContent>
+                        <TooltipContent side="bottom">Settings</TooltipContent>
                     </Tooltip>
                 </div>
 
-                <CardContent className="p-3 sm:p-4 md:p-5 flex flex-col gap-3 md:gap-4 flex-1 overflow-y-auto">
-                    {/* ==================== MODEL CARD TAB ==================== */}
-                    {/* Shows ONLY registry schema data: name, provider, task, capabilities, pricing, context, description, owner */}
-                    {activeTab === "model-card" && (
+                <CardContent className="p-3 sm:p-4 md:p-5 flex flex-col gap-4 flex-1 overflow-y-auto">
+                    {activeTab === "details" && (
                         <>
-                            {/* Header: Model Info */}
-                            <div className="flex items-start gap-2 sm:gap-3">
+                            <div className="flex items-start gap-3">
                                 <div className="p-2 bg-cyan-500/10 border border-cyan-500/30 rounded-lg shrink-0">
                                     <Cpu className="w-5 h-5 sm:w-6 sm:h-6 text-cyan-400" />
                                 </div>
-                                <div className="flex-1 min-w-0">
+                                <div className="min-w-0 flex-1">
                                     <h3 className="font-semibold text-white truncate text-sm md:text-base">
                                         {modelInfo?.name || selectedModel}
                                     </h3>
                                     <p className="text-xs text-muted-foreground truncate">
-                                        {modelInfo?.source || "Unknown Provider"}
+                                        {modelInfo?.provider || "unknown"}
                                     </p>
                                 </div>
                             </div>
 
-                            {/* Badges - Dynamic capabilities from backend */}
                             <div className="flex flex-wrap gap-1.5">
-                                {modelInfo?.task && (
-                                    <Badge className="bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30 text-xs">
-                                        <Layers className="w-3 h-3 mr-1" />
-                                        {modelInfo.task}
+                                {typeValues.map((typeValue) => (
+                                    <Badge key={typeValue} className="bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30 text-xs">
+                                        {formatModelTypeLabel(typeValue)}
                                     </Badge>
-                                )}
-                                {isGoogleModel && (
-                                    <Badge className="bg-cyan-500/20 text-cyan-400 border-cyan-500/30 text-xs">
-                                        <Sparkles className="w-3 h-3 mr-1" />
-                                        Google AI
-                                    </Badge>
-                                )}
-                                {modelInfo?.capabilities?.includes("tools") && (
-                                    <Badge className="bg-green-500/20 text-green-400 border-green-500/30 text-xs">
-                                        Tools
-                                    </Badge>
-                                )}
-                                {modelInfo?.capabilities?.includes("vision") && (
-                                    <Badge className="bg-purple-500/20 text-purple-400 border-purple-500/30 text-xs">
-                                        Vision
-                                    </Badge>
-                                )}
-                                {modelInfo?.capabilities?.includes("reasoning") && (
-                                    <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30 text-xs">
-                                        Reasoning
-                                    </Badge>
-                                )}
-                                {modelInfo?.capabilities?.includes("structured-outputs") && (
-                                    <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30 text-xs">
-                                        JSON
-                                    </Badge>
-                                )}
-                                {modelInfo?.capabilities?.includes("thinking") && (
-                                    <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30 text-xs">
-                                        Thinking
-                                    </Badge>
-                                )}
-                                {modelInfo?.capabilities?.includes("streaming") && (
-                                    <Badge className="bg-sky-500/20 text-sky-400 border-sky-500/30 text-xs">
-                                        Stream
-                                    </Badge>
-                                )}
-                                {modelInfo?.capabilities?.includes("code-execution") && (
-                                    <Badge className="bg-lime-500/20 text-lime-400 border-lime-500/30 text-xs">
-                                        Code Exec
-                                    </Badge>
-                                )}
-                                {modelInfo?.capabilities?.includes("search-grounding") && (
-                                    <Badge className="bg-teal-500/20 text-teal-400 border-teal-500/30 text-xs">
-                                        Search
-                                    </Badge>
-                                )}
-                                {modelInfo?.capabilities?.includes("live-api") && (
-                                    <Badge className="bg-rose-500/20 text-rose-400 border-rose-500/30 text-xs">
-                                        Live API
-                                    </Badge>
-                                )}
-                                {modelInfo?.capabilities?.includes("embeddings") && (
-                                    <Badge className="bg-indigo-500/20 text-indigo-400 border-indigo-500/30 text-xs">
-                                        Embeddings
-                                    </Badge>
-                                )}
-                                {modelInfo?.capabilities?.includes("image-generation") && (
-                                    <Badge className="bg-pink-500/20 text-pink-400 border-pink-500/30 text-xs">
-                                        Image Gen
-                                    </Badge>
-                                )}
-                                {modelInfo?.capabilities?.includes("audio-generation") && (
-                                    <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-xs">
-                                        Audio Gen
-                                    </Badge>
-                                )}
-                                {modelInfo?.capabilities?.includes("audio-understanding") && (
-                                    <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-xs">
-                                        Audio In
-                                    </Badge>
-                                )}
-                                {modelInfo?.capabilities?.includes("video-understanding") && (
-                                    <Badge className="bg-red-500/20 text-red-400 border-red-500/30 text-xs">
-                                        Video In
-                                    </Badge>
-                                )}
-                                {modelInfo?.capabilities?.includes("agentic") && (
-                                    <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-xs">
-                                        Agentic
-                                    </Badge>
-                                )}
+                                ))}
                             </div>
 
-                            {/* Stats Row - Pricing */}
-                            {modelInfo?.pricing && (
-                                <div className="grid grid-cols-2 gap-2 text-center">
-                                    <Tooltip>
-                                        <TooltipTrigger asChild>
-                                            <div className="p-2 bg-background/50 border border-sidebar-border rounded-lg cursor-default">
-                                                <DollarSign className="w-4 h-4 text-green-400 mx-auto" />
-                                                <p className="font-mono text-xs sm:text-sm text-green-400 mt-1">
-                                                    ${modelInfo.pricing.input}/M
-                                                </p>
-                                            </div>
-                                        </TooltipTrigger>
-                                        <TooltipContent>Input Token Price</TooltipContent>
-                                    </Tooltip>
-                                    <Tooltip>
-                                        <TooltipTrigger asChild>
-                                            <div className="p-2 bg-background/50 border border-sidebar-border rounded-lg cursor-default">
-                                                <DollarSign className="w-4 h-4 text-fuchsia-400 mx-auto" />
-                                                <p className="font-mono text-xs sm:text-sm text-fuchsia-400 mt-1">
-                                                    ${modelInfo.pricing.output}/M
-                                                </p>
-                                            </div>
-                                        </TooltipTrigger>
-                                        <TooltipContent>Output Token Price</TooltipContent>
-                                    </Tooltip>
-                                </div>
-                            )}
-
-                            {/* Context Window */}
-                            {modelInfo?.contextLength && modelInfo.contextLength > 0 && (
-                                <div className="text-center p-2 bg-background/30 border border-sidebar-border rounded-lg">
-                                    <p className="text-xs text-muted-foreground">Context Window</p>
-                                    <p className="font-mono text-sm text-cyan-400">
-                                        {(modelInfo.contextLength / 1000).toFixed(0)}K tokens
-                                    </p>
-                                </div>
-                            )}
-
-                            {/* Model Description */}
-                            {modelInfo?.description && (
-                                <div className="p-2 bg-background/30 rounded text-xs text-muted-foreground line-clamp-3">
-                                    {modelInfo.description}
-                                </div>
-                            )}
-
-                            {/* Model Details Footer */}
                             {modelInfo && (
-                                <div className="pt-3 border-t border-sidebar-border mt-auto shrink-0">
-                                    <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                                        <span>Owner: <span className="text-cyan-400">{modelInfo.ownedBy}</span></span>
-                                        {modelInfo.contextLength && (
-                                            <span>Context: <span className="text-cyan-400">{(modelInfo.contextLength / 1000).toFixed(0)}K</span></span>
-                                        )}
+                                <div className="space-y-3 text-xs">
+                                    <div className="rounded-sm border border-sidebar-border bg-background/30 p-3 space-y-3">
+                                        <div>
+                                            <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Model ID</span>
+                                            <div className="font-mono text-cyan-400 break-all">{modelInfo.modelId}</div>
+                                        </div>
+                                        <div>
+                                            <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Input</span>
+                                            <div className="flex flex-wrap gap-1.5 mt-1">
+                                                {inputValues.length > 0 ? inputValues.map((value) => (
+                                                    <Badge key={`input-${value}`} variant="outline" className="text-[10px] border-sidebar-border">
+                                                        {value}
+                                                    </Badge>
+                                                )) : (
+                                                    <span className="text-muted-foreground">None</span>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Output</span>
+                                            <div className="flex flex-wrap gap-1.5 mt-1">
+                                                {outputValues.length > 0 ? outputValues.map((value) => (
+                                                    <Badge key={`output-${value}`} variant="outline" className="text-[10px] border-sidebar-border">
+                                                        {value}
+                                                    </Badge>
+                                                )) : (
+                                                    <span className="text-muted-foreground">None</span>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Context Window</span>
+                                            <div className="mt-1 space-y-1">
+                                                {contextEntries.length > 0 ? contextEntries.map((entry) => (
+                                                    <div key={`context-${entry.label}`} className="flex items-center justify-between gap-3 font-mono">
+                                                        <span className="text-muted-foreground">{entry.label}</span>
+                                                        <span className="text-foreground text-right">{entry.value}</span>
+                                                    </div>
+                                                )) : (
+                                                    <span className="text-muted-foreground">Not provided</span>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Pricing</span>
+                                            <div className="mt-2 space-y-2">
+                                                {pricingSections.length > 0 ? pricingSections.map((section, index) => (
+                                                    <div key={`${section.header}-${index}`} className="rounded-sm border border-sidebar-border bg-background/40 p-2 space-y-1.5">
+                                                        <div className="flex items-center justify-between gap-3">
+                                                            <span className="font-mono text-cyan-400">{section.header}</span>
+                                                            {section.unit && (
+                                                                <Badge variant="outline" className="text-[10px] border-sidebar-border">
+                                                                    {section.unit}
+                                                                </Badge>
+                                                            )}
+                                                        </div>
+                                                        {section.entries.map((entry) => (
+                                                            <div key={`${section.header}-${entry.label}`} className="flex items-center justify-between gap-3 font-mono">
+                                                                <span className="text-muted-foreground">{entry.label}</span>
+                                                                <span className="text-foreground text-right">{entry.value}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )) : (
+                                                    <span className="text-muted-foreground">No pricing metadata</span>
+                                                )}
+                                            </div>
+                                        </div>
                                     </div>
+
+                                    {modelInfo.description && (
+                                        <div className="rounded-sm border border-sidebar-border bg-background/30 p-3 text-muted-foreground leading-relaxed">
+                                            {modelInfo.description}
+                                        </div>
+                                    )}
                                 </div>
                             )}
+
                         </>
                     )}
 
-                    {/* ==================== OPTIONAL PARAMS TAB ==================== */}
-                    {/* Shows: System Prompt, Google Tools (for Google models), Dynamic Params (for image/video) */}
-                    {activeTab === "optional-params" && (
-                        <>
-                            {/* System Prompt */}
-                            <div className="p-3 bg-background/50 border border-sidebar-border rounded-lg">
-                                <div className="flex items-center gap-2 mb-2">
-                                    <Settings2 className="w-4 h-4 text-cyan-400" />
-                                    <Label className="text-xs text-muted-foreground uppercase">System Prompt</Label>
-                                </div>
+                    {activeTab === "settings" && (
+                        <div className="space-y-3">
+                            <div className="space-y-2">
+                                <Label className="text-xs font-mono text-muted-foreground">SYSTEM PROMPT</Label>
                                 <Textarea
                                     value={systemPrompt}
-                                    onChange={(e) => onSystemPromptChange(e.target.value)}
-                                    placeholder="Define the AI's behavior..."
-                                    className="bg-zinc-900 border-zinc-700 min-h-16 sm:min-h-20 text-sm"
+                                    onChange={(event) => onSystemPromptChange(event.target.value)}
+                                    placeholder="Optional system prompt..."
+                                    className="min-h-[120px] bg-background/50 border-sidebar-border font-mono text-xs"
                                 />
                             </div>
 
-                            {/* Google Tools Section */}
                             {isGoogleModel && googleTools && (
-                                <div className="p-3 bg-background/50 border border-sidebar-border rounded-lg">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <Sparkles className="w-4 h-4 text-fuchsia-400" />
-                                        <span className="text-xs text-muted-foreground uppercase">Google AI Tools</span>
+                                <div className="space-y-3 rounded-sm border border-cyan-500/20 bg-cyan-500/5 p-3">
+                                    <div className="text-xs font-mono text-cyan-400">GEMINI TOOLS</div>
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2 text-sm">
+                                            <Search className="w-4 h-4 text-cyan-400" />
+                                            <span>Google Search</span>
+                                        </div>
+                                        <Switch
+                                            checked={googleTools.enableGoogleSearch}
+                                            onCheckedChange={googleTools.setEnableGoogleSearch}
+                                        />
+                                    </div>
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2 text-sm">
+                                            <Code2 className="w-4 h-4 text-cyan-400" />
+                                            <span>Code Execution</span>
+                                        </div>
+                                        <Switch
+                                            checked={googleTools.enableCodeExecution}
+                                            onCheckedChange={googleTools.setEnableCodeExecution}
+                                        />
+                                    </div>
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2 text-sm">
+                                            <MapPin className="w-4 h-4 text-cyan-400" />
+                                            <span>Maps Grounding</span>
+                                        </div>
+                                        <Switch
+                                            checked={googleTools.enableMapsGrounding}
+                                            onCheckedChange={googleTools.setEnableMapsGrounding}
+                                        />
                                     </div>
                                     <div className="space-y-2">
-                                        {/* Google Search */}
-                                        <div className="flex items-center justify-between p-2 sm:p-3 bg-zinc-800/50 rounded-lg">
-                                            <div className="flex items-center gap-2 min-w-0">
-                                                <Search className="w-4 h-4 text-cyan-400 shrink-0" />
-                                                <div className="min-w-0">
-                                                    <p className="text-sm text-white">Google Search</p>
-                                                    <p className="text-xs text-muted-foreground hidden sm:block">Ground with real-time search</p>
-                                                </div>
-                                            </div>
-                                            <Switch
-                                                checked={googleTools.enableGoogleSearch}
-                                                onCheckedChange={googleTools.setEnableGoogleSearch}
-                                            />
-                                        </div>
-
-                                        {/* Code Execution */}
-                                        <div className="flex items-center justify-between p-2 sm:p-3 bg-zinc-800/50 rounded-lg">
-                                            <div className="flex items-center gap-2 min-w-0">
-                                                <Code2 className="w-4 h-4 text-green-400 shrink-0" />
-                                                <div className="min-w-0">
-                                                    <p className="text-sm text-white">Code Execution</p>
-                                                    <p className="text-xs text-muted-foreground hidden sm:block">Execute Python for analysis</p>
-                                                </div>
-                                            </div>
-                                            <Switch
-                                                checked={googleTools.enableCodeExecution}
-                                                onCheckedChange={googleTools.setEnableCodeExecution}
-                                            />
-                                        </div>
-
-                                        {/* Maps Grounding */}
-                                        <div className="flex items-center justify-between p-2 sm:p-3 bg-zinc-800/50 rounded-lg">
-                                            <div className="flex items-center gap-2 min-w-0">
-                                                <MapPin className="w-4 h-4 text-fuchsia-400 shrink-0" />
-                                                <div className="min-w-0">
-                                                    <p className="text-sm text-white">Maps Grounding</p>
-                                                    <p className="text-xs text-muted-foreground hidden sm:block">Ground with Google Maps</p>
-                                                </div>
-                                            </div>
-                                            <Switch
-                                                checked={googleTools.enableMapsGrounding}
-                                                onCheckedChange={googleTools.setEnableMapsGrounding}
-                                            />
-                                        </div>
-
-                                        {/* URL Context */}
-                                        <div className="p-2 sm:p-3 bg-zinc-800/50 rounded-lg">
-                                            <div className="flex items-center gap-2 mb-2">
-                                                <Link className="w-4 h-4 text-yellow-400 shrink-0" />
-                                                <p className="text-sm text-white">URL Context</p>
-                                            </div>
-                                            <Textarea
-                                                value={googleTools.urlContextUrls}
-                                                onChange={(e) => googleTools.setUrlContextUrls(e.target.value)}
-                                                placeholder="https://example.com/doc&#10;(one per line)"
-                                                className="bg-zinc-900 border-zinc-700 min-h-12 text-xs"
-                                            />
-                                        </div>
+                                        <Label className="text-xs font-mono text-muted-foreground flex items-center gap-2">
+                                            <Link className="w-3 h-3" />
+                                            URL CONTEXT
+                                        </Label>
+                                        <Textarea
+                                            value={googleTools.urlContextUrls}
+                                            onChange={(event) => googleTools.setUrlContextUrls(event.target.value)}
+                                            placeholder="One URL per line"
+                                            className="min-h-[90px] bg-background/50 border-sidebar-border font-mono text-xs"
+                                        />
                                     </div>
                                 </div>
                             )}
 
-                            {/* Dynamic Model Parameters (for image/video models) */}
-                            {hasOptionalParams && modelParams && (
-                                <div className="p-3 bg-background/50 border border-sidebar-border rounded-lg">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <Sliders className="w-4 h-4 text-fuchsia-400" />
-                                        <span className="text-xs text-muted-foreground uppercase">Model Parameters</span>
-                                        <Badge className="ml-auto bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30 text-[10px]">
-                                            {modelParams.type}
-                                        </Badge>
-                                    </div>
-                                    <div className="space-y-3">
-                                        {Object.entries(modelParams.params)
-                                            .filter(([key]) => key !== "prompt")
-                                            .map(([key, param]) => (
-                                                <div key={key} className="space-y-1">
-                                                    <div className="flex items-center gap-2">
-                                                        <Label className="text-xs text-white/80 capitalize">
-                                                            {key.replace(/_/g, " ")}
-                                                        </Label>
-                                                        {param.required && (
-                                                            <span className="text-red-400 text-[10px]">*</span>
-                                                        )}
+                            {optionalPricingSections.length > 0 && (
+                                <div className="space-y-2 rounded-sm border border-fuchsia-500/20 bg-fuchsia-500/5 p-3">
+                                    <Label className="text-xs font-mono text-fuchsia-400">OPTIONAL PRICING</Label>
+                                    <div className="space-y-2">
+                                        {optionalPricingSections.map((section, index) => (
+                                            <div key={`${section.header}-${section.unit}-${index}`} className="rounded-sm border border-sidebar-border bg-background/40 p-2 space-y-1.5">
+                                                <div className="flex items-center justify-between gap-3">
+                                                    <span className="font-mono text-fuchsia-300">{section.header}</span>
+                                                    {section.unit && (
+                                                        <Badge variant="outline" className="text-[10px] border-sidebar-border">
+                                                            {section.unit}
+                                                        </Badge>
+                                                    )}
+                                                </div>
+                                                {section.entries.map((entry) => (
+                                                    <div key={`${section.header}-${entry.label}`} className="flex items-center justify-between gap-3 font-mono text-xs">
+                                                        <span className="text-muted-foreground">{entry.label}</span>
+                                                        <span className="text-foreground text-right">{entry.value}</span>
                                                     </div>
-
-                                                    {param.options && param.options.length > 0 ? (
-                                                        <Select
-                                                            value={String(paramValues[key] ?? param.default ?? "")}
-                                                            onValueChange={(val) => {
-                                                                const newVal = param.type === "integer" ? parseInt(val) : val;
-                                                                onParamValuesChange?.({ ...paramValues, [key]: newVal });
-                                                            }}
-                                                        >
-                                                            <SelectTrigger className="bg-zinc-900 border-zinc-700 h-8 text-xs">
-                                                                <SelectValue placeholder={`Select ${key}`} />
-                                                            </SelectTrigger>
-                                                            <SelectContent>
-                                                                {param.options.map((opt) => (
-                                                                    <SelectItem key={String(opt)} value={String(opt)}>
-                                                                        {String(opt)}
-                                                                    </SelectItem>
-                                                                ))}
-                                                            </SelectContent>
-                                                        </Select>
-                                                    ) : param.type === "boolean" ? (
-                                                        <Switch
-                                                            checked={Boolean(paramValues[key] ?? param.default)}
-                                                            onCheckedChange={(val) => {
-                                                                onParamValuesChange?.({ ...paramValues, [key]: val });
-                                                            }}
-                                                        />
-                                                    ) : param.type === "integer" || param.type === "number" ? (
-                                                        <Input
-                                                            type="number"
-                                                            value={String(paramValues[key] ?? param.default ?? "")}
-                                                            onChange={(e) => {
-                                                                const val = param.type === "integer"
-                                                                    ? parseInt(e.target.value)
-                                                                    : parseFloat(e.target.value);
-                                                                onParamValuesChange?.({ ...paramValues, [key]: isNaN(val) ? undefined : val });
-                                                            }}
-                                                            placeholder={param.default !== undefined ? String(param.default) : ""}
-                                                            className="bg-zinc-900 border-zinc-700 h-8 text-xs"
-                                                        />
-                                                    ) : (
-                                                        <Input
-                                                            type="text"
-                                                            value={String(paramValues[key] ?? param.default ?? "")}
-                                                            onChange={(e) => {
-                                                                onParamValuesChange?.({ ...paramValues, [key]: e.target.value || undefined });
-                                                            }}
-                                                            placeholder={param.description || `Enter ${key}`}
-                                                            className="bg-zinc-900 border-zinc-700 h-8 text-xs"
-                                                        />
-                                                    )}
-
-                                                    {param.description && (
-                                                        <p className="text-[10px] text-muted-foreground">
-                                                            {param.description}
-                                                        </p>
-                                                    )}
-                                                </div>
-                                            ))}
+                                                ))}
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
                             )}
-                        </>
+
+                            {!hasOptionalParams && optionalPricingSections.length === 0 && (
+                                <div className="rounded-sm border border-sidebar-border bg-background/30 p-4 text-sm text-muted-foreground">
+                                    No optional parameters exposed for this model.
+                                </div>
+                            )}
+
+                            {hasOptionalParams && modelParams && (
+                                <>
+                                    {Object.entries(modelParams.params).map(([key, definition]) => (
+                                        <div key={key} className="space-y-2">
+                                            <Label className="text-xs font-mono text-muted-foreground">
+                                                {key}
+                                                {definition.required ? " *" : ""}
+                                            </Label>
+                                            {renderParamInput(
+                                                key,
+                                                definition,
+                                                paramValues[key],
+                                                (nextValue) => onParamValuesChange?.({ ...paramValues, [key]: nextValue }),
+                                            )}
+                                            {definition.description && (
+                                                <p className="text-[11px] text-muted-foreground">{definition.description}</p>
+                                            )}
+                                        </div>
+                                    ))}
+                                </>
+                            )}
+                        </div>
                     )}
                 </CardContent>
             </Card>
@@ -536,20 +434,8 @@ export function MirrorPane({
 export function MirrorPaneSkeleton() {
     return (
         <Card className="glass-panel border-cyan-500/30 h-full">
-            <CardContent className="p-5 space-y-4">
-                <div className="flex items-start gap-3">
-                    <Skeleton className="w-10 h-10 rounded-lg" />
-                    <div className="flex-1 space-y-2">
-                        <Skeleton className="h-5 w-32" />
-                        <Skeleton className="h-4 w-20" />
-                    </div>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                    <Skeleton className="h-14" />
-                    <Skeleton className="h-14" />
-                </div>
-                <Skeleton className="h-24" />
-                <Skeleton className="h-32" />
+            <CardContent className="p-4 text-sm text-muted-foreground">
+                Loading model details...
             </CardContent>
         </Card>
     );

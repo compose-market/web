@@ -54,11 +54,11 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useActiveAccount, useSendTransaction, useAdminWallet } from "thirdweb/react";
-import { prepareContractCall } from "thirdweb";
+import { useActiveAccount, useAdminWallet, useSendTransaction } from "thirdweb/react";
 import { submitCronosTransaction, encodeContractCall } from "@/lib/cronos/aa";
 import {
   getWarpContractForChain,
+  prepareWarpAgentCall,
   usdcToWei,
   computeExternalAgentHash,
   deriveAgentWalletAddress,
@@ -120,9 +120,9 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const account = useActiveAccount();
+  const { mutateAsync: sendTransaction } = useSendTransaction();
   const adminWallet = useAdminWallet();
   const { paymentChainId } = useChain();
-  const { mutateAsync: sendTransaction, isPending: isSending } = useSendTransaction();
 
   // Avatar upload state
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
@@ -486,19 +486,11 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
         await handleWarpSuccess({ transactionHash: result.txHash! });
       } else {
         // Fuji/other chains: Use ThirdWeb sendTransaction with AA
+        if (!account) {
+          throw new Error("Wallet account unavailable");
+        }
         const contract = getWarpContractForChain(paymentChainId);
-        const transaction = prepareContractCall({
-          contract,
-          method:
-            "function warpAgent(bytes32 originalAgentHash, address originalCreator, uint256 licenses, uint256 licensePrice, string agentCardUri) returns (uint256 warpedAgentId)",
-          params: [
-            txData.originalAgentHash,
-            txData.originalCreator,
-            txData.licenses,
-            txData.licensePrice,
-            txData.agentCardUri,
-          ],
-        });
+        const transaction = prepareWarpAgentCall(contract, txData);
 
         // Send transaction (gasless sponsorship configured on ThirdWeb)
         const result = await sendTransaction(transaction);

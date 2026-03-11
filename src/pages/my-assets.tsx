@@ -30,7 +30,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useActiveAccount, useSendTransaction } from "thirdweb/react";
 import { prepareContractCall } from "thirdweb";
-import { useAgentsByCreator, useManowarsByCreator, useRFAsByPublisher, type OnchainAgent, type OnchainManowar, type OnchainRFA } from "@/hooks/use-onchain";
+import { useAgentsByCreator, useWorkflowsByCreator, useRFAsByPublisher, type OnchainAgent, type OnchainWorkflow, type OnchainRFA } from "@/hooks/use-onchain";
 import { getIpfsUrl } from "@/lib/pinata";
 import { CHAIN_CONFIG, CHAIN_IDS } from "@/lib/chains";
 import { useChain } from "@/contexts/ChainContext";
@@ -46,7 +46,7 @@ export default function MyAssetsPage() {
   const [activeTab, setActiveTab] = useState("agents");
 
   const { data: agents, isLoading: isLoadingAgents } = useAgentsByCreator(account?.address);
-  const { data: manowars, isLoading: isLoadingManowars } = useManowarsByCreator(account?.address);
+  const { data: workflows, isLoading: isLoadingWorkflows } = useWorkflowsByCreator(account?.address);
   const { data: rfas, isLoading: isLoadingRFAs, refetch: refetchRFAs } = useRFAsByPublisher(account?.address);
 
   // RFA detail dialog state
@@ -104,9 +104,9 @@ export default function MyAssetsPage() {
     );
   }
 
-  const isLoading = isLoadingAgents || isLoadingManowars || isLoadingRFAs;
+  const isLoading = isLoadingAgents || isLoadingWorkflows || isLoadingRFAs;
   const agentCount = agents?.length || 0;
-  const manowarCount = manowars?.length || 0;
+  const workflowCount = workflows?.length || 0;
   const rfaCount = rfas?.length || 0;
   const openRfaCount = rfas?.filter(r => r.status === 'Open').length || 0;
 
@@ -121,7 +121,7 @@ export default function MyAssetsPage() {
               MY ASSETS
             </h1>
             <p className="text-muted-foreground font-mono text-xs sm:text-sm mt-1">
-              Manage your on-chain agents and Manowar workflows.
+              Manage your on-chain Agents and Workflows.
             </p>
           </div>
           <Link href="/create-agent" className="w-full sm:w-auto">
@@ -159,7 +159,7 @@ export default function MyAssetsPage() {
               <p className="text-muted-foreground text-[10px] sm:text-xs">Agents</p>
             </div>
             <div className="text-center">
-              <p className="text-fuchsia-400 font-bold">{manowarCount}</p>
+              <p className="text-fuchsia-400 font-bold">{workflowCount}</p>
               <p className="text-muted-foreground text-[10px] sm:text-xs">Workflows</p>
             </div>
           </div>
@@ -181,7 +181,7 @@ export default function MyAssetsPage() {
             className="flex-1 sm:flex-none font-mono data-[state=active]:bg-fuchsia-500 data-[state=active]:text-black text-xs sm:text-sm px-3 sm:px-4"
           >
             <Layers className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
-            WORKFLOWS ({manowarCount})
+            WORKFLOWS ({workflowCount})
           </TabsTrigger>
           <TabsTrigger
             value="rfas"
@@ -242,7 +242,7 @@ export default function MyAssetsPage() {
 
         {/* Workflows Tab */}
         <TabsContent value="workflows" className="space-y-4">
-          {isLoadingManowars && (
+          {isLoadingWorkflows && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               {Array.from({ length: 2 }).map((_, i) => (
                 <Card key={i} className="bg-background border-sidebar-border">
@@ -256,21 +256,21 @@ export default function MyAssetsPage() {
             </div>
           )}
 
-          {!isLoadingManowars && manowars && manowars.length > 0 && (
+          {!isLoadingWorkflows && workflows && workflows.length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-              {manowars.map((manowar) => (
-                <ManowarAssetCard key={manowar.id} manowar={manowar} chainId={paymentChainId} />
+              {workflows.map((workflow) => (
+                <WorkflowAssetCard key={workflow.id} workflow={workflow} chainId={paymentChainId} />
               ))}
             </div>
           )}
 
-          {!isLoadingManowars && (!manowars || manowars.length === 0) && (
+          {!isLoadingWorkflows && (!workflows || workflows.length === 0) && (
             <Card className="bg-background border-sidebar-border">
               <CardContent className="p-8 sm:p-12 text-center space-y-3 sm:space-y-4">
                 <Layers className="w-12 h-12 sm:w-16 sm:h-16 mx-auto text-muted-foreground/50" />
                 <h3 className="text-base sm:text-lg font-display text-foreground">No Workflows Yet</h3>
                 <p className="text-muted-foreground font-mono text-xs sm:text-sm max-w-md mx-auto">
-                  Compose your first Manowar workflow by combining multiple agents.
+                  Compose your first Workflow by combining multiple agents.
                 </p>
                 <Link href="/compose">
                   <Button className="bg-fuchsia-500 text-white hover:bg-fuchsia-400 font-bold font-mono text-sm">
@@ -482,25 +482,25 @@ function AgentAssetCard({ agent, chainId }: { agent: OnchainAgent; chainId: numb
   );
 }
 
-function ManowarAssetCard({ manowar, chainId }: { manowar: OnchainManowar; chainId: number }) {
+function WorkflowAssetCard({ workflow, chainId }: { workflow: OnchainWorkflow; chainId: number }) {
   let bannerUrl: string | null = null;
-  if (manowar.image && manowar.image.startsWith("ipfs://")) {
-    bannerUrl = getIpfsUrl(manowar.image.replace("ipfs://", ""));
+  if (workflow.image && workflow.image.startsWith("ipfs://")) {
+    bannerUrl = getIpfsUrl(workflow.image.replace("ipfs://", ""));
   }
 
-  // Use chainId from manowar's first agent metadata (source of truth)
-  const manowarChainId = manowar.metadata?.agents?.[0]?.chain;
-  const explorerUrl = manowarChainId && CHAIN_CONFIG[manowarChainId]
-    ? `${CHAIN_CONFIG[manowarChainId].explorer}/token/${getContractAddress("Manowar", manowarChainId)}?a=${manowar.id}`
+  // Use chainId from workflow's first agent metadata (source of truth)
+  const workflowChainId = workflow.metadata?.agents?.[0]?.chain;
+  const explorerUrl = workflowChainId && CHAIN_CONFIG[workflowChainId]
+    ? `${CHAIN_CONFIG[workflowChainId].explorer}/token/${getContractAddress("Workflow", workflowChainId)}?a=${workflow.id}`
     : null;
 
   // Use wallet address for navigation (primary), fallback to numeric ID
-  const manowarPageUrl = manowar.walletAddress
-    ? `/manowar/${manowar.walletAddress}`
-    : `/manowar/${manowar.id}`;
+  const workflowPageUrl = workflow.walletAddress
+    ? `/workflow/${workflow.walletAddress}`
+    : `/workflow/${workflow.id}`;
 
   return (
-    <Link href={manowarPageUrl} className="block">
+    <Link href={workflowPageUrl} className="block">
       <Card
         className="bg-background border-sidebar-border hover:border-fuchsia-500/50 transition-colors overflow-hidden cursor-pointer group"
       >
@@ -516,10 +516,10 @@ function ManowarAssetCard({ manowar, chainId }: { manowar: OnchainManowar; chain
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
               <h3 className="font-display font-bold text-foreground text-sm sm:text-base truncate group-hover:text-fuchsia-400 transition-colors">
-                {manowar.title || `Workflow #${manowar.id}`}
+                {workflow.title || `Workflow #${workflow.id}`}
               </h3>
               <p className="text-[10px] sm:text-xs font-mono text-muted-foreground">
-                Manowar #{manowar.id} • ERC7401
+                Workflow #{workflow.id} • ERC7401
               </p>
             </div>
             {explorerUrl && (
@@ -535,9 +535,9 @@ function ManowarAssetCard({ manowar, chainId }: { manowar: OnchainManowar; chain
             )}
           </div>
 
-          {manowar.description && (
+          {workflow.description && (
             <p className="text-[10px] sm:text-xs text-muted-foreground line-clamp-2">
-              {manowar.description}
+              {workflow.description}
             </p>
           )}
 
@@ -546,18 +546,18 @@ function ManowarAssetCard({ manowar, chainId }: { manowar: OnchainManowar; chain
               <Sparkles className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
               nestable NFT
             </Badge>
-            {manowar.leaseEnabled && (
+            {workflow.leaseEnabled && (
               <Badge variant="outline" className="text-[8px] sm:text-[10px] font-mono border-green-500/30 text-green-400 bg-green-500/10 px-1 sm:px-1.5 py-0">
                 <Clock className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
-                leasable ({manowar.leasePercent}%)
+                leasable ({workflow.leasePercent}%)
               </Badge>
             )}
-            {manowar.hasActiveRfa && (
+            {workflow.hasActiveRfa && (
               <Badge variant="outline" className="text-[8px] sm:text-[10px] font-mono border-yellow-500/30 text-yellow-400 bg-yellow-500/10 px-1 sm:px-1.5 py-0">
                 active RFA
               </Badge>
             )}
-            {manowar.coordinatorModel && (
+            {workflow.coordinatorModel && (
               <Badge variant="outline" className="text-[8px] sm:text-[10px] font-mono border-purple-500/30 text-purple-400 bg-purple-500/10 px-1 sm:px-1.5 py-0">
                 + coordinator
               </Badge>
@@ -567,18 +567,18 @@ function ManowarAssetCard({ manowar, chainId }: { manowar: OnchainManowar; chain
           <div className="grid grid-cols-3 gap-1.5 sm:gap-3 text-[10px] sm:text-xs font-mono">
             <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
               <DollarSign className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-green-400" />
-              <p className="text-foreground font-bold truncate">${manowar.totalPrice}</p>
+              <p className="text-foreground font-bold truncate">${workflow.totalPrice}</p>
               <p className="text-muted-foreground text-[8px] sm:text-[10px]">total cost</p>
             </div>
             <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
               <Layers className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-cyan-400" />
-              <p className="text-foreground font-bold">{manowar.agentIds?.length || 0}</p>
+              <p className="text-foreground font-bold">{workflow.agentIds?.length || 0}</p>
               <p className="text-muted-foreground text-[8px] sm:text-[10px]">agents</p>
             </div>
             <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
               <Zap className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-fuchsia-400" />
               <p className="text-foreground font-bold">
-                {manowar.units === 0 ? "∞" : manowar.units - manowar.unitsMinted}
+                {workflow.units === 0 ? "∞" : workflow.units - workflow.unitsMinted}
               </p>
               <p className="text-muted-foreground text-[8px] sm:text-[10px]">avail</p>
             </div>
@@ -692,7 +692,7 @@ function RFAAssetCard({
 
         {/* Meta Row */}
         <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-          <span>For: Manowar #{rfa.manowarId}</span>
+          <span>For: Workflow #{rfa.workflowId}</span>
           <span>{createdDate.toLocaleDateString()}</span>
         </div>
 

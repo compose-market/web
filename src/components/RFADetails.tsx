@@ -306,6 +306,9 @@ export function RFADetails({ rfaId, open, onOpenChange, mode = "dialog" }: RFADe
         if (!rfaId) return;
 
         try {
+            if (!account) {
+                throw new Error("Wallet account unavailable");
+            }
             setActionState("accepting");
 
             const contract = getRFAContract();
@@ -341,6 +344,9 @@ export function RFADetails({ rfaId, open, onOpenChange, mode = "dialog" }: RFADe
         if (!rfaId) return;
 
         try {
+            if (!account) {
+                throw new Error("Wallet account unavailable");
+            }
             setActionState("cancelling");
 
             const contract = getRFAContract();
@@ -375,6 +381,9 @@ export function RFADetails({ rfaId, open, onOpenChange, mode = "dialog" }: RFADe
         if (!rfaId) return;
 
         try {
+            if (!account) {
+                throw new Error("Wallet account unavailable");
+            }
             setActionState("submitting");
 
             const contract = getRFAContract();

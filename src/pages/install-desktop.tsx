@@ -5,6 +5,7 @@ import { WalletConnector, useWalletAccount } from "@/components/connector";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { API_BASE_URL } from "@/lib/api";
+import { createSignedDesktopInstallDeepLink, resolveAgentCardCid } from "@/lib/desktop-install";
 import { useChain } from "@/contexts/ChainContext";
 import { Download, ExternalLink, Loader2, Monitor, Shield } from "lucide-react";
 
@@ -23,17 +24,19 @@ function normalizeWallet(value: string | null): string | null {
   return /^0x[a-f0-9]{40}$/.test(normalized) ? normalized : null;
 }
 
-function parseQuery(): { token: string | null; agentWallet: string | null } {
+function parseQuery(): { token: string | null; install: boolean; agentWallet: string | null } {
   const params = new URLSearchParams(window.location.search);
   const token = params.get("token");
+  const install = params.get("install");
   const agentWallet = normalizeWallet(params.get("agent_wallet"));
-  return { token, agentWallet };
+  return { token: install || token, install: Boolean(install), agentWallet };
 }
 
 export default function InstallDesktopPage() {
-  const { isConnected, address } = useWalletAccount();
+  const { isConnected, address, account } = useWalletAccount();
   const { paymentChainId } = useChain();
   const [token, setToken] = useState<string | null>(null);
+  const [isInstallPayload, setIsInstallPayload] = useState(false);
   const [agentWallet, setAgentWallet] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -41,6 +44,7 @@ export default function InstallDesktopPage() {
   useEffect(() => {
     const parsed = parseQuery();
     setToken(parsed.token);
+    setIsInstallPayload(parsed.install);
     setAgentWallet(parsed.agentWallet);
   }, []);
 
@@ -49,8 +53,12 @@ export default function InstallDesktopPage() {
       setError("No install token available.");
       return;
     }
+    if (isInstallPayload) {
+      window.location.href = `manowar://open?install=${encodeURIComponent(token)}`;
+      return;
+    }
     window.location.href = `manowar://open?token=${encodeURIComponent(token)}`;
-  }, [token]);
+  }, [isInstallPayload, token]);
 
   const remintAndOpen = useCallback(async () => {
     if (!address) {
@@ -60,6 +68,28 @@ export default function InstallDesktopPage() {
     setBusy(true);
     setError(null);
     try {
+      const signedInstallEnabled = (import.meta.env.VITE_SIGNED_DEEPLINK_INSTALL || "1") === "1";
+      if (signedInstallEnabled) {
+        if (!account) {
+          throw new Error("Wallet signer unavailable for signed desktop install");
+        }
+        const installAgentWallet = (agentWallet || address).toLowerCase() as `0x${string}`;
+        const agentCardCid = await resolveAgentCardCid(installAgentWallet);
+        const signed = await createSignedDesktopInstallDeepLink({
+          account,
+          signer: address.toLowerCase() as `0x${string}`,
+          agentWallet: installAgentWallet,
+          agentCardCid,
+          chainId: paymentChainId,
+        });
+        const encoded = signed.deepLinkUrl.split("install=")[1] || "";
+        setToken(encoded);
+        setIsInstallPayload(true);
+        window.history.replaceState({}, "", `/install-desktop?install=${encodeURIComponent(encoded)}${agentWallet ? `&agent_wallet=${agentWallet}` : ""}`);
+        window.location.href = signed.deepLinkUrl;
+        return;
+      }
+
       const response = await fetch(`${API_BASE_URL}/api/desktop/link-token`, {
         method: "POST",
         headers: {
@@ -78,6 +108,7 @@ export default function InstallDesktopPage() {
         throw new Error(data.error || "Failed to mint desktop install token.");
       }
       setToken(data.token);
+      setIsInstallPayload(false);
       window.history.replaceState({}, "", `/install-desktop?token=${encodeURIComponent(data.token)}${agentWallet ? `&agent_wallet=${agentWallet}` : ""}`);
       window.location.href = data.deepLinkUrl;
     } catch (err) {
@@ -85,7 +116,7 @@ export default function InstallDesktopPage() {
     } finally {
       setBusy(false);
     }
-  }, [address, agentWallet, paymentChainId]);
+  }, [account, address, agentWallet, paymentChainId]);
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">

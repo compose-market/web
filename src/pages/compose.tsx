@@ -41,25 +41,27 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
-import { useActiveAccount, useActiveWallet, useSendTransaction, useAdminWallet } from "thirdweb/react";
+import { useActiveAccount, useActiveWallet, useAdminWallet, useSendTransaction } from "thirdweb/react";
 import { prepareContractCall } from "thirdweb";
 import { readContract } from "thirdweb";
 import { submitCronosTransaction, encodeContractCall } from "@/lib/cronos/aa";
 import { saveMintSuccessForShare } from "@/lib/share";
 import {
-  getManowarContractForChain, getContractAddressForChain, getAgentFactoryContractForChain,
-  weiToUsdc, computeManowarDnaHash, deriveManowarWalletAddress
+  getWorkflowContractForChain, getContractAddressForChain, getAgentFactoryContractForChain,
+  prepareMintWorkflowCall,
+  weiToUsdc, computeWorkflowDnaHash, deriveWorkflowWalletAddress
 } from "@/lib/contracts";
 import {
-  uploadManowarBanner, uploadManowarMetadata, getIpfsUri, getIpfsUrl,
+  uploadWorkflowBanner, uploadWorkflowMetadata, getIpfsUri, getIpfsUrl,
   fileToDataUrl, isPinataConfigured, fetchFromIpfs,
-  type ManowarMetadata, type AgentCard
+  type WorkflowMetadata, type AgentCard
 } from "@/lib/pinata";
 import { CHAIN_IDS, CHAIN_CONFIG, thirdwebClient, getUsdcContractForChain, isCronosChain, getUsdcAddress } from "@/lib/chains";
 import { useChain } from "@/contexts/ChainContext";
 import { NetworkSelector } from "@/components/ui/network-selector";
+import { API_BASE_URL } from "@/lib/api";
 import { createPaymentFetch } from "@/lib/payment";
-import { coordinatorModels } from "@/hooks/use-coordinator";
+import { useAgenticModels } from "@/hooks/use-coordinator";
 import { useSession } from "@/hooks/use-session.tsx";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter,
@@ -76,7 +78,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { useWorkflowExecution } from "@/hooks/use-services";
-import { useWorkflow } from "@/hooks/use-workflow";
+import { useWorkflow, type ComposeNode } from "@/hooks/use-workflow";
 import type { WorkflowStep } from "@/lib/services";
 import { WorkflowOutputPanel, type WorkflowExecutionResult } from "@/components/output";
 import { AGENT_REGISTRIES, type Agent } from "@/lib/agents";
@@ -85,7 +87,7 @@ import { RFAComponent } from "@/components/RFAComponent";
 // Extracted components
 import {
   StepNode, AgentNode, TriggerNode, HookNode,
-  type StepNodeData, type AgentNodeData,
+  type StepNodeData, type AgentNodeData, type TriggerNodeData,
 } from "@/components/compose/nodes";
 import { ConnectorPicker, AgentsPicker } from "@/components/compose/pickers";
 import { FullscreenOverlay } from "@/components/compose/overlay";
@@ -102,10 +104,10 @@ const nodeTypes = {
 };
 
 // =============================================================================
-// Mint Manowar Dialog
+// Mint Workflow Dialog
 // =============================================================================
 
-interface MintManowarDialogProps {
+interface MintWorkflowDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   workflowName: string;
@@ -114,17 +116,17 @@ interface MintManowarDialogProps {
   agentPrices?: Map<number, bigint>;
 }
 
-function MintManowarDialog({
+function MintWorkflowDialog({
   open, onOpenChange, workflowName, workflowDescription, agentIds,
   agentPrices = new Map()
-}: MintManowarDialogProps) {
+}: MintWorkflowDialogProps) {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const wallet = useActiveWallet();
   const account = useActiveAccount();
+  const { mutateAsync: sendTransaction } = useSendTransaction();
   const adminWallet = useAdminWallet();
   const { selectedChainId } = useChain();
-  const { mutateAsync: sendTransaction } = useSendTransaction();
 
   const [title, setTitle] = useState(workflowName);
   const [description, setDescription] = useState(workflowDescription);
@@ -145,6 +147,7 @@ function MintManowarDialog({
   const [generatedBannerUrl, setGeneratedBannerUrl] = useState<string | null>(null);
   const [bannerGenerationCount, setBannerGenerationCount] = useState(0);
   const MAX_BANNER_GENERATIONS = 3;
+  const { data: coordinatorModels = [] } = useAgenticModels();
 
   const totalAgentPrice = useMemo(() => {
     let total = BigInt(0);
@@ -256,12 +259,12 @@ function MintManowarDialog({
       setIsMinting(true);
       let bannerImageUri = "";
       if (bannerFile) {
-        const bannerCid = await uploadManowarBanner(bannerFile, title);
+        const bannerCid = await uploadWorkflowBanner(bannerFile, title);
         bannerImageUri = getIpfsUri(bannerCid);
       }
       const mintTimestamp = Math.floor(Date.now() / 1000);
-      const dnaHash = computeManowarDnaHash(agentIds, mintTimestamp);
-      const walletAddress = deriveManowarWalletAddress(dnaHash, mintTimestamp);
+      const dnaHash = computeWorkflowDnaHash(agentIds, mintTimestamp);
+      const walletAddress = deriveWorkflowWalletAddress(dnaHash, mintTimestamp);
       const agentFactoryContract = getAgentFactoryContractForChain(selectedChainId);
       const nestedAgentCards: AgentCard[] = [];
       for (const agentId of agentIds) {
@@ -280,7 +283,7 @@ function MintManowarDialog({
           console.warn(`Failed to fetch agentCard for agent ${agentId}:`, err);
         }
       }
-      const metadata: ManowarMetadata = {
+      const metadata: WorkflowMetadata = {
         schemaVersion: "1.0.0",
         title,
         description,
@@ -299,9 +302,9 @@ function MintManowarDialog({
         creator: account?.address || "",
         createdAt: new Date().toISOString(),
       };
-      const metadataCid = await uploadManowarMetadata(metadata);
-      const manowarCardUri = getIpfsUri(metadataCid);
-      const manowarAddress = getContractAddressForChain("Manowar", selectedChainId);
+      const metadataCid = await uploadWorkflowMetadata(metadata);
+      const workflowCardUri = getIpfsUri(metadataCid);
+      const workflowAddress = getContractAddressForChain("Workflow", selectedChainId);
 
       // Chain-aware transaction: routes to selected chain
       if (isCronosChain(selectedChainId) && account) {
@@ -314,7 +317,7 @@ function MintManowarDialog({
         const mintData = encodeContractCall({
           abi: [{
             type: "function",
-            name: "mintManowar",
+            name: "mintWorkflow",
             inputs: [
               {
                 type: "tuple",
@@ -323,7 +326,7 @@ function MintManowarDialog({
                   { type: "string", name: "title" },
                   { type: "string", name: "description" },
                   { type: "string", name: "banner" },
-                  { type: "string", name: "manowarCardUri" },
+                  { type: "string", name: "workflowCardUri" },
                   { type: "uint256", name: "units" },
                   { type: "bool", name: "leaseEnabled" },
                   { type: "uint256", name: "leaseDuration" },
@@ -334,15 +337,15 @@ function MintManowarDialog({
               },
               { type: "uint256[]", name: "agentIds" },
             ],
-            outputs: [{ type: "uint256", name: "manowarId" }],
+            outputs: [{ type: "uint256", name: "workflowId" }],
           }],
-          functionName: "mintManowar",
+          functionName: "mintWorkflow",
           args: [
             {
               title,
               description,
               banner: bannerImageUri,
-              manowarCardUri,
+              workflowCardUri,
               units: units ? BigInt(parseInt(units)) : BigInt(1),
               leaseEnabled,
               leaseDuration: BigInt(parseInt(leaseDuration) || 0),
@@ -371,7 +374,7 @@ function MintManowarDialog({
               outputs: [{ type: "bool" }],
             }],
             functionName: "approve",
-            args: [manowarAddress, totalAgentPrice],
+            args: [workflowAddress, totalAgentPrice],
           });
 
           // Single batched transaction: approve + mint
@@ -379,7 +382,7 @@ function MintManowarDialog({
             account,
             calls: [
               { to: usdcContractAddress as `0x${string}`, data: approvalData as `0x${string}` },
-              { to: manowarAddress as `0x${string}`, data: mintData as `0x${string}` },
+              { to: workflowAddress as `0x${string}`, data: mintData as `0x${string}` },
             ],
             chainId: selectedChainId,
             adminAddress,
@@ -389,7 +392,7 @@ function MintManowarDialog({
           // No payment needed, just mint
           result = await submitCronosTransaction({
             account,
-            to: manowarAddress as `0x${string}`,
+            to: workflowAddress as `0x${string}`,
             data: mintData as `0x${string}`,
             value: BigInt(0),
             chainId: selectedChainId,
@@ -403,7 +406,7 @@ function MintManowarDialog({
         }
 
         saveMintSuccessForShare({
-          type: 'manowar',
+          type: 'workflow',
           name: title,
           walletAddress,
           txHash: result.txHash!,
@@ -414,38 +417,37 @@ function MintManowarDialog({
         setLocation("/my-assets");
       } else {
         // Fuji/other chains: Use ThirdWeb sendTransaction with AA
-        const manowarContract = getManowarContractForChain(selectedChainId);
+        if (!account) {
+          throw new Error("Wallet account unavailable");
+        }
+        const workflowContract = getWorkflowContractForChain(selectedChainId);
         const usdcContract = getUsdcContractForChain(selectedChainId);
-        const mintTransaction = prepareContractCall({
-          contract: manowarContract,
-          method: "function mintManowar((string title, string description, string banner, string manowarCardUri, uint256 units, bool leaseEnabled, uint256 leaseDuration, uint8 leasePercent, bool hasCoordinator, string coordinatorModel) params, uint256[] agentIds) returns (uint256 manowarId)",
-          params: [
-            {
-              title,
-              description,
-              banner: bannerImageUri,
-              manowarCardUri,
-              units: units ? BigInt(parseInt(units)) : BigInt(1),
-              leaseEnabled,
-              leaseDuration: BigInt(parseInt(leaseDuration) || 0),
-              leasePercent: parseInt(leasePercent) || 0,
-              hasCoordinator: !!coordinatorModel,
-              coordinatorModel: coordinatorModel || "",
-            },
-            agentIds.map(id => BigInt(id)),
-          ],
+        const mintTransaction = prepareMintWorkflowCall(workflowContract, {
+          params: {
+            title,
+            description,
+            banner: bannerImageUri,
+            workflowCardUri,
+            units: units ? BigInt(parseInt(units)) : BigInt(1),
+            leaseEnabled,
+            leaseDuration: BigInt(parseInt(leaseDuration) || 0),
+            leasePercent: parseInt(leasePercent) || 0,
+            hasCoordinator: !!coordinatorModel,
+            coordinatorModel: coordinatorModel || "",
+          },
+          agentIds: agentIds.map(id => BigInt(id)),
         });
         if (totalAgentPrice > BigInt(0)) {
           const approvalTx = prepareContractCall({
             contract: usdcContract,
             method: "function approve(address spender, uint256 amount) returns (bool)",
-            params: [manowarAddress, totalAgentPrice],
+            params: [workflowAddress, totalAgentPrice],
           });
           await sendTransaction(approvalTx);
         }
         const result = await sendTransaction(mintTransaction);
         saveMintSuccessForShare({
-          type: 'manowar',
+          type: 'workflow',
           name: title,
           walletAddress,
           txHash: result.transactionHash,
@@ -472,7 +474,7 @@ function MintManowarDialog({
           <DialogHeader>
             <DialogTitle className="font-display text-lg sm:text-xl flex items-center gap-2">
               <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-fuchsia-400" />
-              Mint as Manowar
+              Mint as Workflow
             </DialogTitle>
             <DialogDescription className="text-xs sm:text-sm">
               Deploy this workflow as an ERC-7401 nestable NFT on {CHAIN_CONFIG[selectedChainId]?.name || 'testnet'}
@@ -590,9 +592,9 @@ function MintManowarDialog({
                   <SelectContent>
                     <SelectItem value="none">No coordinator</SelectItem>
                     {coordinatorModels.map((model) => (
-                      <SelectItem key={model.id} value={model.id}>
+                      <SelectItem key={model.modelId} value={model.modelId}>
                         <div className="flex items-center gap-2">
-                          <span>{model.name}</span>
+                          <span>{model.name || model.modelId}</span>
                           <span className="text-[10px] text-muted-foreground">({model.provider})</span>
                         </div>
                       </SelectItem>
@@ -648,7 +650,7 @@ function MintManowarDialog({
           <DialogFooter>
             <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isMinting}>Cancel</Button>
             <Button onClick={handleMintClick} disabled={!wallet || isMinting} className="bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white font-bold">
-              {isMinting ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Minting...</> : <><Sparkles className="w-4 h-4 mr-2" />Mint Manowar</>}
+              {isMinting ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Minting...</> : <><Sparkles className="w-4 h-4 mr-2" />Mint Workflow</>}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -752,7 +754,7 @@ function ComposeFlow() {
   const wallet = useActiveWallet();
   const account = useActiveAccount();
   const { paymentChainId } = useChain();
-  const { sessionActive, budgetRemaining } = useSession();
+  const { sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken } = useSession();
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
 
   // UI state - start in fullscreen mode by default
@@ -765,7 +767,7 @@ function ComposeFlow() {
   const [showRFADialog, setShowRFADialog] = useState(false);
   const [pendingWarpAgent, setPendingWarpAgent] = useState<Agent | null>(null);
   const [workflowResult, setWorkflowResult] = useState<WorkflowExecutionResult | null>(null);
-  const [pendingManowarId] = useState<number | null>(null);
+  const [pendingWorkflowId] = useState<number | null>(null);
 
   // Use the extracted workflow hook
   const {
@@ -788,7 +790,7 @@ function ComposeFlow() {
   // Add trigger handler
   const handleAddTrigger = useCallback((trigger: Partial<import("@/lib/triggers").TriggerDefinition>) => {
     const id = `trigger_${Date.now()}`;
-    const newNode = {
+    const newNode: ComposeNode = {
       id,
       type: "triggerNode",
       position: { x: 100, y: nodes.length * 120 + 100 },
@@ -796,7 +798,7 @@ function ComposeFlow() {
         trigger: {
           id,
           name: trigger.name || "Trigger",
-          type: trigger.type || "cron",
+          type: (trigger.type || "cron") as TriggerNodeData["trigger"]["type"],
           cronExpression: trigger.cronExpression,
           cronReadable: trigger.cronReadable,
           enabled: trigger.enabled ?? true,
@@ -820,7 +822,7 @@ function ComposeFlow() {
     setPendingWarpAgent(null);
   }, [pendingWarpAgent, setLocation]);
 
-  // Run workflow with x402 payment via Manowar backend
+  // Run workflow with x402 payment via Runtime backend
   const handleRun = useCallback(async (userPrompt: string) => {
     if (currentWorkflow.steps.length === 0) {
       toast({ title: "No Steps", description: "Add at least one step to run the workflow", variant: "destructive" });
@@ -848,12 +850,18 @@ function ComposeFlow() {
         return updated;
       });
 
+      let activeComposeKeyToken = composeKeyToken;
+      if (sessionActive && budgetRemaining > 0 && !activeComposeKeyToken) {
+        activeComposeKeyToken = await ensureComposeKeyToken();
+      }
+      if (!activeComposeKeyToken) {
+        throw new Error("Compose key session is required");
+      }
+
       // Chain-aware payment: routes to selected chain
       const fetchWithPayment = createPaymentFetch({
         chainId: paymentChainId,
-        account: account!,
-        wallet,
-        maxValue: BigInt(10000 + (5000 * currentWorkflow.steps.length)),
+        sessionToken: activeComposeKeyToken,
       });
 
       const workflowPayload = {
@@ -881,12 +889,8 @@ function ComposeFlow() {
       };
 
       const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (sessionActive && budgetRemaining > 0) {
-        headers["x-session-active"] = "true";
-        headers["x-session-budget-remaining"] = budgetRemaining.toString();
-      }
 
-      const response = await fetchWithPayment("https://manowar.compose.market/manowar/execute", {
+      const response = await fetchWithPayment(`${API_BASE_URL}/workflow/execute`, {
         method: "POST", headers, body: JSON.stringify(workflowPayload),
       });
 
@@ -919,7 +923,7 @@ function ComposeFlow() {
     } catch (err) {
       toast({ title: "Execution Error", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
     }
-  }, [currentWorkflow, inputJson, nodes, edges, setNodes, toast, wallet, sessionActive, budgetRemaining]);
+  }, [currentWorkflow, inputJson, nodes, edges, setNodes, toast, wallet, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, paymentChainId]);
 
   return (
     <div className="min-h-[calc(100vh-120px)] lg:h-[calc(100vh-100px)] flex flex-col lg:flex-row gap-3 lg:gap-4 pb-4">
@@ -1108,7 +1112,7 @@ function ComposeFlow() {
       </FullscreenOverlay>
 
       {/* Dialogs */}
-      <MintManowarDialog open={showMintDialog} onOpenChange={setShowMintDialog} workflowName={workflowName} workflowDescription={workflowDescription} agentIds={workflowAgentIds} agentPrices={agentPrices} />
+      <MintWorkflowDialog open={showMintDialog} onOpenChange={setShowMintDialog} workflowName={workflowName} workflowDescription={workflowDescription} agentIds={workflowAgentIds} agentPrices={agentPrices} />
       <RunWorkflowDialog open={showRunDialog} onOpenChange={setShowRunDialog} workflowName={workflowName || "Workflow"} stepCount={nodes.length} isRunning={isRunning} onRun={handleRun} />
       <WorkflowOutputPanel open={showOutputPanel} onOpenChange={setShowOutputPanel} result={workflowResult} workflowName={workflowName || "Workflow"} />
 
@@ -1157,8 +1161,8 @@ function ComposeFlow() {
       <RFAComponent
         open={showRFADialog}
         onOpenChange={setShowRFADialog}
-        manowarId={pendingManowarId || 0}
-        manowarTitle={workflowName || "New Workflow"}
+        workflowId={pendingWorkflowId || 0}
+        workflowTitle={workflowName || "New Workflow"}
         onSuccess={() => { toast({ title: "Agent Request Published", description: "Bounty hunters can now submit agents for your request." }); }}
       />
     </div>

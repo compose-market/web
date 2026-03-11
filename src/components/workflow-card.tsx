@@ -1,7 +1,7 @@
 /**
- * Manowar Card Component
+ * Workflow Card Component
  *
- * Compact card displaying Manowar workflow details with nested agent viewing.
+ * Compact card displaying Workflow details with nested agent viewing.
  * Shows: identity, coordinator, agents (with fold pattern), stats, lease info, and endpoints.
  * 
  * Fold Pattern: Main Card → Agent List → Individual AgentCard
@@ -20,9 +20,10 @@ import {
     TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { getIpfsUrl } from "@/lib/pinata";
-import type { OnchainManowar, OnchainAgent } from "@/hooks/use-onchain";
+import type { OnchainWorkflow, OnchainAgent } from "@/hooks/use-onchain";
 import type { AgentCard as AgentCardType } from "@/lib/pinata";
 import { AgentCard } from "@/components/agent-card";
+import { API_BASE_URL } from "@/lib/api";
 import {
     Copy,
     ExternalLink,
@@ -41,39 +42,39 @@ import {
 } from "lucide-react";
 import { CHAIN_CONFIG, getContractAddress } from "@/lib/chains";
 
-export interface ManowarCardProps {
-    manowar: OnchainManowar;
+export interface WorkflowCardProps {
+    workflow: OnchainWorkflow;
     onCopyEndpoint?: () => void;
 }
 
 // View state for fold pattern
 type CardView = "main" | "agents" | "agent-detail";
 
-export function ManowarCard({ manowar, onCopyEndpoint }: ManowarCardProps) {
+export function WorkflowCard({ workflow, onCopyEndpoint }: WorkflowCardProps) {
     // Fold pattern state
     const [cardView, setCardView] = useState<CardView>("main");
     const [selectedAgentIndex, setSelectedAgentIndex] = useState<number | null>(null);
 
     // Banner image from IPFS
-    const bannerUrl = manowar.image && manowar.image.startsWith("ipfs://")
-        ? getIpfsUrl(manowar.image.replace("ipfs://", ""))
-        : manowar.image?.startsWith("https://")
-            ? manowar.image
+    const bannerUrl = workflow.image && workflow.image.startsWith("ipfs://")
+        ? getIpfsUrl(workflow.image.replace("ipfs://", ""))
+        : workflow.image?.startsWith("https://")
+            ? workflow.image
             : null;
 
-    const unitsDisplay = manowar.units === 0 ? "∞" : `${manowar.units - manowar.unitsMinted}/${manowar.units}`;
+    const unitsDisplay = workflow.units === 0 ? "∞" : `${workflow.units - workflow.unitsMinted}/${workflow.units}`;
 
-    const agents = manowar.metadata?.agents || [];
+    const agents = workflow.metadata?.agents || [];
     const selectedAgent = selectedAgentIndex !== null ? agents[selectedAgentIndex] : null;
 
-    // Manowar's minting chain
-    const manowarChainId = manowar.chainId!;
-    const chainInfo = CHAIN_CONFIG[manowarChainId];
+    // Workflow's minting chain
+    const workflowChainId = workflow.chainId!;
+    const chainInfo = CHAIN_CONFIG[workflowChainId];
     const chainAbbr = chainInfo.name.split(" ")[0].toUpperCase().slice(0, 4);
 
     // API endpoint URL - direct path without double /api/
-    const apiEndpoint = manowar.walletAddress
-        ? `https://manowar.compose.market/manowar/${manowar.walletAddress}`
+    const apiEndpoint = workflow.walletAddress
+        ? `${API_BASE_URL}/workflow/${workflow.walletAddress}`
         : null;
 
     // Format price with max 4 decimal places, trim trailing zeros
@@ -101,7 +102,7 @@ export function ManowarCard({ manowar, onCopyEndpoint }: ManowarCardProps) {
         licensesAvailable: agentCard.licenses || 0,
         licensePrice: agentCard.licensePrice || "0",
         licensePriceFormatted: `$${parseFloat(agentCard.licensePrice || "0").toFixed(2)}`,
-        creator: agentCard.creator || manowar.creator,
+        creator: agentCard.creator || workflow.creator,
         cloneable: agentCard.cloneable || false,
         isClone: false,
         parentAgentId: 0,
@@ -233,7 +234,7 @@ export function ManowarCard({ manowar, onCopyEndpoint }: ManowarCardProps) {
     }
 
     // =========================================================================
-    // Main Card View - Original ManowarCard with clickable agents section
+    // Main Card View - Original WorkflowCard with clickable agents section
     // =========================================================================
     return (
         <TooltipProvider>
@@ -256,12 +257,12 @@ export function ManowarCard({ manowar, onCopyEndpoint }: ManowarCardProps) {
                             <div className="flex items-center gap-1.5 sm:gap-2">
                                 <Layers className="w-4 h-4 sm:w-5 sm:h-5 text-fuchsia-400 shrink-0" />
                                 <h3 className="font-semibold text-white truncate text-sm md:text-base">
-                                    {manowar.title || `Manowar #${manowar.id}`}
+                                    {workflow.title || `Workflow #${workflow.id}`}
                                 </h3>
                                 <Tooltip>
                                     <TooltipTrigger asChild>
                                         <button
-                                            onClick={() => window.open(`${CHAIN_CONFIG[manowarChainId].explorer}/token/${getContractAddress("Manowar", manowarChainId)}?a=${manowar.id}`, "_blank")}
+                                            onClick={() => window.open(`${CHAIN_CONFIG[workflowChainId].explorer}/token/${getContractAddress("Workflow", workflowChainId)}?a=${workflow.id}`, "_blank")}
                                             className="text-muted-foreground hover:text-fuchsia-400 transition-colors shrink-0"
                                         >
                                             <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
@@ -271,20 +272,20 @@ export function ManowarCard({ manowar, onCopyEndpoint }: ManowarCardProps) {
                                 </Tooltip>
                             </div>
                             <p className="text-muted-foreground text-xs md:text-sm line-clamp-2 mt-1">
-                                {manowar.description || "No description available"}
+                                {workflow.description || "No description available"}
                             </p>
                         </div>
                     </div>
 
                     {/* Badges */}
                     <div className="flex flex-wrap gap-1 sm:gap-1.5">
-                        {manowar.hasActiveRfa && (
+                        {workflow.hasActiveRfa && (
                             <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30 text-[10px] sm:text-xs">
                                 <AlertTriangle className="w-2.5 h-2.5 sm:w-3 sm:h-3 mr-0.5 sm:mr-1" />
                                 Active RFA
                             </Badge>
                         )}
-                        {manowar.leaseEnabled && (
+                        {workflow.leaseEnabled && (
                             <Badge className="bg-cyan-500/20 text-cyan-400 border-cyan-500/30 text-[10px] sm:text-xs">
                                 <Clock className="w-2.5 h-2.5 sm:w-3 sm:h-3 mr-0.5 sm:mr-1" />
                                 Leasable
@@ -298,7 +299,7 @@ export function ManowarCard({ manowar, onCopyEndpoint }: ManowarCardProps) {
                             <TooltipTrigger asChild>
                                 <div className="p-1.5 sm:p-2 bg-background/50 border border-sidebar-border rounded-lg cursor-default">
                                     <DollarSign className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-green-400 mx-auto" />
-                                    <p className="font-mono text-xs sm:text-sm text-green-400 mt-0.5 sm:mt-1">${formatPrice(manowar.totalPrice)}</p>
+                                    <p className="font-mono text-xs sm:text-sm text-green-400 mt-0.5 sm:mt-1">${formatPrice(workflow.totalPrice)}</p>
                                 </div>
                             </TooltipTrigger>
                             <TooltipContent>Total Workflow Price</TooltipContent>
@@ -333,13 +334,13 @@ export function ManowarCard({ manowar, onCopyEndpoint }: ManowarCardProps) {
                     </div>
 
                     {/* Coordinator Model */}
-                    {manowar.hasCoordinator && manowar.coordinatorModel && (
+                    {workflow.hasCoordinator && workflow.coordinatorModel && (
                         <div className="flex items-center gap-2 sm:gap-3 p-2 sm:p-3 bg-background/50 border border-sidebar-border rounded-lg">
                             <Cpu className="w-4 h-4 sm:w-5 sm:h-5 text-fuchsia-400 shrink-0" />
                             <div className="min-w-0 flex-1">
                                 <span className="text-[10px] sm:text-xs text-muted-foreground uppercase block">Coordinator</span>
-                                <span className="font-mono text-xs sm:text-sm text-fuchsia-400 truncate block" title={manowar.coordinatorModel}>
-                                    {manowar.coordinatorModel}
+                                <span className="font-mono text-xs sm:text-sm text-fuchsia-400 truncate block" title={workflow.coordinatorModel}>
+                                    {workflow.coordinatorModel}
                                 </span>
                             </div>
                         </div>
@@ -373,17 +374,17 @@ export function ManowarCard({ manowar, onCopyEndpoint }: ManowarCardProps) {
                     )}
 
                     {/* Lease Info - if enabled */}
-                    {manowar.leaseEnabled && (
+                    {workflow.leaseEnabled && (
                         <div className="flex items-center gap-3 sm:gap-4 p-2 sm:p-3 bg-background/50 border border-sidebar-border rounded-lg text-xs sm:text-sm">
                             <div className="flex items-center gap-1.5 sm:gap-2">
                                 <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-400" />
                                 <span className="text-muted-foreground">Duration:</span>
-                                <span className="font-mono text-cyan-400">{manowar.leaseDuration} days</span>
+                                <span className="font-mono text-cyan-400">{workflow.leaseDuration} days</span>
                             </div>
                             <div className="flex items-center gap-1.5 sm:gap-2">
                                 <Percent className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-green-400" />
                                 <span className="text-muted-foreground">Creator:</span>
-                                <span className="font-mono text-green-400">{manowar.leasePercent}%</span>
+                                <span className="font-mono text-green-400">{workflow.leasePercent}%</span>
                             </div>
                         </div>
                     )}
@@ -415,12 +416,12 @@ export function ManowarCard({ manowar, onCopyEndpoint }: ManowarCardProps) {
                             <div className="flex items-center gap-1.5 sm:gap-2 mt-2 sm:mt-3 text-[10px] sm:text-xs text-muted-foreground">
                                 <span>Creator:</span>
                                 <a
-                                    href={`${CHAIN_CONFIG[manowarChainId].explorer}/address/${manowar.creator}`}
+                                    href={`${CHAIN_CONFIG[workflowChainId].explorer}/address/${workflow.creator}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="text-fuchsia-400 hover:underline font-mono"
                                 >
-                                    {`${manowar.creator.slice(0, 6)}...${manowar.creator.slice(-4)}`}
+                                    {`${workflow.creator.slice(0, 6)}...${workflow.creator.slice(-4)}`}
                                 </a>
                             </div>
                         </div>
@@ -431,7 +432,7 @@ export function ManowarCard({ manowar, onCopyEndpoint }: ManowarCardProps) {
     );
 }
 
-export function ManowarCardSkeleton() {
+export function WorkflowCardSkeleton() {
     return (
         <Card className="glass-panel border-fuchsia-500/30 h-full">
             <div className="h-16 bg-gradient-to-br from-fuchsia-500/20 via-cyan-500/10 to-transparent" />

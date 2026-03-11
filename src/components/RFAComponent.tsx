@@ -2,7 +2,7 @@
  * RFA (Request-For-Agent) Component
  * 
  * Simple form for creating an RFA (bounty request) for a missing agent.
- * Used in compose.tsx when the manowar creator needs an agent that doesn't exist.
+ * Used in compose.tsx when the workflow creator needs an agent that doesn't exist.
  */
 import { useState, useMemo } from "react";
 import { z } from "zod";
@@ -80,8 +80,8 @@ type RFAFormValues = z.infer<typeof rfaFormSchema>;
 interface RFAComponentProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    manowarId: number;
-    manowarTitle?: string;
+    workflowId: number;
+    workflowTitle?: string;
     onSuccess?: (rfaId: number) => void;
 }
 
@@ -98,8 +98,8 @@ import { getUsdcContractForChain } from "../lib/chains";
 export function RFAComponent({
     open,
     onOpenChange,
-    manowarId,
-    manowarTitle,
+    workflowId,
+    workflowTitle,
     onSuccess,
 }: RFAComponentProps) {
     const { toast } = useToast();
@@ -193,9 +193,9 @@ export function RFAComponent({
 
             const createTx = prepareContractCall({
                 contract: rfaContract,
-                method: "function createRFA(uint256 manowarId, string title, string description, bytes32[] requiredSkills, uint256 offerAmount) returns (uint256 rfaId)",
+                method: "function createRFA(uint256 workflowId, string title, string description, bytes32[] requiredSkills, uint256 offerAmount) returns (uint256 rfaId)",
                 params: [
-                    BigInt(manowarId),
+                    BigInt(workflowId),
                     title,
                     values.description,
                     requiredSkills,
@@ -247,10 +247,10 @@ export function RFAComponent({
                         Request an Agent
                     </DialogTitle>
                     <DialogDescription className="text-sm">
-                        Create a bounty request for a missing agent in your Manowar workflow.
-                        {manowarTitle && (
+                        Create a bounty request for a missing agent in your Workflow.
+                        {workflowTitle && (
                             <span className="block mt-1 font-mono text-cyan-400">
-                                For: {manowarTitle}
+                                For: {workflowTitle}
                             </span>
                         )}
                     </DialogDescription>

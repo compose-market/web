@@ -1,5 +1,5 @@
 /**
- * Market - Manowar Workflows & RFA Bounties
+ * Market - Agents, Workflows & RFA Bounties
  * 
  * Browse and purchase ERC7401 workflow NFTs and submit agents for RFA bounties.
  */
@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useOnchainManowars, useManowarsWithRFA, useOnchainAgents, useOpenRFAs, type OnchainManowar, type OnchainAgent, type OnchainRFA } from "@/hooks/use-onchain";
+import { useOnchainWorkflows, useWorkflowsWithRFA, useOnchainAgents, useOpenRFAs, type OnchainWorkflow, type OnchainAgent, type OnchainRFA } from "@/hooks/use-onchain";
 import { useTabs } from "@/hooks/use-tabs";
 import { getIpfsUrl } from "@/lib/pinata";
 import { RFA_CATEGORIES, RFA_BOUNTY_LIMITS, getContractAddress } from "@/lib/contracts";
@@ -53,7 +53,7 @@ export default function Market() {
   const deferredQuery = useDeferredValue(searchQuery);
 
   // Persisted tab state - survives browser back/forward navigation
-  const [activeTab, setActiveTab] = useTabs("market", "manowars");
+  const [activeTab, setActiveTab] = useTabs("market", "workflows");
 
   return (
     <div className="space-y-4 sm:space-y-6 lg:space-y-8">
@@ -85,11 +85,11 @@ export default function Market() {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="bg-sidebar-accent border border-sidebar-border p-1 mb-4 sm:mb-6 lg:mb-8 w-full sm:w-auto">
           <TabsTrigger
-            value="manowars"
+            value="workflows"
             className="flex-1 sm:flex-none data-[state=active]:bg-cyan-500 data-[state=active]:text-black font-bold font-mono tracking-wide px-2 sm:px-6 lg:px-8 text-[10px] sm:text-sm min-w-0"
           >
             <Layers className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2 shrink-0" />
-            <span className="truncate">MANOWARS</span>
+            <span className="truncate">WORKFLOWS</span>
           </TabsTrigger>
           <TabsTrigger
             value="agents"
@@ -107,8 +107,8 @@ export default function Market() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="manowars" className="mt-0">
-          <ManowarsTab searchQuery={deferredQuery} />
+        <TabsContent value="workflows" className="mt-0">
+          <WorkflowsTab searchQuery={deferredQuery} />
         </TabsContent>
 
         <TabsContent value="agents" className="mt-0">
@@ -124,21 +124,21 @@ export default function Market() {
 }
 
 // =============================================================================
-// Manowars Tab - Complete ERC7401 Workflows
+// Workflows Tab - Complete ERC7401 Workflows
 // =============================================================================
 
-function ManowarsTab({ searchQuery }: { searchQuery: string }) {
+function WorkflowsTab({ searchQuery }: { searchQuery: string }) {
   const [sort, setSort] = useState<"newest" | "price-low" | "price-high">("newest");
-  const { data: manowars, isLoading, error, refetch } = useOnchainManowars({
+  const { data: workflows, isLoading, error, refetch } = useOnchainWorkflows({
     onlyComplete: true,
     includeRFA: false
   });
 
   // Filter and sort
-  const filteredManowars = React.useMemo(() => {
-    if (!manowars) return [];
+  const filteredWorkflows = React.useMemo(() => {
+    if (!workflows) return [];
 
-    let filtered = manowars;
+    let filtered = workflows;
 
     // Search filter
     if (searchQuery) {
@@ -166,7 +166,7 @@ function ManowarsTab({ searchQuery }: { searchQuery: string }) {
     });
 
     return filtered;
-  }, [manowars, searchQuery, sort]);
+  }, [workflows, searchQuery, sort]);
 
   return (
     <div className="space-y-4">
@@ -185,9 +185,9 @@ function ManowarsTab({ searchQuery }: { searchQuery: string }) {
           </Select>
         </div>
         <div className="flex items-center justify-between sm:justify-end gap-2">
-          {manowars && (
+          {workflows && (
             <Badge variant="outline" className="font-mono text-[10px] sm:text-xs">
-              {filteredManowars.length} workflows
+              {filteredWorkflows.length} workflows
             </Badge>
           )}
           <Button
@@ -234,17 +234,17 @@ function ManowarsTab({ searchQuery }: { searchQuery: string }) {
         </div>
       )}
 
-      {/* Manowars Grid */}
-      {!isLoading && filteredManowars.length > 0 && (
+      {/* Workflows Grid */}
+      {!isLoading && filteredWorkflows.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-          {filteredManowars.map((manowar) => (
-            <ManowarCard key={manowar.id} manowar={manowar} />
+          {filteredWorkflows.map((workflow) => (
+            <WorkflowCard key={workflow.id} workflow={workflow} />
           ))}
         </div>
       )}
 
       {/* Empty State */}
-      {filteredManowars.length === 0 && !isLoading && (
+      {filteredWorkflows.length === 0 && !isLoading && (
         <div className="text-center py-12 sm:py-20">
           <Layers className="w-10 h-10 sm:w-12 sm:h-12 mx-auto text-muted-foreground/30 mb-4" />
           <p className="text-muted-foreground text-sm sm:text-base">
@@ -262,20 +262,20 @@ function ManowarsTab({ searchQuery }: { searchQuery: string }) {
 }
 
 // Memoized card component to avoid re-renders when list changes (Fix 9)
-const ManowarCard = React.memo(function ManowarCard({ manowar }: { manowar: OnchainManowar }) {
-  const bannerUrl = manowar.image && manowar.image.startsWith("ipfs://")
-    ? getIpfsUrl(manowar.image.replace("ipfs://", ""))
+const WorkflowCard = React.memo(function WorkflowCard({ workflow }: { workflow: OnchainWorkflow }) {
+  const bannerUrl = workflow.image && workflow.image.startsWith("ipfs://")
+    ? getIpfsUrl(workflow.image.replace("ipfs://", ""))
     : null;
 
-  const unitsAvailable = manowar.units === 0 ? "∞" : `${manowar.units - manowar.unitsMinted}/${manowar.units}`;
+  const unitsAvailable = workflow.units === 0 ? "∞" : `${workflow.units - workflow.unitsMinted}/${workflow.units}`;
 
   // Use wallet address for navigation (primary), fallback to numeric ID
-  const manowarPageUrl = manowar.walletAddress
-    ? `/manowar/${manowar.walletAddress}`
-    : `/manowar/${manowar.id}`;
+  const workflowPageUrl = workflow.walletAddress
+    ? `/workflow/${workflow.walletAddress}`
+    : `/workflow/${workflow.id}`;
 
   return (
-    <Link href={manowarPageUrl} className="block">
+    <Link href={workflowPageUrl} className="block">
       <Card
         className="glass-panel border-cyan-500/20 hover:border-cyan-500/60 transition-all duration-300 group overflow-hidden cursor-pointer"
       >
@@ -284,7 +284,7 @@ const ManowarCard = React.memo(function ManowarCard({ manowar }: { manowar: Onch
           {bannerUrl ? (
             <img
               src={bannerUrl}
-              alt={manowar.title}
+              alt={workflow.title}
               width={400}
               height={144}
               loading="lazy"
@@ -301,8 +301,8 @@ const ManowarCard = React.memo(function ManowarCard({ manowar }: { manowar: Onch
           {/* Badges */}
           <div className="absolute top-2 right-2 flex gap-1">
             {/* Chain badge */}
-            {manowar.metadata?.agents?.[0]?.chain && (() => {
-              const chainId = manowar.metadata.agents[0].chain;
+            {workflow.metadata?.agents?.[0]?.chain && (() => {
+              const chainId = workflow.metadata.agents[0].chain;
               const chainInfo = CHAIN_CONFIG[chainId];
               const colorClass = chainInfo?.color === 'red'
                 ? 'border-red-500/30 text-red-400 bg-red-500/10'
@@ -320,7 +320,7 @@ const ManowarCard = React.memo(function ManowarCard({ manowar }: { manowar: Onch
           </div>
 
           {/* Lease badge */}
-          {manowar.leaseEnabled && (
+          {workflow.leaseEnabled && (
             <div className="absolute top-2 left-2">
               <Badge className="bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30 text-[8px] sm:text-[10px]">
                 <Percent className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
@@ -332,10 +332,10 @@ const ManowarCard = React.memo(function ManowarCard({ manowar }: { manowar: Onch
 
         <CardHeader className="p-3 sm:p-4 pb-2">
           <CardTitle className="text-base sm:text-lg font-display font-bold text-white group-hover:text-cyan-400 transition-colors truncate">
-            {manowar.title || `Manowar #${manowar.id}`}
+            {workflow.title || `Workflow #${workflow.id}`}
           </CardTitle>
           <CardDescription className="line-clamp-2 text-[10px] sm:text-xs h-7 sm:h-8">
-            {manowar.description || "No description"}
+            {workflow.description || "No description"}
           </CardDescription>
         </CardHeader>
 
@@ -346,14 +346,14 @@ const ManowarCard = React.memo(function ManowarCard({ manowar }: { manowar: Onch
               <p className="text-[8px] sm:text-[10px] text-muted-foreground uppercase">Total Price</p>
               <div className="flex items-center gap-1">
                 <DollarSign className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-green-400" />
-                <span className="font-mono text-xs sm:text-sm text-green-400 truncate">{manowar.totalPrice} USDC</span>
+                <span className="font-mono text-xs sm:text-sm text-green-400 truncate">{workflow.totalPrice} USDC</span>
               </div>
             </div>
             <div className="p-1.5 sm:p-2 bg-background border border-sidebar-border/50 rounded">
               <p className="text-[8px] sm:text-[10px] text-muted-foreground uppercase">Agents</p>
               <div className="flex items-center gap-1">
                 <Zap className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-cyan-400" />
-                <span className="font-mono text-xs sm:text-sm text-cyan-400 truncate">{manowar.agentIds?.length || "?"}</span>
+                <span className="font-mono text-xs sm:text-sm text-cyan-400 truncate">{workflow.agentIds?.length || "?"}</span>
               </div>
             </div>
           </div>
@@ -366,21 +366,21 @@ const ManowarCard = React.memo(function ManowarCard({ manowar }: { manowar: Onch
                 <span className="font-mono text-xs sm:text-sm text-cyan-400">{unitsAvailable}</span>
               </div>
             </div>
-            {manowar.leaseEnabled && (
+            {workflow.leaseEnabled && (
               <div className="p-1.5 sm:p-2 bg-background border border-sidebar-border/50 rounded">
                 <p className="text-[8px] sm:text-[10px] text-muted-foreground uppercase">Lease</p>
                 <div className="flex items-center gap-1">
                   <Calendar className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-fuchsia-400" />
-                  <span className="font-mono text-[10px] sm:text-sm text-fuchsia-400 truncate">{manowar.leaseDuration}d @ {manowar.leasePercent}%</span>
+                  <span className="font-mono text-[10px] sm:text-sm text-fuchsia-400 truncate">{workflow.leaseDuration}d @ {workflow.leasePercent}%</span>
                 </div>
               </div>
             )}
-            {manowar.coordinatorModel && (
+            {workflow.coordinatorModel && (
               <div className="p-1.5 sm:p-2 bg-background border border-sidebar-border/50 rounded">
                 <p className="text-[8px] sm:text-[10px] text-muted-foreground uppercase">Coordinator</p>
                 <div className="flex items-center gap-1">
                   <Users className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-amber-400" />
-                  <span className="font-mono text-[10px] sm:text-sm text-amber-400 truncate">{manowar.coordinatorModel || "Active"}</span>
+                  <span className="font-mono text-[10px] sm:text-sm text-amber-400 truncate">{workflow.coordinatorModel || "Active"}</span>
                 </div>
               </div>
             )}
@@ -400,9 +400,9 @@ const ManowarCard = React.memo(function ManowarCard({ manowar }: { manowar: Onch
             className="border-sidebar-border hover:border-cyan-500/50 h-8 sm:h-9 w-8 sm:w-9"
             onClick={(e) => {
               e.stopPropagation();
-              const metadataChainId = manowar.metadata?.agents?.[0]?.chain;
+              const metadataChainId = workflow.metadata?.agents?.[0]?.chain;
               if (metadataChainId && CHAIN_CONFIG[metadataChainId]) {
-                window.open(`${CHAIN_CONFIG[metadataChainId].explorer}/token/${getContractAddress("Manowar", metadataChainId)}?a=${manowar.id}`, "_blank");
+                window.open(`${CHAIN_CONFIG[metadataChainId].explorer}/token/${getContractAddress("Workflow", metadataChainId)}?a=${workflow.id}`, "_blank");
               }
             }}
           >
@@ -616,7 +616,7 @@ const RFACard = React.memo(function RFACard({
 
         {/* Meta info */}
         <div className="flex items-center justify-between text-[10px] sm:text-xs text-muted-foreground">
-          <span>For: Manowar #{rfa.manowarId}</span>
+          <span>For: Workflow #{rfa.workflowId}</span>
           <span>{createdDate.toLocaleDateString()}</span>
         </div>
       </CardContent>

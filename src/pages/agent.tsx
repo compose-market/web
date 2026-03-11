@@ -7,11 +7,11 @@
  * Layout: Chat on left, AgentCard on right
  * Uses shared MultimodalCanvas component and hooks for the chat interface.
  */
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useParams } from "wouter";
 import { Link } from "wouter";
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
-import { CHAIN_CONFIG, inferencePriceWei, isCronosChain } from "@/lib/chains";
+import { inferencePriceWei, isCronosChain } from "@/lib/chains";
 import { createPaymentFetch } from "@/lib/payment";
 import { useChain } from "@/contexts/ChainContext";
 import { Button } from "@/components/ui/button";
@@ -26,7 +26,8 @@ import { SessionBudgetDialog } from "@/components/session";
 import { useOnchainAgentByIdentifier } from "@/hooks/use-onchain";
 import { MultimodalCanvas, type ChatMessage } from "@/components/chat";
 import { useChat, type AttachedFile } from "@/hooks/use-chat";
-import { parseSSEStream } from "@/lib/api";
+import { API_BASE_URL, parseSSEStream } from "@/lib/api";
+import { fetchBackpackConnections, resolveBackpackUserId, type BackpackConnectionInfo } from "@/lib/backpack";
 import { AgentCard, AgentCardSkeleton } from "@/components/agent-card";
 import {
   Dialog,
@@ -57,8 +58,7 @@ import {
   IdCard,
 } from "lucide-react";
 
-const RUNTIME_URL = (import.meta.env.VITE_RUNTIME_URL || "https://runtime.compose.market").replace(/\/+$/, "");
-const MANOWAR_URL = (import.meta.env.VITE_MANOWAR_URL || "https://manowar.compose.market").replace(/\/+$/, "");
+const API_URL = API_BASE_URL;
 
 export default function AgentDetailPage() {
   const params = useParams<{ id: string }>();
@@ -106,76 +106,6 @@ export default function AgentDetailPage() {
 
   // Mobile card sheet
   const [mobileCardOpen, setMobileCardOpen] = useState(false);
-
-  // Auto-register agent with backend if not registered
-  const autoRegisterAgent = useCallback(async (): Promise<boolean> => {
-    if (!agent || !agentWallet) return false;
-
-    try {
-      const metadata = agent.metadata;
-      const chainId = metadata?.chain;
-
-      if (!Number.isInteger(chainId) || !CHAIN_CONFIG[chainId as number]) {
-        const errorMessage = `Agent metadata.chain is required and must be a supported chain ID. Received: ${String(chainId)}`;
-        console.error(`[agent] ${errorMessage}`, { walletAddress: agentWallet });
-        setChatError(errorMessage);
-        toast({
-          title: "Agent Metadata Error",
-          description: "Agent chain metadata is invalid. Registration blocked.",
-          variant: "destructive",
-        });
-        return false;
-      }
-
-      // walletTimestamp is optional - agent works for chat without it
-      // Only needed if agent needs to sign transactions
-      const walletTimestamp = metadata?.walletTimestamp;
-      if (!walletTimestamp) {
-        console.log(`[agent] No walletTimestamp in metadata - agent will work without signing capability`);
-      }
-
-      const response = await fetch(`${MANOWAR_URL}/agent/register`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chainId,
-          walletAddress: agentWallet,
-          ...(walletTimestamp && { walletTimestamp }), // Optional - for signing capability
-          dnaHash: agent.dnaHash,
-          name: metadata?.name || `Agent #${agent.id}`,
-          description: metadata?.description || "",
-          agentCardUri: agent.agentCardUri,
-          creator: agent.creator,
-          model: metadata?.model,
-          framework: metadata?.framework || "langchain",
-          plugins: metadata?.plugins?.map(p => p.registryId) || [],
-        }),
-      });
-
-      if (response.ok || response.status === 409) {
-        // 409 = already registered, which is fine
-        console.log(`[agent] Auto-registered agent ${agentWallet}`);
-        return true;
-      }
-
-      console.warn(`[agent] Auto-registration failed:`, await response.text());
-      return false;
-    } catch (err) {
-      console.error(`[agent] Auto-registration error:`, err);
-      return false;
-    }
-  }, [agent, agentWallet, toast]);
-
-  // Pre-register agent when page loads
-  useEffect(() => {
-    if (agentWallet) {
-      autoRegisterAgent().then((ok) => {
-        if (!ok) {
-          console.warn("[agent] Pre-registration failed, will retry on 404");
-        }
-      });
-    }
-  }, [agentWallet, autoRegisterAgent]);
 
   // Send chat message with x402 payment
   const handleSendMessage = useCallback(async () => {
@@ -251,16 +181,7 @@ export default function AgentDetailPage() {
       // When session is active, uses session bypass for instant <100ms latency
       const fetchWithPayment = createPaymentFetch({
         chainId: paymentChainId,
-        account,
-        wallet,
-        maxValue: BigInt(inferencePriceWei), // $0.005
-        // Session bypass: skip x402 wallet flow when session is active
-        sessionToken: sessionActive && budgetRemaining > 0 ? activeComposeKeyToken : undefined,
-        sessionHeaders: sessionActive && budgetRemaining > 0 ? {
-          'x-session-user-address': account.address,
-          'x-session-active': 'true',
-          'x-session-budget-remaining': budgetRemaining.toString(),
-        } : undefined,
+        sessionToken: activeComposeKeyToken,
       });
 
       // Use Pinata URL for attachments (not base64)
@@ -275,10 +196,11 @@ export default function AgentDetailPage() {
       const makeChatRequest = async (): Promise<Response> => {
         // Persistent thread ID scoped to user and agent
         const userAddress = wallet.getAccount()?.address;
-        const threadKey = `thread-${userAddress}-${agentWallet}`;
+        const backpackUserId = resolveBackpackUserId(userAddress);
+        const threadKey = `thread-${backpackUserId}-${agentWallet}`;
         let threadId = sessionStorage.getItem(threadKey);
         if (!threadId) {
-          threadId = `thread-${userAddress}-${agentWallet}-${crypto.randomUUID()}`;
+          threadId = `thread-${backpackUserId}-${agentWallet}-${crypto.randomUUID()}`;
           sessionStorage.setItem(threadKey, threadId);
         }
         resolvedThreadId = threadId;
@@ -286,9 +208,6 @@ export default function AgentDetailPage() {
         const headers: Record<string, string> = {
           "Content-Type": "application/json",
         };
-        if (userAddress) {
-          headers["x-session-user-address"] = userAddress;
-        }
 
         // Collect granted permissions from sessionStorage (from Backpack)
         const grantedPermissions: string[] = [];
@@ -300,11 +219,20 @@ export default function AgentDetailPage() {
         });
 
         // Build request body with attachment if present (like playground.tsx)
+        let backpackAccounts: BackpackConnectionInfo[] = [];
+        try {
+          backpackAccounts = await fetchBackpackConnections(backpackUserId);
+        } catch (error) {
+          console.warn("[agent] Backpack connections unavailable:", error);
+        }
+
         const requestBody: Record<string, unknown> = {
           message: userMessage.content,
           threadId: threadId,
           composeRunId,
+          userId: backpackUserId,
           grantedPermissions, // Pass to backend for proactive permission checks
+          backpackAccounts,
         };
         sessionStorage.setItem(runStorageKey, JSON.stringify({
           runId: composeRunId,
@@ -320,7 +248,7 @@ export default function AgentDetailPage() {
           };
         }
 
-        return fetchWithPayment(`${MANOWAR_URL}/agent/${agentWallet}/chat`, {
+        return fetchWithPayment(`${API_URL}/agent/${agentWallet}/chat`, {
           method: "POST",
           headers,
           body: JSON.stringify(requestBody),
@@ -328,17 +256,6 @@ export default function AgentDetailPage() {
       };
 
       let response = await makeChatRequest();
-
-      // If agent not found (404), auto-register and retry once
-      if (response.status === 404) {
-        console.log(`[agent] Agent not registered, auto-registering...`);
-        const registered = await autoRegisterAgent();
-        if (registered) {
-          // Wait a moment for backend to spin up the agent
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          response = await makeChatRequest();
-        }
-      }
 
       // If runtime is still warming, retry once after bounded delay
       if (response.status === 503) {
@@ -525,7 +442,7 @@ export default function AgentDetailPage() {
       setSending(false);
       setChatStatus("idle");
     }
-  }, [inputValue, sending, agentWallet, wallet, account, toast, agent, autoRegisterAgent, attachedFiles, clearFiles, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, setShowSessionDialog, parseSSEStream, scheduleStreamUpdate, flushStreamContent, updateAssistantMessage, handleJsonResponse]);
+  }, [inputValue, sending, agentWallet, wallet, account, toast, agent, attachedFiles, clearFiles, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, setShowSessionDialog, parseSSEStream, scheduleStreamUpdate, flushStreamContent, updateAssistantMessage, handleJsonResponse]);
 
   // Upload knowledge
   const handleUploadKnowledge = useCallback(async () => {
@@ -533,7 +450,7 @@ export default function AgentDetailPage() {
 
     setUploadingKnowledge(true);
     try {
-      const response = await fetch(`${MANOWAR_URL}/agent/${agentWallet}/knowledge`, {
+      const response = await fetch(`${API_URL}/agent/${agentWallet}/knowledge`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

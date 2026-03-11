@@ -7,11 +7,11 @@
  * Layout: Chat on left, ManowarCard on right (matching agent.tsx pattern)
  * Uses shared MultimodalCanvas component and hooks for the chat interface.
  */
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useParams } from "wouter";
 import { Link } from "wouter";
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
-import { CHAIN_CONFIG, inferencePriceWei, isCronosChain } from "@/lib/chains";
+import { inferencePriceWei, isCronosChain } from "@/lib/chains";
 import { createPaymentFetch } from "@/lib/payment";
 import { useChain } from "@/contexts/ChainContext";
 import { Button } from "@/components/ui/button";
@@ -21,10 +21,11 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
-import { useOnchainManowarByIdentifier, fetchAgentByWalletAddress } from "@/hooks/use-onchain";
+import { useOnchainWorkflowByIdentifier } from "@/hooks/use-onchain";
 import { MultimodalCanvas, type ChatMessage } from "@/components/chat";
 import { useChat } from "@/hooks/use-chat";
-import { ManowarCard, ManowarCardSkeleton } from "@/components/manowar-card";
+import { API_BASE_URL } from "@/lib/api";
+import { WorkflowCard, WorkflowCardSkeleton } from "@/components/workflow-card";
 import {
     Sheet,
     SheetContent,
@@ -39,17 +40,17 @@ import {
     StopCircle,
 } from "lucide-react";
 
-const MANOWAR_URL = (import.meta.env.VITE_MANOWAR_URL || "https://manowar.compose.market").replace(/\/+$/, "");
+const API_URL = API_BASE_URL;
 
 export default function ManowarPage() {
     const params = useParams<{ id: string }>();
-    const manowarIdentifier = params.id || null;
+    const workflowIdentifier = params.id || null;
 
     // Use identifier-based lookup (supports both wallet address and numeric ID)
-    const { data: manowar, isLoading, error: manowarError } = useOnchainManowarByIdentifier(manowarIdentifier);
+    const { data: workflow, isLoading, error: workflowError } = useOnchainWorkflowByIdentifier(workflowIdentifier);
 
     // Coordinator exists if hasCoordinator is true
-    const hasCoordinator = !!manowar?.hasCoordinator;
+    const hasCoordinator = !!workflow?.hasCoordinator;
 
     const { toast } = useToast();
     const wallet = useActiveWallet();
@@ -58,9 +59,9 @@ export default function ManowarPage() {
     const { sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken } = useSession();
 
     // Chat state from shared hook (includes messages, attachments, and recording)
-    const manowarWallet = manowar?.walletAddress;
+    const workflowWallet = workflow?.walletAddress;
     const chat = useChat({
-        conversationId: `manowar-${manowarWallet || 'unknown'}`,
+        conversationId: `workflow-${workflowWallet || 'unknown'}`,
         onError: (err) => setChatError(err),
     });
     const { messages, setMessages, scrollContainerRef, messagesEndRef,
@@ -85,124 +86,10 @@ export default function ManowarPage() {
     // Mobile card sheet
     const [mobileCardOpen, setMobileCardOpen] = useState(false);
 
-    // Auto-register manowar with backend if not registered
-    const autoRegisterManowar = useCallback(async (): Promise<boolean> => {
-        if (!manowar || !manowar.walletAddress) return false;
-
-        try {
-            const response = await fetch(`${MANOWAR_URL}/manowar/register`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    // Use walletAddress as primary identifier - manowarId only for on-chain reference
-                    walletAddress: manowar.walletAddress,
-                    manowarId: manowar.id, // for backward compat display only
-                    // IPFS URI to manowarCard
-                    manowarCardUri: manowar.manowarCardUri,
-                    dnaHash: manowar.dnaHash,
-                    title: manowar.title || "",
-                    description: manowar.description || "",
-                    image: manowar.image,
-                    creator: manowar.creator,
-                    hasCoordinator: manowar.hasCoordinator,
-                    coordinatorModel: manowar.coordinatorModel,
-                    totalPrice: manowar.totalPrice,
-                    // Send agent wallet addresses (unique identifiers from IPFS metadata)
-                    // Basic numeric agentIds can conflict across contract deployments
-                    agentWalletAddresses: manowar.metadata?.agents?.map(a => a.walletAddress).filter(Boolean) || [],
-                }),
-            });
-
-            if (response.ok || response.status === 409) {
-                console.log(`[manowar] Auto-registered manowar ${manowar.walletAddress}`);
-
-                // Also register each component agent so orchestrator can delegate to them
-                const agents = manowar.metadata?.agents || [];
-                const componentRegistrationErrors: string[] = [];
-                for (const agentCard of agents) {
-                    if (!agentCard.walletAddress) continue;
-                    try {
-                        const chainId = agentCard.chain;
-                        if (!Number.isInteger(chainId) || !CHAIN_CONFIG[chainId as number]) {
-                            throw new Error(`Invalid metadata.chain for agent ${agentCard.walletAddress}: ${String(chainId)}`);
-                        }
-
-                        // Fetch the full on-chain agent data of the agentCardUri
-                        const onchainAgent = await fetchAgentByWalletAddress(agentCard.walletAddress);
-                        if (!onchainAgent) {
-                            throw new Error(`Component agent ${agentCard.walletAddress} not found on-chain`);
-                        }
-
-                        const onchainMetadataChain = onchainAgent.metadata?.chain;
-                        if (!Number.isInteger(onchainMetadataChain) || onchainMetadataChain !== chainId) {
-                            throw new Error(
-                                `metadata.chain mismatch for ${agentCard.walletAddress}: card=${chainId}, onchain=${String(onchainMetadataChain)}`
-                            );
-                        }
-
-                        const agentRes = await fetch(`${MANOWAR_URL}/agent/register`, {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                                chainId,
-                                walletAddress: onchainAgent.walletAddress,
-                                dnaHash: onchainAgent.dnaHash,
-                                name: onchainAgent.metadata?.name || agentCard.name || `Agent ${agentCard.walletAddress.slice(0, 8)}`,
-                                description: onchainAgent.metadata?.description || agentCard.description || "",
-                                agentCardUri: onchainAgent.agentCardUri, // From blockchain
-                                creator: onchainAgent.creator,
-                                model: onchainAgent.metadata?.model || agentCard.model,
-                                framework: onchainAgent.metadata?.framework || agentCard.framework || "langchain",
-                                plugins: onchainAgent.metadata?.plugins?.map((p) => p.registryId) || [],
-                            }),
-                        });
-                        if (!agentRes.ok && agentRes.status !== 409) {
-                            throw new Error(`Registration failed with ${agentRes.status}: ${await agentRes.text()}`);
-                        }
-                        console.log(`[manowar] Registered component agent ${agentCard.walletAddress.slice(0, 10)}...`);
-                    } catch (err) {
-                        const message = err instanceof Error ? err.message : String(err);
-                        componentRegistrationErrors.push(message);
-                        console.warn(`[manowar] Failed to register component agent:`, err);
-                    }
-                }
-
-                if (componentRegistrationErrors.length > 0) {
-                    const firstError = componentRegistrationErrors[0];
-                    toast({
-                        title: "Component Agent Registration Failed",
-                        description: firstError,
-                        variant: "destructive",
-                    });
-                    return false;
-                }
-
-                return true;
-            }
-
-            console.warn(`[manowar] Auto-registration failed:`, await response.text());
-            return false;
-        } catch (err) {
-            console.error(`[manowar] Auto-registration error:`, err);
-            return false;
-        }
-    }, [manowar, toast]);
-
-    // Pre-register manowar when page loads
-    useEffect(() => {
-        if (manowar?.walletAddress) {
-            autoRegisterManowar().then((ok) => {
-                if (!ok) {
-                    console.warn("[manowar] Pre-registration failed, will retry on 404");
-                }
-            });
-        }
-    }, [manowar?.walletAddress, autoRegisterManowar]);
-
     // Send chat message with x402 payment
     const handleSendMessage = useCallback(async () => {
         if (attachedFiles.some(f => f.uploading)) return;
-        if ((!inputValue.trim() && attachedFiles.length === 0) || sending || !manowar) return;
+        if ((!inputValue.trim() && attachedFiles.length === 0) || sending || !workflow) return;
 
         if (!wallet || !account) {
             toast({ title: "Connect wallet", description: "Please connect your wallet to execute workflow", variant: "destructive" });
@@ -261,7 +148,7 @@ export default function ManowarPage() {
         const assistantId = crypto.randomUUID();
         setMessages(prev => [...prev, { id: assistantId, role: "assistant", content: "", timestamp: Date.now() }]);
         const composeRunId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const runStorageKey = `manowar-active-run:${manowar.walletAddress}`;
+        const runStorageKey = `workflow-active-run:${workflow.walletAddress}`;
         let resolvedThreadId: string | null = null;
         let replayEventIndex = 0;
 
@@ -272,16 +159,7 @@ export default function ManowarPage() {
             // When session is active, uses session bypass for instant <100ms latency
             const fetchWithPayment = createPaymentFetch({
                 chainId: paymentChainId,
-                account,
-                wallet,
-                maxValue: BigInt(10_000), // $0.01 - matches MANOWAR_PRICES.ORCHESTRATION
-                // Session bypass: skip x402 wallet flow when session is active
-                sessionToken: sessionActive && budgetRemaining > 0 ? activeComposeKeyToken : undefined,
-                sessionHeaders: sessionActive && budgetRemaining > 0 ? {
-                    'x-session-user-address': account.address,
-                    'x-session-active': 'true',
-                    'x-session-budget-remaining': budgetRemaining.toString(),
-                } : undefined,
+                sessionToken: activeComposeKeyToken,
             });
 
             // Use Pinata URL for attachments (not base64)
@@ -294,12 +172,12 @@ export default function ManowarPage() {
             }
 
             const makeChatRequest = async (): Promise<Response> => {
-                // Persistent thread ID scoped to user and manowar workflow
+                // Persistent thread ID scoped to user and workflow workflow
                 const userAddress = wallet.getAccount()?.address;
-                const threadKey = `manowar-thread-${userAddress}-${manowar.walletAddress}`;
+                const threadKey = `workflow-thread-${userAddress}-${workflow.walletAddress}`;
                 let threadId = sessionStorage.getItem(threadKey);
                 if (!threadId) {
-                    threadId = `manowar-${manowar.walletAddress}-user-${userAddress}-${crypto.randomUUID()}`;
+                    threadId = `workflow-${workflow.walletAddress}-user-${userAddress}-${crypto.randomUUID()}`;
                     sessionStorage.setItem(threadKey, threadId);
                 }
                 resolvedThreadId = threadId;
@@ -308,9 +186,6 @@ export default function ManowarPage() {
                 const headers: Record<string, string> = {
                     "Content-Type": "application/json",
                 };
-                if (userAddress) {
-                    headers["x-session-user-address"] = userAddress;
-                }
 
                 // Build request body with Pinata URL for attachments
                 const requestBody: Record<string, unknown> = {
@@ -335,9 +210,9 @@ export default function ManowarPage() {
                     };
                 }
 
-                // Use the /manowar/:id/chat endpoint - prefer wallet address for routing
-                const manowarIdentifier = manowar.walletAddress || manowar.id.toString();
-                return fetchWithPayment(`${MANOWAR_URL}/manowar/${manowarIdentifier}/chat`, {
+                // Use the /workflow/:id/chat endpoint - prefer wallet address for routing
+                const workflowIdentifier = workflow.walletAddress || workflow.id.toString();
+                return fetchWithPayment(`${API_URL}/workflow/${workflowIdentifier}/chat`, {
                     method: "POST",
                     headers,
                     body: JSON.stringify(requestBody),
@@ -345,17 +220,7 @@ export default function ManowarPage() {
                 });
             };
 
-            let response = await makeChatRequest();
-
-            // If manowar not found (404), auto-register and retry once
-            if (response.status === 404) {
-                console.log(`[manowar] Manowar not registered, auto-registering...`);
-                const registered = await autoRegisterManowar();
-                if (registered) {
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    response = await makeChatRequest();
-                }
-            }
+            const response = await makeChatRequest();
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
@@ -482,7 +347,7 @@ export default function ManowarPage() {
                 const { parseMultimodalResponse } = await import("@/lib/multimodal");
                 const result = await parseMultimodalResponse(response, {
                     uploadToPinata: true,
-                    conversationId: `manowar-${manowar.walletAddress}`,
+                    conversationId: `workflow-${workflow.walletAddress}`,
                     // Handle async video polling
                     onVideoPolling: {
                         onProgress: (status, progress) => {
@@ -516,7 +381,7 @@ export default function ManowarPage() {
 
                 // Handle polling - don't update if polling in progress
                 if (result.polling) {
-                    console.log(`[manowar] Video job submitted, polling: ${result.jobId}`);
+                    console.log(`[workflow] Video job submitted, polling: ${result.jobId}`);
                     return;
                 }
 
@@ -557,13 +422,13 @@ export default function ManowarPage() {
             setChatStatus("idle");
             abortControllerRef.current = null;
         }
-    }, [inputValue, sending, manowar, wallet, account, toast, attachedFiles, clearFiles, autoRegisterManowar, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, setShowSessionDialog, continuousEnabled, scheduleStreamUpdate, flushStreamContent, updateAssistantMessage, handleJsonResponse]);
+    }, [inputValue, sending, workflow, wallet, account, toast, attachedFiles, clearFiles, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, setShowSessionDialog, continuousEnabled, scheduleStreamUpdate, flushStreamContent, updateAssistantMessage, handleJsonResponse]);
 
     const handleStopExecution = useCallback(async () => {
-        if (!manowar?.walletAddress || !activeThreadId) return;
+        if (!workflow?.walletAddress || !activeThreadId) return;
         try {
             abortControllerRef.current?.abort();
-            await fetch(`${MANOWAR_URL}/manowar/${manowar.walletAddress}/stop`, {
+            await fetch(`${API_URL}/workflow/${workflow.walletAddress}/stop`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ threadId: activeThreadId }),
@@ -574,7 +439,7 @@ export default function ManowarPage() {
         } catch {
             toast({ title: "Stop failed", description: "Could not stop workflow", variant: "destructive" });
         }
-    }, [manowar?.walletAddress, activeThreadId, toast]);
+    }, [workflow?.walletAddress, activeThreadId, toast]);
 
     const copyEndpoint = () => {
         toast({
@@ -595,14 +460,14 @@ export default function ManowarPage() {
                         <Skeleton className="h-full w-full rounded-lg" />
                     </div>
                     <div className="lg:col-span-1 hidden lg:block">
-                        <ManowarCardSkeleton />
+                        <WorkflowCardSkeleton />
                     </div>
                 </div>
             </div>
         );
     }
 
-    if (manowarError || !manowar) {
+    if (workflowError || !workflow) {
         return (
             <div className="flex flex-col h-[calc(100vh-120px)]">
                 <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-fuchsia-400 -ml-2 mb-3" onClick={() => history.back()}>
@@ -653,7 +518,7 @@ export default function ManowarPage() {
                     </Button>
                     <Badge className="bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30 text-xs">
                         <Layers className="w-3 h-3 mr-1" />
-                        Manowar {manowar.walletAddress?.slice(0, 6)}…{manowar.walletAddress?.slice(-4)}
+                        Manowar {workflow.walletAddress?.slice(0, 6)}…{workflow.walletAddress?.slice(-4)}
                     </Badge>
                 </div>
 
@@ -685,8 +550,8 @@ export default function ManowarPage() {
                         </div>
                     ) : (
                         <MultimodalCanvas
-                            variant="manowar"
-                            title={`Execute ${manowar.title || `Manowar #${manowar.id}`}`}
+                            variant="workflow"
+                            title={`Execute ${workflow.title || `Manowar #${workflow.id}`}`}
                             messages={messages}
                             inputValue={inputValue}
                             onInputChange={setInputValue}
@@ -719,15 +584,15 @@ export default function ManowarPage() {
                             onDeleteMessage={(id) => setMessages(prev => prev.filter(m => m.id !== id))}
                             height="h-full"
                             emptyStateText="Ready to execute workflow."
-                            emptyStateSubtext={`Input will be sent to Coordinator: ${manowar.coordinatorModel || "Model"}`}
+                            emptyStateSubtext={`Input will be sent to Coordinator: ${workflow.coordinatorModel || "Model"}`}
                         />
                     )}
                 </div>
 
                 {/* Manowar Card (1/3 width on desktop, hidden on mobile) */}
                 <div className="lg:col-span-1 hidden lg:flex flex-col min-h-0">
-                    <ManowarCard
-                        manowar={manowar}
+                    <WorkflowCard
+                        workflow={workflow}
                         onCopyEndpoint={copyEndpoint}
                     />
                 </div>
@@ -746,8 +611,8 @@ export default function ManowarPage() {
                         </SheetTitle>
                     </SheetHeader>
                     <div className="p-4">
-                        <ManowarCard
-                            manowar={manowar}
+                        <WorkflowCard
+                            workflow={workflow}
                             onCopyEndpoint={copyEndpoint}
                         />
                     </div>

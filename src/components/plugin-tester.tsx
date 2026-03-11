@@ -9,6 +9,7 @@ import { useActiveWallet, useActiveAccount } from "thirdweb/react";
 import { inferencePriceWei } from "@/lib/chains.js";
 import { createPaymentFetch } from "@/lib/payment";
 import { useChain } from "@/contexts/ChainContext";
+import { useSession } from "@/hooks/use-session";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -214,6 +215,7 @@ export function PluginTester({
     const wallet = useActiveWallet();
     const account = useActiveAccount();
     const { paymentChainId } = useChain();
+    const { composeKeyToken, ensureComposeKeyToken } = useSession();
     const resultsEndRef = useRef<HTMLDivElement>(null);
 
     // Common state
@@ -345,19 +347,20 @@ export function PluginTester({
         setPluginError(null);
 
         try {
-            // Chain-aware payment: routes to selected chain
+            let activeComposeKeyToken = composeKeyToken;
+            if (!activeComposeKeyToken) {
+                activeComposeKeyToken = await ensureComposeKeyToken();
+            }
+            if (!activeComposeKeyToken) {
+                throw new Error("Compose key session is required");
+            }
+
             const fetchWithPayment = createPaymentFetch({
                 chainId: paymentChainId,
-                account: account!,
-                wallet,
-                maxValue: BigInt(inferencePriceWei),
+                sessionToken: activeComposeKeyToken,
             });
 
             const headers: Record<string, string> = { "Content-Type": "application/json" };
-            if (sessionActive && budgetRemaining > 0) {
-                headers["x-session-active"] = "true";
-                headers["x-session-budget-remaining"] = budgetRemaining.toString();
-            }
 
             const response = await fetchWithPayment(`${CONNECTOR_URL}/plugins/${encodeURIComponent(selectedPlugin)}/execute`, {
                 method: "POST",
@@ -456,19 +459,20 @@ export function PluginTester({
         setPluginError(null);
 
         try {
-            // Chain-aware payment: routes to selected chain
+            let activeComposeKeyToken = composeKeyToken;
+            if (!activeComposeKeyToken) {
+                activeComposeKeyToken = await ensureComposeKeyToken();
+            }
+            if (!activeComposeKeyToken) {
+                throw new Error("Compose key session is required");
+            }
+
             const fetchWithPayment = createPaymentFetch({
                 chainId: paymentChainId,
-                account: account!,
-                wallet,
-                maxValue: BigInt(inferencePriceWei),
+                sessionToken: activeComposeKeyToken,
             });
 
             const headers: Record<string, string> = { "Content-Type": "application/json" };
-            if (sessionActive && budgetRemaining > 0) {
-                headers["x-session-active"] = "true";
-                headers["x-session-budget-remaining"] = budgetRemaining.toString();
-            }
 
             const response = await fetchWithPayment(`${API_BASE}/api/mcp/servers/${encodeURIComponent(selectedMcpServer)}/call`, {
                 method: "POST",
@@ -604,19 +608,20 @@ export function PluginTester({
         setPluginError(null);
 
         try {
-            // Chain-aware payment: routes to selected chain
+            let activeComposeKeyToken = composeKeyToken;
+            if (!activeComposeKeyToken) {
+                activeComposeKeyToken = await ensureComposeKeyToken();
+            }
+            if (!activeComposeKeyToken) {
+                throw new Error("Compose key session is required");
+            }
+
             const fetchWithPayment = createPaymentFetch({
                 chainId: paymentChainId,
-                account: account!,
-                wallet,
-                maxValue: BigInt(inferencePriceWei),
+                sessionToken: activeComposeKeyToken,
             });
 
             const headers: Record<string, string> = { "Content-Type": "application/json" };
-            if (sessionActive && budgetRemaining > 0) {
-                headers["x-session-active"] = "true";
-                headers["x-session-budget-remaining"] = budgetRemaining.toString();
-            }
 
             const response = await fetchWithPayment(`${CONNECTOR_URL}/eliza/plugins/${encodeURIComponent(selectedElizaPlugin)}/execute`, {
                 method: "POST",

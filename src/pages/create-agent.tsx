@@ -40,7 +40,11 @@ import {
 } from "@/components/ui/tooltip";
 import { WarpAgentForm, type WarpAgentData } from "@/components/warp-form";
 import { ModelSelector } from "@/components/model-selector";
-import { type AIModel } from "@/lib/models";
+import {
+  clearSelectedCatalogModel,
+  loadSelectedCatalogModel,
+  type SelectedCatalogModel,
+} from "@/lib/models";
 import { useRegistryServers, useRegistrySearch, type RegistryServer, type ServerOrigin } from "@/hooks/use-registry";
 import {
   uploadAgentAvatar,
@@ -58,27 +62,14 @@ import {
   usdcToWei,
   getContractAddress
 } from "@/lib/contracts";
-import { CHAIN_IDS, CHAIN_CONFIG, inferencePriceWei, isCronosChain } from "@/lib/chains";
+import { CHAIN_IDS, CHAIN_CONFIG, isCronosChain } from "@/lib/chains";
 import { useChain } from "@/contexts/ChainContext";
 import { NetworkSelector } from "@/components/ui/network-selector";
-import { useActiveAccount, useAdminWallet } from "thirdweb/react";
-import { useSendTransaction } from "thirdweb/react";
-import { prepareContractCall, type Hex } from "thirdweb";
+import { useActiveAccount, useAdminWallet, useSendTransaction } from "thirdweb/react";
 import { accountAbstraction } from "../lib/chains";
-import { getAgentFactoryContractForChain } from "@/lib/contracts";
+import { getAgentFactoryContractForChain, prepareMintAgentCall } from "@/lib/contracts";
 import { submitCronosTransaction, encodeContractCall } from "@/lib/cronos/aa";
 import { saveMintSuccessForShare } from "@/lib/share";
-
-const RUNTIME_URL = import.meta.env.VITE_RUNTIME_URL || "https://runtime.compose.market".replace(/\/+$/, "");
-const MANOWAR_URL = import.meta.env.VITE_MANOWAR_URL || "https://manowar.compose.market".replace(/\/+$/, "");
-
-interface SelectedHFModel {
-  id: string;
-  name: string;
-  provider: string;
-  priceMultiplier: number;
-  contextLength: number;
-}
 
 interface SelectedPlugin {
   id: string;
@@ -145,8 +136,8 @@ export default function CreateAgent() {
   const [, setLocation] = useLocation();
   const searchString = useSearch();
   const account = useActiveAccount();
+  const { mutateAsync: sendTransaction } = useSendTransaction();
   const { selectedChainId } = useChain();
-  const { mutateAsync: sendTransaction, isPending: isSending } = useSendTransaction();
   const adminWallet = useAdminWallet(); // EOA signer for Smart Account (needed for Cronos AA deployment)
 
   // Parse URL params
@@ -157,7 +148,7 @@ export default function CreateAgent() {
   const [mode, setMode] = useState<CreateMode>("choice");
   const [warpAgent, setWarpAgent] = useState<WarpAgentData | null>(null);
 
-  const [selectedHFModel, setSelectedHFModel] = useState<SelectedHFModel | null>(null);
+  const [selectedCatalogModel, setSelectedCatalogModel] = useState<SelectedCatalogModel | null>(null);
   const [selectedPlugins, setSelectedPlugins] = useState<SelectedPlugin[]>([]);
   const [pluginSearch, setPluginSearch] = useState("");
   const [showPluginPicker, setShowPluginPicker] = useState(false);
@@ -195,17 +186,16 @@ export default function CreateAgent() {
     }
   }, [isWarpMode, setLocation]);
 
-  // Check for selected HF model from models page
+  // Check for selected model from models page
   useEffect(() => {
-    const stored = sessionStorage.getItem("selectedHFModel");
-    if (stored) {
-      try {
-        const model = JSON.parse(stored) as SelectedHFModel;
-        setSelectedHFModel(model);
-        sessionStorage.removeItem("selectedHFModel");
-      } catch {
-        // Ignore parse errors
+    try {
+      const model = loadSelectedCatalogModel();
+      if (model) {
+        setSelectedCatalogModel(model);
+        clearSelectedCatalogModel();
       }
+    } catch {
+      clearSelectedCatalogModel();
     }
   }, []);
 
@@ -293,12 +283,12 @@ export default function CreateAgent() {
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [pendingValues, setPendingValues] = useState<FormValues | null>(null);
 
-  // Update form when HF model is selected
+  // Update form when a catalog model is selected
   useEffect(() => {
-    if (selectedHFModel) {
-      form.setValue("model", selectedHFModel.id);
+    if (selectedCatalogModel) {
+      form.setValue("model", selectedCatalogModel.modelId);
     }
-  }, [selectedHFModel, form]);
+  }, [selectedCatalogModel, form]);
 
   // Handle avatar file selection
   const handleAvatarSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -429,18 +419,6 @@ export default function CreateAgent() {
     handleGenerateAvatar();
   }, [handleGenerateAvatar]);
 
-  // Prepare transaction data for minting
-  const [preparedTx, setPreparedTx] = useState<{
-    chainId: number;
-    dnaHash: `0x${string}`;
-    walletAddress: `0x${string}`;
-    walletTimestamp: number;
-    licenses: bigint;
-    licensePrice: bigint;
-    cloneable: boolean;
-    agentCardUri: string;
-  } | null>(null);
-
   // Handle form validation and IPFS upload before minting
   // Returns prepared transaction data or null if failed
   const prepareForMint = async (values: FormValues): Promise<{
@@ -473,7 +451,7 @@ export default function CreateAgent() {
 
       // 2. Compute DNA hash (skills, chainId, model) - matches contract expectation
       const chainId = selectedChainId; // Use selected chain from context
-      const modelId = selectedHFModel?.id || values.model;
+      const modelId = selectedCatalogModel?.modelId || values.model;
       const skills = selectedPlugins.map(p => p.id);
       const timestamp = Date.now();
 
@@ -529,8 +507,6 @@ export default function CreateAgent() {
         cloneable: values.isCloneable,
         agentCardUri,
       };
-
-      setPreparedTx(txData);
       setMintStep("minting");
 
       // Return the prepared data so caller can trigger transaction immediately
@@ -547,8 +523,11 @@ export default function CreateAgent() {
     }
   };
 
-  const handleMintSuccess = async (result: { transactionHash: string }) => {
-    if (!preparedTx) {
+  const handleMintSuccess = async (
+    txData: NonNullable<Awaited<ReturnType<typeof prepareForMint>>>,
+    result: { transactionHash: string },
+  ) => {
+    if (!txData) {
       toast({
         title: "Minting Error",
         description: "Missing prepared mint transaction data",
@@ -557,10 +536,10 @@ export default function CreateAgent() {
       return;
     }
 
-    const chainId = preparedTx.chainId;
+    const chainId = txData.chainId;
     const values = form.getValues();
 
-    const walletAddress = preparedTx.walletAddress || null;
+    const walletAddress = txData.walletAddress || null;
 
     if (!walletAddress || !Number.isInteger(chainId) || !CHAIN_CONFIG[chainId]) {
       toast({
@@ -579,41 +558,12 @@ export default function CreateAgent() {
       chainId,
     });
 
-    if (account?.address && walletAddress) {
-      try {
-        const response = await fetch(`${MANOWAR_URL}/agent/register`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chainId,
-            walletAddress,
-            walletTimestamp: preparedTx.walletTimestamp,
-            dnaHash: preparedTx.dnaHash,
-            name: values.name,
-            description: values.description,
-            agentCardUri: preparedTx.agentCardUri,
-            creator: account.address,
-            model: selectedHFModel?.id || values.model,
-            framework: values.framework,
-            plugins: selectedPlugins.map(p => p.id),
-          }),
-        });
-
-        if (!response.ok) {
-          console.warn("Backend registration failed:", await response.text());
-        }
-      } catch (err) {
-        console.error("Failed to register agent:", err);
-      }
-    }
-
     setLocation("/my-assets");
   };
 
   const handleMintError = (error: Error) => {
     console.error("Mint error:", error);
     setMintStep("idle");
-    setPreparedTx(null);
     toast({
       title: "Minting Failed",
       description: error.message || "Unknown error occurred",
@@ -691,28 +641,21 @@ export default function CreateAgent() {
         }
 
         // Handle success
-        await handleMintSuccess({ transactionHash: result.txHash! });
+        await handleMintSuccess(txData, { transactionHash: result.txHash! });
       } else {
         // Fuji/other chains: Use ThirdWeb sendTransaction (bundler available)
         console.log(`[mint] Using ThirdWeb for chain ${selectedChainId}`);
+        if (!account) {
+          throw new Error("Wallet account unavailable");
+        }
 
-        const transaction = prepareContractCall({
-          contract,
-          method: "function mintAgent(bytes32 dnaHash, uint256 licenses, uint256 licensePrice, bool cloneable, string agentCardUri) returns (uint256 agentId)",
-          params: [
-            txData.dnaHash,
-            txData.licenses,
-            txData.licensePrice,
-            txData.cloneable,
-            txData.agentCardUri,
-          ],
-        });
+        const transaction = prepareMintAgentCall(contract, txData);
 
         // Send transaction (gasless sponsorship configured on ThirdWeb)
         const result = await sendTransaction(transaction);
 
         // Handle success
-        await handleMintSuccess({ transactionHash: result.transactionHash });
+        await handleMintSuccess(txData, { transactionHash: result.transactionHash });
       }
     } catch (error) {
       handleMintError(error instanceof Error ? error : new Error(String(error)));
@@ -944,14 +887,14 @@ export default function CreateAgent() {
                       render={({ field }: { field: ControllerRenderProps<FormValues, "model"> }) => (
                         <FormItem>
                           <FormLabel className="font-mono text-foreground text-sm">LLM Model</FormLabel>
-                          {selectedHFModel ? (
+                          {selectedCatalogModel ? (
                             <div className="space-y-2">
                               <div className="p-3 rounded-sm bg-cyan-500/10 border border-cyan-500/30">
                                 <div className="flex items-center justify-between">
                                   <div>
-                                    <p className="font-mono font-bold text-cyan-400 text-sm">{selectedHFModel.name}</p>
+                                    <p className="font-mono font-bold text-cyan-400 text-sm">{selectedCatalogModel.name || selectedCatalogModel.modelId}</p>
                                     <p className="text-xs text-muted-foreground font-mono">
-                                      via {selectedHFModel.provider} · ${(inferencePriceWei / 1_000_000).toFixed(3)}/call (x402)
+                                      via {selectedCatalogModel.provider} · usage-based x402 settlement
                                     </p>
                                   </div>
                                   <Sparkles className="w-4 h-4 text-cyan-400" />
@@ -962,7 +905,7 @@ export default function CreateAgent() {
                                   type="button"
                                   variant="ghost"
                                   size="sm"
-                                  onClick={() => setSelectedHFModel(null)}
+                                  onClick={() => setSelectedCatalogModel(null)}
                                   className="text-xs text-muted-foreground hover:text-foreground"
                                 >
                                   Use built-in model
@@ -975,10 +918,10 @@ export default function CreateAgent() {
                                 value={field.value}
                                 onChange={field.onChange}
                                 placeholder="Search 1300+ models..."
-                                showTaskFilter={true}
+                                showTypeFilter
                               />
                               <p className="text-[10px] text-muted-foreground">
-                                x402 pricing: ${(inferencePriceWei / 1_000_000).toFixed(3)}/call
+                                x402 pricing is resolved from live model usage
                               </p>
                             </div>
                           )}
@@ -1540,7 +1483,7 @@ export default function CreateAgent() {
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Model</span>
-                <span className="font-mono text-cyan-400">{selectedHFModel?.name || pendingValues.model}</span>
+                <span className="font-mono text-cyan-400">{selectedCatalogModel?.name || pendingValues.model}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">License Price</span>
