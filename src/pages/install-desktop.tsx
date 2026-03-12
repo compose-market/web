@@ -69,16 +69,16 @@ export default function InstallDesktopPage() {
     setError(null);
     try {
       const signedInstallEnabled = (import.meta.env.VITE_SIGNED_DEEPLINK_INSTALL || "1") === "1";
-      if (signedInstallEnabled) {
+      const linkedAgentWallet = agentWallet ? (agentWallet.toLowerCase() as `0x${string}`) : null;
+      if (signedInstallEnabled && linkedAgentWallet) {
         if (!account) {
           throw new Error("Wallet signer unavailable for signed desktop install");
         }
-        const installAgentWallet = (agentWallet || address).toLowerCase() as `0x${string}`;
-        const agentCardCid = await resolveAgentCardCid(installAgentWallet);
+        const agentCardCid = await resolveAgentCardCid(linkedAgentWallet);
         const signed = await createSignedDesktopInstallDeepLink({
           account,
           signer: address.toLowerCase() as `0x${string}`,
-          agentWallet: installAgentWallet,
+          agentWallet: linkedAgentWallet,
           agentCardCid,
           chainId: paymentChainId,
         });
@@ -101,6 +101,7 @@ export default function InstallDesktopPage() {
           userAddress: address,
           chainId: paymentChainId,
           agentWallet: agentWallet || undefined,
+          agentCardCid: linkedAgentWallet ? await resolveAgentCardCid(linkedAgentWallet) : undefined,
         }),
       });
       const data: DesktopLinkTokenResponse = await response.json();

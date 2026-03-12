@@ -1,5 +1,5 @@
 import type { Account } from "thirdweb/wallets";
-import { API_BASE_URL } from "@/lib/api";
+import { fetchAgentByWalletAddress } from "@/hooks/use-onchain";
 
 const INSTALL_DOMAIN_NAME = "ComposeDesktopInstall";
 const INSTALL_DOMAIN_VERSION = "1";
@@ -42,15 +42,11 @@ export function extractCid(agentCardUri: string): string {
 }
 
 export async function resolveAgentCardCid(agentWallet: string): Promise<string> {
-  const response = await fetch(`${API_BASE_URL}/agent/${agentWallet.toLowerCase()}`);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch agent metadata (${response.status})`);
-  }
-  const data = await response.json() as { agentCardUri?: string };
-  if (!data.agentCardUri) {
+  const agent = await fetchAgentByWalletAddress(agentWallet.toLowerCase());
+  if (!agent?.agentCardUri) {
     throw new Error("Agent metadata missing agentCardUri");
   }
-  return extractCid(data.agentCardUri);
+  return extractCid(agent.agentCardUri);
 }
 
 function toBase64Url(value: string): string {

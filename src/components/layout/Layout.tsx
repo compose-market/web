@@ -12,6 +12,7 @@ import { DispenserButton } from "@/components/dispenser";
 import { useChain } from "@/contexts/ChainContext";
 import { CHAIN_CONFIG } from "@/lib/chains";
 import { NetworkSelector } from "@/components/ui/network-selector";
+import { ComposeAppShell } from "@compose-market/theme/app";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -92,18 +93,11 @@ export function Layout({ children }: LayoutProps) {
   }, []);
 
   return (
-    <div className="min-h-screen bg-background text-foreground font-sans selection:bg-fuchsia-500/30 selection:text-fuchsia-200 overflow-x-hidden">
-      {/* Background Grid Layer with Parallax */}
-      <div
-        className="fixed inset-0 bg-grid-pattern pointer-events-none z-0"
-        style={{ transform: `translate(${mousePos.x * 10}px, ${mousePos.y * 10}px)` }}
-      />
-
-      {/* Gradient Overlay */}
-      <div className="fixed inset-0 bg-gradient-to-b from-background via-transparent to-background z-0 pointer-events-none" />
-
-      {/* Scanline Effect */}
-      <div className="scanline fixed inset-0 z-[60] pointer-events-none" />
+    <ComposeAppShell
+      contentClassName="min-h-screen text-foreground font-sans selection:bg-fuchsia-500/30 selection:text-fuchsia-200 overflow-x-hidden"
+      gridOffsetX={mousePos.x * 10}
+      gridOffsetY={mousePos.y * 10}
+    >
 
       {/* Desktop Sidebar */}
       <div className="hidden md:block">
@@ -257,6 +251,6 @@ export function Layout({ children }: LayoutProps) {
           {children}
         </div>
       </main>
-    </div>
+    </ComposeAppShell>
   );
 }

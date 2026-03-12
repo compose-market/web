@@ -764,14 +764,14 @@ export default function AgentDetailPage() {
 
       {/* Mobile Card Sheet */}
       <Sheet open={mobileCardOpen} onOpenChange={setMobileCardOpen}>
-        <SheetContent side="right" className="w-[340px] sm:w-[400px] p-0 overflow-y-auto">
-          <SheetHeader className="p-4 border-b border-sidebar-border">
+        <SheetContent side="right" className="w-[340px] sm:w-[400px] p-0 overflow-hidden flex flex-col">
+          <SheetHeader className="p-4 border-b border-sidebar-border shrink-0">
             <SheetTitle className="font-display text-cyan-400 flex items-center gap-2">
               <IdCard className="w-4 h-4" />
               Agent Details
             </SheetTitle>
           </SheetHeader>
-          <div className="p-4">
+          <div className="flex-1 min-h-0 overflow-hidden p-4">
             <AgentCard
               agent={agent}
               onCopyEndpoint={copyEndpoint}
