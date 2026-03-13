@@ -23,23 +23,19 @@ export default defineConfig(() => ({
     chunkSizeWarningLimit: 4000, // 4MB - mermaid/thirdweb are large but already code-split
     rollupOptions: {
       output: {
-        manualChunks: {
-          // Core React
-          "vendor-react": ["react", "react-dom"],
-          // ThirdWeb (large)
-          "vendor-thirdweb": ["thirdweb"],
-          // UI components
-          "vendor-radix": [
-            "@radix-ui/react-dialog",
-            "@radix-ui/react-dropdown-menu",
-            "@radix-ui/react-tabs",
-            "@radix-ui/react-tooltip",
-            "@radix-ui/react-select",
-            "@radix-ui/react-scroll-area",
-            "@radix-ui/react-avatar",
-          ],
-          // Query + routing
-          "vendor-data": ["@tanstack/react-query", "wouter"],
+        manualChunks(id: string) {
+          if (id.includes("node_modules/react-dom/") || id.includes("node_modules/react/")) {
+            return "vendor-react";
+          }
+          if (id.includes("node_modules/thirdweb/")) {
+            return "vendor-thirdweb";
+          }
+          if (id.includes("node_modules/@radix-ui/")) {
+            return "vendor-radix";
+          }
+          if (id.includes("node_modules/@tanstack/react-query/") || id.includes("node_modules/wouter/")) {
+            return "vendor-data";
+          }
         },
       },
     },

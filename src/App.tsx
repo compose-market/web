@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { ThirdwebProvider } from "thirdweb/react";
@@ -24,29 +24,51 @@ import Workflow from "@/pages/workflow";
 import ConnectDesktop from "@/pages/connect-desktop";
 import InstallDesktop from "@/pages/install-desktop";
 
-function Router() {
+function normalizeStandalonePathname(value: string): string {
+  const withoutQuery = value.split("?")[0]?.split("#")[0] || "/";
+  const normalized = withoutQuery.replace(/\/+$/, "");
+  return normalized || "/";
+}
+
+function isStandaloneAppRoute(pathname: string): boolean {
+  const normalized = normalizeStandalonePathname(pathname);
   return (
-    <>
-      <Route path="/connect-desktop" component={ConnectDesktop} />
-      <Route path="/connect-desktop/:rest*" component={ConnectDesktop} />
-      <Route path="/install-desktop" component={InstallDesktop} />
-      <Layout>
-        <Switch>
-          <Route path="/" component={Home} />
-          <Route path="/market" component={Market} />
-          <Route path="/create-agent" component={CreateAgent} />
-          <Route path="/compose" component={Compose} />
-          <Route path="/models" component={Models} />
-          <Route path="/agents" component={Agents} />
-          <Route path="/agent/:id" component={AgentDetail} />
-          <Route path="/registry" component={Registry} />
-          <Route path="/my-assets" component={MyAssets} />
-          <Route path="/playground" component={Playground} />
-          <Route path="/workflow/:id" component={Workflow} />
-          <Route component={NotFound} />
-        </Switch>
-      </Layout>
-    </>
+    normalized === "/connect-desktop"
+    || normalized.startsWith("/connect-desktop/")
+    || normalized === "/install-desktop"
+  );
+}
+
+function Router() {
+  const [location] = useLocation();
+
+  if (isStandaloneAppRoute(location)) {
+    return (
+      <Switch>
+        <Route path="/connect-desktop/:rest*" component={ConnectDesktop} />
+        <Route path="/connect-desktop" component={ConnectDesktop} />
+        <Route path="/install-desktop" component={InstallDesktop} />
+      </Switch>
+    );
+  }
+
+  return (
+    <Layout>
+      <Switch>
+        <Route path="/" component={Home} />
+        <Route path="/market" component={Market} />
+        <Route path="/create-agent" component={CreateAgent} />
+        <Route path="/compose" component={Compose} />
+        <Route path="/models" component={Models} />
+        <Route path="/agents" component={Agents} />
+        <Route path="/agent/:id" component={AgentDetail} />
+        <Route path="/registry" component={Registry} />
+        <Route path="/my-assets" component={MyAssets} />
+        <Route path="/playground" component={Playground} />
+        <Route path="/workflow/:id" component={Workflow} />
+        <Route component={NotFound} />
+      </Switch>
+    </Layout>
   );
 }
 

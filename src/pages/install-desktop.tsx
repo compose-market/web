@@ -164,16 +164,6 @@ export default function InstallDesktopPage() {
             <Download className="w-4 h-4 mr-2" />
             Download Desktop
           </Button>
-
-          <Button
-            variant="ghost"
-            className="w-full"
-            onClick={() => void remintAndOpen()}
-            disabled={busy || !isConnected}
-          >
-            {busy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <ExternalLink className="w-4 h-4 mr-2" />}
-            Mint New Token And Open Desktop
-          </Button>
         </CardContent>
       </Card>
     </div>
