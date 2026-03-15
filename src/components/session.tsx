@@ -18,6 +18,7 @@ import { API_BASE_URL } from "@/lib/api";
 
 interface ComposeKeyRecord {
   keyId: string;
+  purpose: "session" | "api";
   budgetLimit: number;
   budgetUsed: number;
   budgetRemaining: number;
@@ -213,7 +214,9 @@ function SessionManageDialog({ open, onOpenChange }: SessionManageDialogProps) {
       }
 
       const data = await response.json();
-      setSessions(((data.keys || []) as ComposeKeyRecord[]).filter((key) => isActiveKey(key)));
+      setSessions(
+        ((data.keys || []) as ComposeKeyRecord[]).filter((key) => key.purpose === "api" && isActiveKey(key)),
+      );
     } catch (error) {
       console.error("Failed to fetch sessions:", error);
       toast.error("Failed to fetch sessions");
@@ -354,6 +357,8 @@ function ComposeKeyDialog({ open, onOpenChange }: ComposeKeyDialogProps) {
           budgetLimit: session.budgetRemaining,
           expiresAt: session.expiresAt,
           name: keyName,
+          chainId: session.chainId,
+          purpose: "api",
         }),
       });
 

@@ -73,6 +73,24 @@ export function useWs(userAddress: string | undefined, chainId: number) {
             }
         });
 
+        source.addEventListener("session-active", (event: MessageEvent<string>) => {
+            try {
+                const data = JSON.parse(event.data) as {
+                    userAddress: string;
+                    chainId: number;
+                    expiresAt?: number;
+                    budgetRemaining?: number | string;
+                    sessionId?: string;
+                    duration?: number;
+                    timestamp?: number;
+                };
+
+                window.dispatchEvent(new CustomEvent("session-active", { detail: data }));
+            } catch (err) {
+                console.error("[session-events] Active parse error:", err);
+            }
+        });
+
         source.onerror = () => {
             if (source.readyState === EventSource.CLOSED) {
                 source.close();

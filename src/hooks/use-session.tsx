@@ -29,11 +29,30 @@ import { submitCronosTransaction, encodeContractCall } from "@/lib/cronos/aa";
 import { useWs } from "./use-sse";
 import type { Address } from "viem";
 
-// Session storage key
-const SESSION_KEY = "compose_session";
-
 // API endpoint for Compose Keys
 const API_BASE = (import.meta.env.VITE_API_URL || "https://api.compose.market").replace(/\/+$/, "");
+const SESSION_STORAGE_PREFIX = "compose_session";
+
+type SessionSyncReason = "startup" | "token" | "manual" | "invalid" | "poll";
+
+function normalizeSessionUserAddress(userAddress: string): string {
+    return userAddress.trim().toLowerCase();
+}
+
+function createScopedSessionStorageKey(userAddress: string, chainId: number): string {
+    return `${SESSION_STORAGE_PREFIX}:${normalizeSessionUserAddress(userAddress)}:${chainId}`;
+}
+
+function shouldBootstrapSessionFromBackend(
+    reason: SessionSyncReason,
+    hasStoredSession: boolean,
+): boolean {
+    if (reason === "startup") {
+        return hasStoredSession;
+    }
+
+    return true;
+}
 
 export interface SessionState {
     isActive: boolean;
@@ -55,6 +74,18 @@ interface StoredSession {
     chainId: number;
     // NOTE: composeKeyToken only kept in memory 
     // Then fetched fresh from backend on reload
+}
+
+interface ApiSessionResponse {
+    hasSession: boolean;
+    keyId?: string;
+    token?: string;
+    budgetLimit?: string | number;
+    budgetUsed?: string | number;
+    budgetLocked?: string | number;
+    budgetRemaining?: string | number;
+    expiresAt?: number;
+    chainId?: string | number;
 }
 
 interface SessionContextValue {
@@ -91,7 +122,8 @@ const SessionContext = createContext<SessionContextValue | undefined>(undefined)
  * Load session from localStorage
  */
 function loadStoredSession(userAddress: string, expectedChainId: number): SessionState | null {
-    const stored = localStorage.getItem(SESSION_KEY);
+    const storageKey = createScopedSessionStorageKey(userAddress, expectedChainId);
+    const stored = localStorage.getItem(storageKey);
     if (!stored) return null;
 
     try {
@@ -99,7 +131,7 @@ function loadStoredSession(userAddress: string, expectedChainId: number): Sessio
 
         // Validate session belongs to current user, correct chain, and hasn't expired
         if (
-            data.userAddress === userAddress &&
+            normalizeSessionUserAddress(data.userAddress) === normalizeSessionUserAddress(userAddress) &&
             data.expiresAt > Date.now() &&
             data.chainId === expectedChainId
         ) {
@@ -116,10 +148,10 @@ function loadStoredSession(userAddress: string, expectedChainId: number): Sessio
         }
 
         // Session expired, different user, or different chain - clear it
-        localStorage.removeItem(SESSION_KEY);
+        localStorage.removeItem(storageKey);
         return null;
     } catch {
-        localStorage.removeItem(SESSION_KEY);
+        localStorage.removeItem(storageKey);
         return null;
     }
 }
@@ -128,8 +160,7 @@ function loadStoredSession(userAddress: string, expectedChainId: number): Sessio
  * Save session to localStorage
  */
 function saveSession(session: SessionState, userAddress: string): void {
-    if (!session.isActive) {
-        localStorage.removeItem(SESSION_KEY);
+    if (!session.isActive || !session.chainId) {
         return;
     }
 
@@ -138,10 +169,43 @@ function saveSession(session: SessionState, userAddress: string): void {
         budgetUsed: session.budgetUsed,
         expiresAt: session.expiresAt || 0,
         sessionKeyAddress: session.sessionKeyAddress || "",
-        userAddress,
+        userAddress: normalizeSessionUserAddress(userAddress),
         chainId: session.chainId || paymentChain.id,
     };
-    localStorage.setItem(SESSION_KEY, JSON.stringify(data));
+    localStorage.setItem(createScopedSessionStorageKey(userAddress, session.chainId), JSON.stringify(data));
+}
+
+function clearStoredSession(userAddress: string, chainId: number | null | undefined): void {
+    if (!chainId) return;
+    localStorage.removeItem(createScopedSessionStorageKey(userAddress, chainId));
+}
+
+function parseSessionNumber(value: unknown, fieldName: string): number {
+    if (typeof value === "number" && Number.isFinite(value)) {
+        return value;
+    }
+
+    if (typeof value === "string" && value.trim().length > 0) {
+        const parsed = Number.parseInt(value, 10);
+        if (Number.isFinite(parsed)) {
+            return parsed;
+        }
+    }
+
+    throw new Error(`Invalid session field: ${fieldName}`);
+}
+
+function buildSessionStateFromApi(data: ApiSessionResponse, fallbackChainId: number): SessionState {
+    return {
+        isActive: true,
+        budgetLimit: parseSessionNumber(data.budgetLimit, "budgetLimit"),
+        budgetUsed: parseSessionNumber(data.budgetUsed, "budgetUsed"),
+        budgetRemaining: parseSessionNumber(data.budgetRemaining, "budgetRemaining"),
+        expiresAt: typeof data.expiresAt === "number" ? data.expiresAt : null,
+        sessionKeyAddress: TREASURY_WALLET,
+        chainId: data.chainId ? parseSessionNumber(data.chainId, "chainId") : fallbackChainId,
+        composeKeyToken: typeof data.token === "string" ? data.token : null,
+    };
 }
 
 /**
@@ -156,54 +220,56 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const [isCreating, setIsCreating] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    useWs(session.isActive ? account?.address : undefined, paymentChainId);
+    useWs(session.isActive ? account?.address : undefined, session.chainId ?? paymentChainId);
 
-    const clearSessionState = useCallback(() => {
-        localStorage.removeItem(SESSION_KEY);
+    const clearSessionState = useCallback((options?: { removePersisted?: boolean; chainId?: number | null }) => {
+        if (options?.removePersisted !== false && account?.address) {
+            clearStoredSession(account.address, options?.chainId ?? session.chainId ?? paymentChainId);
+        }
         setSession(defaultSession);
-    }, []);
+    }, [account?.address, paymentChainId, session.chainId]);
 
     const syncSessionFromBackend = useCallback(
-        async (options?: { clearOnMissing?: boolean }): Promise<SessionState | null> => {
+        async (
+            reason: SessionSyncReason,
+            options?: { clearOnMissing?: boolean; chainId?: number }
+        ): Promise<SessionState | null> => {
             if (!account?.address) {
                 return null;
             }
 
-            const clearOnMissing = options?.clearOnMissing ?? true;
+            const targetChainId = options?.chainId ?? session.chainId ?? paymentChainId;
+            const hasStoredSession = Boolean(loadStoredSession(account.address, targetChainId));
+            if (!shouldBootstrapSessionFromBackend(reason, hasStoredSession)) {
+                return null;
+            }
+
+            const clearOnMissing = options?.clearOnMissing ?? reason !== "token";
 
             try {
                 const response = await fetch(`${API_BASE}/api/session`, {
                     headers: {
                         "x-session-user-address": account.address,
-                        "x-chain-id": paymentChainId.toString(),
+                        "x-chain-id": targetChainId.toString(),
                     },
                 });
 
                 if (!response.ok) {
-                    if (clearOnMissing && (response.status === 404 || response.status === 401)) {
-                        clearSessionState();
+                    if (clearOnMissing && response.status === 409) {
+                        clearSessionState({ chainId: targetChainId });
                     }
                     return null;
                 }
 
-                const data = await response.json();
+                const data = await response.json() as ApiSessionResponse;
                 if (!data.hasSession) {
                     if (clearOnMissing) {
-                        clearSessionState();
+                        clearSessionState({ chainId: targetChainId });
                     }
                     return null;
                 }
 
-                const restoredSession: SessionState = {
-                    isActive: true,
-                    budgetLimit: data.budgetLimit,
-                    budgetUsed: data.budgetUsed,
-                    budgetRemaining: data.budgetRemaining,
-                    expiresAt: data.expiresAt,
-                    sessionKeyAddress: TREASURY_WALLET,
-                    chainId: data.chainId || paymentChainId,
-                    composeKeyToken: data.token || null,
-                };
+                const restoredSession = buildSessionStateFromApi(data, targetChainId);
 
                 setSession(restoredSession);
                 saveSession(restoredSession, account.address);
@@ -213,13 +279,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 return null;
             }
         },
-        [account?.address, paymentChainId, clearSessionState]
+        [account?.address, paymentChainId, clearSessionState, session.chainId]
     );
 
     // Load local session immediately, then reconcile with backend.
     useEffect(() => {
         if (!account?.address) {
-            clearSessionState();
+            setSession(defaultSession);
             return;
         }
 
@@ -233,8 +299,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             setSession(defaultSession);
         }
 
-        void syncSessionFromBackend({ clearOnMissing: true });
-    }, [account?.address, paymentChainId, clearSessionState, syncSessionFromBackend]);
+        void syncSessionFromBackend("startup", {
+            clearOnMissing: true,
+            chainId: stored?.chainId ?? paymentChainId,
+        });
+    }, [account?.address, paymentChainId, syncSessionFromBackend]);
 
     /**
      * Ensure the active session has a Compose Key token available for bypass.
@@ -249,23 +318,22 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             return session.composeKeyToken;
         }
 
-        const refreshed = await syncSessionFromBackend({ clearOnMissing: false });
+        const refreshed = await syncSessionFromBackend("token", {
+            clearOnMissing: false,
+            chainId: session.chainId ?? paymentChainId,
+        });
         return refreshed?.composeKeyToken || null;
-    }, [account?.address, session.isActive, session.composeKeyToken, syncSessionFromBackend]);
-
-    // If a session exists without an in-memory token, proactively refresh it.
-    useEffect(() => {
-        if (!account?.address) return;
-        if (!session.isActive || session.composeKeyToken) return;
-        void ensureComposeKeyToken();
-    }, [account?.address, session.isActive, session.composeKeyToken, ensureComposeKeyToken]);
+    }, [account?.address, paymentChainId, session.isActive, session.composeKeyToken, session.chainId, syncSessionFromBackend]);
 
     // Keep frontend session in sync with backend expiration/budget changes.
     useEffect(() => {
         if (!account?.address || !session.isActive) return;
 
         const sync = () => {
-            void syncSessionFromBackend({ clearOnMissing: true });
+            void syncSessionFromBackend("poll", {
+                clearOnMissing: true,
+                chainId: session.chainId ?? paymentChainId,
+            });
         };
 
         const intervalId = window.setInterval(sync, 15000);
@@ -279,7 +347,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             window.clearInterval(intervalId);
             window.removeEventListener("visibilitychange", onVisibilityChange);
         };
-    }, [account?.address, session.isActive, syncSessionFromBackend]);
+    }, [account?.address, paymentChainId, session.chainId, session.isActive, syncSessionFromBackend]);
 
     // Update session budget immediately from backend payment response headers.
     useEffect(() => {
@@ -319,34 +387,66 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             });
         };
 
-        const handleInvalidEvent = () => {
-            void syncSessionFromBackend({ clearOnMissing: true });
+        const handleInvalidEvent = (event: Event) => {
+            const detail = (event as CustomEvent<{ reason?: string }>).detail;
+            if (!detail?.reason) {
+                return;
+            }
+
+            void syncSessionFromBackend("invalid", {
+                clearOnMissing: true,
+                chainId: session.chainId ?? paymentChainId,
+            });
         };
 
-        const handleSessionExpired = () => {
+        const handleSessionActive = (event: Event) => {
+            const detail = (event as CustomEvent<{
+                chainId?: number;
+                expiresAt?: number;
+                budgetRemaining?: string | number;
+            }>).detail;
+
+            if (!detail) {
+                return;
+            }
+
+            void syncSessionFromBackend("manual", {
+                clearOnMissing: true,
+                chainId: detail.chainId ?? session.chainId ?? paymentChainId,
+            });
+        };
+
+        const handleSessionExpired = (event: Event) => {
+            const detail = (event as CustomEvent<{ chainId?: number }>).detail;
             console.log("[session] Received session-expired event from session stream");
-            clearSessionState();
+            clearSessionState({
+                chainId: detail?.chainId ?? session.chainId ?? paymentChainId,
+            });
         };
 
         window.addEventListener(SESSION_BUDGET_EVENT, handleBudgetEvent as EventListener);
         window.addEventListener(SESSION_INVALID_EVENT, handleInvalidEvent as EventListener);
+        window.addEventListener("session-active", handleSessionActive as EventListener);
         window.addEventListener("session-expired", handleSessionExpired as EventListener);
 
         return () => {
             window.removeEventListener(SESSION_BUDGET_EVENT, handleBudgetEvent as EventListener);
             window.removeEventListener(SESSION_INVALID_EVENT, handleInvalidEvent as EventListener);
+            window.removeEventListener("session-active", handleSessionActive as EventListener);
             window.removeEventListener("session-expired", handleSessionExpired as EventListener);
         };
-    }, [account?.address, syncSessionFromBackend, clearSessionState]);
+    }, [account?.address, clearSessionState, paymentChainId, session.chainId, syncSessionFromBackend]);
 
     // Listen for storage changes from other tabs/windows
     useEffect(() => {
         if (!account?.address) return;
 
         const handleStorageChange = (e: StorageEvent) => {
-            if (e.key === SESSION_KEY) {
+            const activeStorageKey = createScopedSessionStorageKey(account.address, session.chainId ?? paymentChainId);
+            const currentChainKey = createScopedSessionStorageKey(account.address, paymentChainId);
+            if (e.key === activeStorageKey || e.key === currentChainKey) {
                 if (e.newValue) {
-                    const stored = loadStoredSession(account.address, paymentChainId);
+                    const stored = loadStoredSession(account.address, session.chainId ?? paymentChainId);
                     if (stored) {
                         setSession((prev) => ({
                             ...stored,
@@ -362,7 +462,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
         window.addEventListener("storage", handleStorageChange);
         return () => window.removeEventListener("storage", handleStorageChange);
-    }, [account?.address, paymentChainId]);
+    }, [account?.address, paymentChainId, session.chainId]);
 
     /**
      * Create a new session with a budget limit
@@ -482,6 +582,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                         body: JSON.stringify({
                             budgetLimit: budgetWei,
                             expiresAt,
+                            chainId: paymentChainId,
+                            purpose: "session",
                             name: `Cronos Session ${new Date().toISOString().slice(0, 10)}`,
                         }),
                     });
@@ -561,18 +663,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                             budgetLimit: budgetWei,
                             expiresAt,
                             chainId: paymentChainId,
+                            purpose: "session",
                             name: `Session ${new Date().toISOString().slice(0, 10)}`,
                         }),
                     });
 
-                    let composeKeyToken: string | null = null;
-                    if (keysResponse.ok) {
-                        const keyResult = await keysResponse.json();
-                        composeKeyToken = keyResult.token;
-                    } else {
-                        // Compose Key creation failed - session still works but with slower x402 flow
-                        console.warn("[Session] Compose Key creation failed, falling back to x402 flow");
+                    if (!keysResponse.ok) {
+                        const errorBody = await keysResponse.text();
+                        throw new Error(`Failed to create Compose Key: ${errorBody}`);
                     }
+
+                    const keyResult = await keysResponse.json();
+                    const composeKeyToken: string = keyResult.token;
 
                     // Create new session state with Compose Key token
                     const newSession: SessionState = {
