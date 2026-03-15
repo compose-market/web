@@ -6,6 +6,24 @@ export interface PaymentFetchParams {
   sessionToken?: string;
 }
 
+function readSessionInvalidation(response: Pick<Response, "headers">): {
+  invalid: boolean;
+  reason: string | null;
+} {
+  const reason = response.headers.get("x-compose-session-invalid");
+  if (!reason) {
+    return {
+      invalid: false,
+      reason: null,
+    };
+  }
+
+  return {
+    invalid: true,
+    reason,
+  };
+}
+
 function requireSessionToken(sessionToken: string | undefined): string {
   if (!sessionToken) {
     throw new Error("Compose key sessionToken is required");
@@ -42,10 +60,14 @@ function syncBudgetState(response: Response): void {
     );
   }
 
-  if (response.status === 401 || response.status === 402 || response.status === 403) {
+  const invalidation = readSessionInvalidation(response);
+  if (invalidation.invalid) {
     window.dispatchEvent(
       new CustomEvent(SESSION_INVALID_EVENT, {
-        detail: { status: response.status },
+        detail: {
+          status: response.status,
+          reason: invalidation.reason,
+        },
       }),
     );
   }
