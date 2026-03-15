@@ -89,7 +89,7 @@ export default function ManowarPage() {
     // Send chat message with x402 payment
     const handleSendMessage = useCallback(async () => {
         if (attachedFiles.some(f => f.uploading)) return;
-        if ((!inputValue.trim() && attachedFiles.length === 0) || sending || !workflow) return;
+        if ((!inputValue.trim() && attachedFiles.length === 0) || sending || !workflow || !workflowWallet) return;
 
         if (!wallet || !account) {
             toast({ title: "Connect wallet", description: "Please connect your wallet to execute workflow", variant: "destructive" });
@@ -147,8 +147,8 @@ export default function ManowarPage() {
         // Create assistant placeholder
         const assistantId = crypto.randomUUID();
         setMessages(prev => [...prev, { id: assistantId, role: "assistant", content: "", timestamp: Date.now() }]);
-        const composeRunId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const runStorageKey = `workflow-active-run:${workflow.walletAddress}`;
+        const composeRunId = crypto.randomUUID();
+        const runStorageKey = `workflow-active-run:${workflowWallet}`;
         let resolvedThreadId: string | null = null;
         let replayEventIndex = 0;
 
@@ -174,10 +174,10 @@ export default function ManowarPage() {
             const makeChatRequest = async (): Promise<Response> => {
                 // Persistent thread ID scoped to user and workflow workflow
                 const userAddress = wallet.getAccount()?.address;
-                const threadKey = `workflow-thread-${userAddress}-${workflow.walletAddress}`;
+                const threadKey = `workflow-thread-${userAddress}-${workflowWallet}`;
                 let threadId = sessionStorage.getItem(threadKey);
                 if (!threadId) {
-                    threadId = `workflow-${workflow.walletAddress}-user-${userAddress}-${crypto.randomUUID()}`;
+                    threadId = `workflow-${workflowWallet}-user-${userAddress}-${crypto.randomUUID()}`;
                     sessionStorage.setItem(threadKey, threadId);
                 }
                 resolvedThreadId = threadId;
@@ -211,8 +211,7 @@ export default function ManowarPage() {
                 }
 
                 // Use the /workflow/:id/chat endpoint - prefer wallet address for routing
-                const workflowIdentifier = workflow.walletAddress || workflow.id.toString();
-                return fetchWithPayment(`${API_URL}/workflow/${workflowIdentifier}/chat`, {
+                return fetchWithPayment(`${API_URL}/workflow/${workflowWallet}/chat`, {
                     method: "POST",
                     headers,
                     body: JSON.stringify(requestBody),
@@ -347,7 +346,7 @@ export default function ManowarPage() {
                 const { parseMultimodalResponse } = await import("@/lib/multimodal");
                 const result = await parseMultimodalResponse(response, {
                     uploadToPinata: true,
-                    conversationId: `workflow-${workflow.walletAddress}`,
+                    conversationId: `workflow-${workflowWallet}`,
                     // Handle async video polling
                     onVideoPolling: {
                         onProgress: (status, progress) => {

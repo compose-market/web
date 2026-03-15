@@ -166,7 +166,7 @@ export default function AgentDetailPage() {
     // Create assistant placeholder
     const assistantId = crypto.randomUUID();
     setMessages(prev => [...prev, { id: assistantId, role: "assistant", content: "", timestamp: Date.now() }]);
-    const composeRunId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const composeRunId = crypto.randomUUID();
     let resolvedThreadId: string | null = null;
     const runStorageKey = `agent-active-run:${agentWallet || "unknown"}`;
 
