@@ -8,6 +8,7 @@
  * Uses shared MultimodalCanvas component and hooks for the chat interface.
  */
 import { useState, useCallback, useRef } from "react";
+import { usePostHog } from "@posthog/react";
 import { useParams } from "wouter";
 import { Link } from "wouter";
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
@@ -25,8 +26,8 @@ import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
 import { useOnchainAgentByIdentifier } from "@/hooks/use-onchain";
 import { MultimodalCanvas, type ChatMessage } from "@/components/chat";
-import { useChat, type AttachedFile } from "@/hooks/use-chat";
-import { API_BASE_URL, parseSSEStream } from "@/lib/api";
+import { useChat } from "@/hooks/use-chat";
+import { API_BASE_URL, buildAttachmentPart, parseSSEStream } from "@/lib/api";
 import { fetchBackpackConnections, resolveBackpackUserId, type BackpackConnectionInfo } from "@/lib/backpack";
 import { AgentCard, AgentCardSkeleton } from "@/components/agent-card";
 import {
@@ -61,6 +62,7 @@ import {
 const API_URL = API_BASE_URL;
 
 export default function AgentDetailPage() {
+  const posthog = usePostHog();
   const params = useParams<{ id: string }>();
   // id is always the wallet address (preferred)
   const identifier = params.id || null;
@@ -163,6 +165,14 @@ export default function AgentDetailPage() {
     setChatError(null);
     setChatStatus("paying");
 
+    posthog?.capture("agent_chat_sent", {
+      agent_wallet: agentWallet,
+      agent_name: agent?.metadata?.name,
+      has_attachment: attachedFiles.length > 0,
+      attachment_type: attachedFiles[0]?.type ?? null,
+      chain_id: paymentChainId,
+    });
+
     // Create assistant placeholder
     const assistantId = crypto.randomUUID();
     setMessages(prev => [...prev, { id: assistantId, role: "assistant", content: "", timestamp: Date.now() }]);
@@ -184,13 +194,7 @@ export default function AgentDetailPage() {
         sessionToken: activeComposeKeyToken,
       });
 
-      // Use Pinata URL for attachments (not base64)
-      let attachmentUrl: string | undefined;
-      let attachmentType: "image" | "audio" | "video" | undefined;
-      if (attached && attached.url) {
-        attachmentUrl = attached.url;
-        attachmentType = attached.type;
-      }
+      const attachmentPart = buildAttachmentPart(attached);
 
       // ALL agents use MCP for chat - MCP handles both plugin and non-plugin agents
       const makeChatRequest = async (): Promise<Response> => {
@@ -240,12 +244,8 @@ export default function AgentDetailPage() {
           startedAt: Date.now(),
         }));
 
-        // Send Pinata URLs
-        if (attachmentUrl && attachmentType) {
-          requestBody.attachment = {
-            type: attachmentType,
-            url: attachmentUrl,
-          };
+        if (attachmentPart) {
+          requestBody.attachment = attachmentPart;
         }
 
         return fetchWithPayment(`${API_URL}/agent/${agentWallet}/chat`, {
@@ -442,7 +442,7 @@ export default function AgentDetailPage() {
       setSending(false);
       setChatStatus("idle");
     }
-  }, [inputValue, sending, agentWallet, wallet, account, toast, agent, attachedFiles, clearFiles, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, setShowSessionDialog, parseSSEStream, scheduleStreamUpdate, flushStreamContent, updateAssistantMessage, handleJsonResponse]);
+  }, [inputValue, sending, agentWallet, wallet, account, toast, agent, attachedFiles, clearFiles, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, setShowSessionDialog, parseSSEStream, scheduleStreamUpdate, flushStreamContent, updateAssistantMessage, handleJsonResponse, posthog]);
 
   // Upload knowledge
   const handleUploadKnowledge = useCallback(async () => {
@@ -463,6 +463,12 @@ export default function AgentDetailPage() {
       if (!response.ok) throw new Error("Upload failed");
 
       const result = await response.json();
+      posthog?.capture("agent_knowledge_uploaded", {
+        agent_wallet: agentWallet,
+        knowledge_key: knowledgeKey.trim(),
+        content_length: result.contentLength,
+        url_count: knowledgeUrls.length,
+      });
       toast({
         title: "Knowledge Uploaded!",
         description: `Added "${knowledgeKey}" (${result.contentLength} chars) to agent's knowledge base.`,
@@ -479,7 +485,7 @@ export default function AgentDetailPage() {
     } finally {
       setUploadingKnowledge(false);
     }
-  }, [agentWallet, knowledgeKey, knowledgeContent, toast]);
+  }, [agentWallet, knowledgeKey, knowledgeContent, knowledgeUrls, toast, posthog]);
 
   // ==========================================================================
   // Knowledge File/URL Handlers
@@ -574,7 +580,7 @@ export default function AgentDetailPage() {
           >
             <Link href={`/connect-desktop?agent_wallet=${encodeURIComponent(agentWallet || "")}`}>
               <Download className="w-3 h-3 mr-1" />
-              Install on Desktop
+              Install locally
             </Link>
           </Button>
           <Badge className="bg-cyan-500/20 text-cyan-400 border-cyan-500/30 text-xs">

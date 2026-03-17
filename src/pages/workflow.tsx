@@ -8,6 +8,7 @@
  * Uses shared MultimodalCanvas component and hooks for the chat interface.
  */
 import { useState, useCallback, useRef } from "react";
+import { usePostHog } from "@posthog/react";
 import { useParams } from "wouter";
 import { Link } from "wouter";
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
@@ -24,7 +25,7 @@ import { SessionBudgetDialog } from "@/components/session";
 import { useOnchainWorkflowByIdentifier } from "@/hooks/use-onchain";
 import { MultimodalCanvas, type ChatMessage } from "@/components/chat";
 import { useChat } from "@/hooks/use-chat";
-import { API_BASE_URL } from "@/lib/api";
+import { API_BASE_URL, buildAttachmentPart } from "@/lib/api";
 import { WorkflowCard, WorkflowCardSkeleton } from "@/components/workflow-card";
 import {
     Sheet,
@@ -43,6 +44,7 @@ import {
 const API_URL = API_BASE_URL;
 
 export default function ManowarPage() {
+    const posthog = usePostHog();
     const params = useParams<{ id: string }>();
     const workflowIdentifier = params.id || null;
 
@@ -144,6 +146,14 @@ export default function ManowarPage() {
         setChatStatus("paying");
         abortControllerRef.current = new AbortController();
 
+        posthog?.capture("workflow_executed", {
+            workflow_wallet: workflowWallet,
+            workflow_title: workflow?.title,
+            has_attachment: attachedFiles.length > 0,
+            continuous: continuousEnabled,
+            chain_id: paymentChainId,
+        });
+
         // Create assistant placeholder
         const assistantId = crypto.randomUUID();
         setMessages(prev => [...prev, { id: assistantId, role: "assistant", content: "", timestamp: Date.now() }]);
@@ -162,14 +172,7 @@ export default function ManowarPage() {
                 sessionToken: activeComposeKeyToken,
             });
 
-            // Use Pinata URL for attachments (not base64)
-            // The file is already uploaded by useFileAttachment hook
-            let attachmentUrl: string | undefined;
-            let attachmentType: "image" | "audio" | "video" | undefined;
-            if (attached && attached.url) {
-                attachmentUrl = attached.url;
-                attachmentType = attached.type;
-            }
+            const attachmentPart = buildAttachmentPart(attached);
 
             const makeChatRequest = async (): Promise<Response> => {
                 // Persistent thread ID scoped to user and workflow workflow
@@ -202,12 +205,8 @@ export default function ManowarPage() {
                     startedAt: Date.now(),
                 }));
 
-                // Send Pinata URLs, not base64 data
-                if (attachmentUrl && attachmentType) {
-                    requestBody.attachment = {
-                        type: attachmentType,
-                        url: attachmentUrl,
-                    };
+                if (attachmentPart) {
+                    requestBody.attachment = attachmentPart;
                 }
 
                 // Use the /workflow/:id/chat endpoint - prefer wallet address for routing
@@ -421,7 +420,7 @@ export default function ManowarPage() {
             setChatStatus("idle");
             abortControllerRef.current = null;
         }
-    }, [inputValue, sending, workflow, wallet, account, toast, attachedFiles, clearFiles, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, setShowSessionDialog, continuousEnabled, scheduleStreamUpdate, flushStreamContent, updateAssistantMessage, handleJsonResponse]);
+    }, [inputValue, sending, workflow, wallet, account, toast, attachedFiles, clearFiles, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, setShowSessionDialog, continuousEnabled, scheduleStreamUpdate, flushStreamContent, updateAssistantMessage, handleJsonResponse, posthog]);
 
     const handleStopExecution = useCallback(async () => {
         if (!workflow?.walletAddress || !activeThreadId) return;
@@ -432,13 +431,18 @@ export default function ManowarPage() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ threadId: activeThreadId }),
             });
+            posthog?.capture("workflow_stopped", {
+                workflow_wallet: workflow.walletAddress,
+                workflow_title: workflow.title,
+                thread_id: activeThreadId,
+            });
             setChatStatus("idle");
             setSending(false);
             toast({ title: "Stopped", description: "Workflow execution stopped" });
         } catch {
             toast({ title: "Stop failed", description: "Could not stop workflow", variant: "destructive" });
         }
-    }, [workflow?.walletAddress, activeThreadId, toast]);
+    }, [workflow?.walletAddress, workflow?.title, activeThreadId, toast, posthog]);
 
     const copyEndpoint = () => {
         toast({

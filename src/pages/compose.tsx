@@ -12,6 +12,7 @@
  */
 
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
+import { usePostHog } from "@posthog/react";
 import { useLocation } from "wouter";
 import {
   ReactFlow,
@@ -120,6 +121,7 @@ function MintWorkflowDialog({
   open, onOpenChange, workflowName, workflowDescription, agentIds,
   agentPrices = new Map()
 }: MintWorkflowDialogProps) {
+  const posthog = usePostHog();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const wallet = useActiveWallet();
@@ -413,6 +415,15 @@ function MintWorkflowDialog({
           chainId: selectedChainId,
         });
 
+        posthog?.capture("workflow_published", {
+          workflow_title: title,
+          workflow_wallet: walletAddress,
+          chain_id: selectedChainId,
+          agent_count: agentIds.length,
+          tx_hash: result.txHash,
+          path: "cronos",
+        });
+
         onOpenChange(false);
         setLocation("/my-assets");
       } else {
@@ -453,10 +464,24 @@ function MintWorkflowDialog({
           txHash: result.transactionHash,
           chainId: selectedChainId,
         });
+
+        posthog?.capture("workflow_published", {
+          workflow_title: title,
+          workflow_wallet: walletAddress,
+          chain_id: selectedChainId,
+          agent_count: agentIds.length,
+          tx_hash: result.transactionHash,
+          path: "thirdweb",
+        });
+
         onOpenChange(false);
         setLocation("/my-assets");
       }
     } catch (error) {
+      posthog?.captureException(error instanceof Error ? error : new Error(String(error)), {
+        $exception_message: "workflow_publish_failed",
+        chain_id: selectedChainId,
+      });
       toast({
         title: "Minting Failed",
         description: error instanceof Error ? error.message : "Unknown error",

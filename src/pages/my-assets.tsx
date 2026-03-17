@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link } from "wouter";
+import { usePostHog } from "@posthog/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -600,6 +601,7 @@ function RFAAssetCard({
   onRefresh: () => void;
 }) {
   const { toast } = useToast();
+  const posthog = usePostHog();
   const { mutateAsync: sendTransaction, isPending } = useSendTransaction();
   const [isCancelling, setIsCancelling] = useState(false);
 
@@ -626,6 +628,13 @@ function RFAAssetCard({
       });
 
       await sendTransaction(tx);
+
+      posthog?.capture("rfa_cancelled", {
+        rfa_id: rfa.id,
+        rfa_title: rfa.title,
+        offer_amount: rfa.offerAmount,
+        workflow_id: rfa.workflowId,
+      });
 
       toast({
         title: "RFA Cancelled",

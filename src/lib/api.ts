@@ -36,11 +36,11 @@ export interface APIChatMessage {
   tool_call_id?: string;
 }
 
-export interface APIChatContentPart {
-  type: "text" | "image_url";
-  text?: string;
-  image_url?: { url: string; detail?: "auto" | "low" | "high" };
-}
+export type APIChatContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string; detail?: "auto" | "low" | "high" } }
+  | { type: "input_audio"; input_audio: { url: string } }
+  | { type: "video_url"; video_url: { url: string } };
 
 export interface ToolCall {
   id: string;
@@ -74,6 +74,26 @@ export interface AttachedFile {
   preview?: string;
   uploading: boolean;
   type: "image" | "audio" | "video";
+}
+
+export function buildAttachmentPart(attached: Pick<AttachedFile, "type" | "url"> | undefined): APIChatContentPart | undefined {
+  if (!attached?.url) {
+    return undefined;
+  }
+
+  if (attached.type === "image") {
+    return { type: "image_url", image_url: { url: attached.url } };
+  }
+
+  if (attached.type === "audio") {
+    return { type: "input_audio", input_audio: { url: attached.url } };
+  }
+
+  if (attached.type === "video") {
+    return { type: "video_url", video_url: { url: attached.url } };
+  }
+
+  return undefined;
 }
 
 // =============================================================================

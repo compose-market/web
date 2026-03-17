@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";
+import { usePostHog } from "@posthog/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -43,6 +44,7 @@ import {
 
 export default function AgentsPage() {
   const [, setLocation] = useLocation();
+  const posthog = usePostHog();
   const [search, setSearch] = useState("");
   const [selectedTag, setSelectedTag] = useState("all");
   const [selectedRegistries, setSelectedRegistries] = useState<AgentRegistryId[]>(getEnabledRegistries());
@@ -133,6 +135,12 @@ export default function AgentsPage() {
   const isLoading = isLoadingExternal || isLoadingOnchain;
 
   const handleSelectAgent = (agent: Agent) => {
+    posthog?.capture("agent_selected", {
+      agent_id: agent.id,
+      agent_name: agent.name,
+      agent_registry: agent.registry,
+      agent_category: agent.category,
+    });
     // Store selected agent in sessionStorage and navigate back to compose
     sessionStorage.setItem("selectedAgent", JSON.stringify({
       id: agent.id,
@@ -353,6 +361,7 @@ interface ExtendedAgent extends Agent {
 
 function AgentCard({ agent, onSelect }: { agent: ExtendedAgent; onSelect: (a: Agent) => void }) {
   const [, setLocation] = useLocation();
+  const posthog = usePostHog();
   const excerpt = agent.description || (agent.readme ? getReadmeExcerpt(agent.readme, 100) : "");
   const initials = agent.name
     .split(" ")
@@ -376,6 +385,11 @@ function AgentCard({ agent, onSelect }: { agent: ExtendedAgent; onSelect: (a: Ag
   const isAgentWarped = isManowar ? agent.isWarped : externalWarpData?.isWarped;
 
   const handleWarp = () => {
+    posthog?.capture("agent_warp_initiated", {
+      agent_id: agent.id,
+      agent_name: agent.name,
+      agent_registry: agent.registry,
+    });
     // Store agent for warp flow
     sessionStorage.setItem("warpAgent", JSON.stringify(agent));
     setLocation("/create-agent?warp=true");

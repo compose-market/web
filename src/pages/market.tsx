@@ -5,6 +5,7 @@
  */
 import { useState, useDeferredValue } from "react";
 import * as React from "react";
+import { usePostHog } from "@posthog/react";
 import { Link } from "wouter";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -263,6 +264,7 @@ function WorkflowsTab({ searchQuery }: { searchQuery: string }) {
 
 // Memoized card component to avoid re-renders when list changes (Fix 9)
 const WorkflowCard = React.memo(function WorkflowCard({ workflow }: { workflow: OnchainWorkflow }) {
+  const posthog = usePostHog();
   const bannerUrl = workflow.image && workflow.image.startsWith("ipfs://")
     ? getIpfsUrl(workflow.image.replace("ipfs://", ""))
     : null;
@@ -390,7 +392,16 @@ const WorkflowCard = React.memo(function WorkflowCard({ workflow }: { workflow: 
         <CardFooter className="p-3 sm:p-4 pt-0 flex gap-2">
           <Button
             className="flex-1 bg-cyan-500 hover:bg-cyan-600 text-black font-bold font-mono text-[10px] sm:text-xs h-8 sm:h-9"
-            onClick={(e) => { e.stopPropagation(); /* TODO: Purchase */ }}
+            onClick={(e) => {
+              e.stopPropagation();
+              posthog?.capture("market_workflow_purchase_clicked", {
+                workflow_id: workflow.id,
+                workflow_title: workflow.title,
+                total_price: workflow.totalPrice,
+                workflow_wallet: workflow.walletAddress,
+              });
+              /* TODO: Purchase */
+            }}
           >
             <DollarSign className="w-3 h-3 mr-1" />
             PURCHASE
@@ -551,6 +562,7 @@ const RFACard = React.memo(function RFACard({
   rfa: OnchainRFA;
   onViewDetails: () => void;
 }) {
+  const posthog = usePostHog();
   // Get category info from skills (first skill hash)
   const categoryId = rfa.requiredSkills.length > 0 ? rfa.requiredSkills[0] : null;
 
@@ -623,7 +635,15 @@ const RFACard = React.memo(function RFACard({
 
       <CardFooter className="p-3 sm:p-4 pt-0 flex flex-row gap-1.5 sm:gap-2">
         <Button
-          onClick={onViewDetails}
+          onClick={() => {
+            posthog?.capture("market_rfa_details_viewed", {
+              rfa_id: rfa.id,
+              rfa_title: rfa.title,
+              offer_amount: rfa.offerAmount,
+              workflow_id: rfa.workflowId,
+            });
+            onViewDetails();
+          }}
           className="flex-1 bg-fuchsia-500 hover:bg-fuchsia-600 text-white font-bold font-mono text-[9px] sm:text-xs h-8 sm:h-9 px-2 sm:px-3 min-w-0"
         >
           <Award className="w-3 h-3 mr-0.5 sm:mr-1 shrink-0" />
@@ -773,6 +793,7 @@ function AgentsTab({ searchQuery }: { searchQuery: string }) {
 
 // Memoized agent card component
 const AgentCard = React.memo(function AgentCard({ agent }: { agent: OnchainAgent }) {
+  const posthog = usePostHog();
   const metadata = agent.metadata;
   const name = metadata?.name || `Agent #${agent.id}`;
   const description = metadata?.description || "No description available";
@@ -893,6 +914,15 @@ const AgentCard = React.memo(function AgentCard({ agent }: { agent: OnchainAgent
         <CardFooter className="p-3 sm:p-4 pt-0 flex gap-1.5 sm:gap-2">
           <Button
             className="flex-1 bg-cyan-500 hover:bg-cyan-600 text-black font-bold font-mono text-[9px] sm:text-xs h-8 sm:h-9 px-2 sm:px-3 min-w-0"
+            onClick={(e) => {
+              e.stopPropagation();
+              posthog?.capture("market_agent_use_clicked", {
+                agent_id: agent.id,
+                agent_name: name,
+                agent_wallet: agent.walletAddress,
+                license_price: agent.licensePriceFormatted,
+              });
+            }}
           >
             <Zap className="w-3 h-3 mr-0.5 sm:mr-1 shrink-0" />
             <span className="truncate">USE IT</span>

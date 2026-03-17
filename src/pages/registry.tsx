@@ -6,6 +6,7 @@
  */
 import { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";
+import { usePostHog } from "@posthog/react";
 import {
   useRegistryServers,
   useRegistrySearch,
@@ -277,6 +278,7 @@ function ServerDetailDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const [, navigate] = useLocation();
+  const posthog = usePostHog();
 
   if (!server) return null;
 
@@ -284,6 +286,12 @@ function ServerDetailDialog({
   const isExecutable = server.executable === true;
 
   const handleAddToWorkflow = () => {
+    posthog?.capture("registry_server_added_to_workflow", {
+      server_id: server.registryId,
+      server_name: server.name,
+      server_origin: server.origin,
+      server_category: server.category,
+    });
     // Store server data and navigate to compose
     sessionStorage.setItem("selectedMcpServer", JSON.stringify({
       registryId: server.registryId,
@@ -301,6 +309,11 @@ function ServerDetailDialog({
   const isEliza = server.origin === "eliza";
 
   const handleTestPlugin = () => {
+    posthog?.capture("registry_server_tested", {
+      server_id: server.registryId,
+      server_name: server.name,
+      server_origin: server.origin,
+    });
     // Determine source based on origin
     const source = isGoat ? "goat" : isEliza ? "eliza" : "mcp";
 
@@ -482,6 +495,7 @@ function ServerDetailDialog({
 // =============================================================================
 
 export default function RegistryPage() {
+  const posthog = usePostHog();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedOrigin, setSelectedOrigin] = useState<"all" | "mcp" | "goat" | "eliza">("all");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
@@ -524,6 +538,12 @@ export default function RegistryPage() {
   const isLoading = searchQuery.length > 0 ? loadingSearch : loadingServers;
 
   const handleSelectServer = (server: RegistryServer) => {
+    posthog?.capture("registry_server_viewed", {
+      server_id: server.registryId,
+      server_name: server.name,
+      server_origin: server.origin,
+      server_category: server.category,
+    });
     setSelectedServer(server);
     setDetailOpen(true);
   };

@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
+import { usePostHog } from "@posthog/react";
 import { useForm, type SubmitHandler, type ControllerRenderProps } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -132,6 +133,7 @@ type FormValues = z.infer<typeof formSchema>;
 type CreateMode = "choice" | "scratch" | "warp";
 
 export default function CreateAgent() {
+  const posthog = usePostHog();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const searchString = useSearch();
@@ -558,11 +560,19 @@ export default function CreateAgent() {
       chainId,
     });
 
+    posthog?.capture("agent_created", {
+      agent_name: values.name,
+      agent_wallet: walletAddress,
+      chain_id: chainId,
+      tx_hash: result.transactionHash,
+    });
+
     setLocation("/my-assets");
   };
 
   const handleMintError = (error: Error) => {
     console.error("Mint error:", error);
+    posthog?.captureException(error, { $exception_message: "agent_mint_failed" });
     setMintStep("idle");
     toast({
       title: "Minting Failed",

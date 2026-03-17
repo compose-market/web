@@ -9,6 +9,7 @@
  * - PluginTester for plugin testing
  */
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { usePostHog } from "@posthog/react";
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
 import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
@@ -99,6 +100,7 @@ function getDefaultParamValues(schema: ModelParamsSchema | null): Record<string,
 // =============================================================================
 
 export default function PlaygroundPage() {
+  const posthog = usePostHog();
   const wallet = useActiveWallet();
   const account = useActiveAccount();
   const { sessionActive, budgetRemaining, formatBudget, composeKeyToken, ensureComposeKeyToken } = useSession();
@@ -296,6 +298,14 @@ export default function PlaygroundPage() {
       audioUrl: attached?.type === "audio" ? attached.url : undefined,
       videoUrl: attached?.type === "video" ? attached.url : undefined,
     };
+
+    posthog?.capture("playground_message_sent", {
+      model_id: selectedModel,
+      has_attachment: attachedFiles.length > 0,
+      attachment_type: attachedFiles[0]?.type ?? null,
+      output_type: outputType,
+      chain_id: paymentChainId,
+    });
 
     setMessages((prev) => [...prev, userMessage]);
     setInputValue("");

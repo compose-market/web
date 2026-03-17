@@ -52,22 +52,26 @@ function Router() {
     );
   }
 
+  const routes = (
+    <Switch>
+      <Route path="/" component={Home} />
+      <Route path="/market" component={Market} />
+      <Route path="/create-agent" component={CreateAgent} />
+      <Route path="/compose" component={Compose} />
+      <Route path="/models" component={Models} />
+      <Route path="/agents" component={Agents} />
+      <Route path="/agent/:id" component={AgentDetail} />
+      <Route path="/registry" component={Registry} />
+      <Route path="/my-assets" component={MyAssets} />
+      <Route path="/playground" component={Playground} />
+      <Route path="/workflow/:id" component={Workflow} />
+      <Route component={NotFound} />
+    </Switch>
+  );
+
   return (
     <Layout>
-      <Switch>
-        <Route path="/" component={Home} />
-        <Route path="/market" component={Market} />
-        <Route path="/create-agent" component={CreateAgent} />
-        <Route path="/compose" component={Compose} />
-        <Route path="/models" component={Models} />
-        <Route path="/agents" component={Agents} />
-        <Route path="/agent/:id" component={AgentDetail} />
-        <Route path="/registry" component={Registry} />
-        <Route path="/my-assets" component={MyAssets} />
-        <Route path="/playground" component={Playground} />
-        <Route path="/workflow/:id" component={Workflow} />
-        <Route component={NotFound} />
-      </Switch>
+      {routes}
     </Layout>
   );
 }

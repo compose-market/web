@@ -6,6 +6,7 @@ import {
     useContext,
     ReactNode
 } from "react";
+import { usePostHog } from "@posthog/react";
 import { useActiveAccount, useAdminWallet } from "thirdweb/react";
 import { getContract } from "thirdweb";
 import { addSessionKey, getAllActiveSigners } from "thirdweb/extensions/erc4337";
@@ -219,8 +220,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const [session, setSession] = useState<SessionState>(defaultSession);
     const [isCreating, setIsCreating] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const posthog = usePostHog();
 
     useWs(session.isActive ? account?.address : undefined, session.chainId ?? paymentChainId);
+
+    // Identify user when wallet connects
+    useEffect(() => {
+        if (account?.address) {
+            posthog?.identify(account.address, {
+                wallet_address: account.address,
+            });
+        }
+    }, [account?.address, posthog]);
 
     const clearSessionState = useCallback((options?: { removePersisted?: boolean; chainId?: number | null }) => {
         if (options?.removePersisted !== false && account?.address) {
@@ -613,6 +624,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                     // Then update React state
                     setSession(newSession);
 
+                    posthog?.capture("session_created", {
+                        chain_id: paymentChainId,
+                        budget_usdc: budgetUSDC,
+                        duration_hours: durationHours,
+                        path: "cronos",
+                    });
+
                     return true;
                 } else {
                     // ===========================================================
@@ -694,25 +712,42 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                     // Then update React state
                     setSession(newSession);
 
+                    posthog?.capture("session_created", {
+                        chain_id: paymentChainId,
+                        budget_usdc: budgetUSDC,
+                        duration_hours: durationHours,
+                        path: "thirdweb",
+                    });
+
                     return true;
                 }
             } catch (err) {
                 console.error("[Session] Failed to create session:", err);
+                posthog?.captureException(err instanceof Error ? err : new Error(String(err)), {
+                    $exception_message: "session_create_failed",
+                    chain_id: paymentChainId,
+                    budget_usdc: budgetUSDC,
+                });
                 setError(err instanceof Error ? err.message : "Failed to create session");
                 return false;
             } finally {
                 setIsCreating(false);
             }
         },
-        [account, paymentChainId, adminWallet]
+        [account, paymentChainId, adminWallet, posthog]
     );
 
     /**
      * End the current session
      */
     const endSession = useCallback(() => {
+        posthog?.capture("session_ended", {
+            chain_id: session.chainId,
+            budget_remaining: session.budgetRemaining,
+            budget_used: session.budgetUsed,
+        });
         clearSessionState();
-    }, [clearSessionState]);
+    }, [clearSessionState, posthog, session.chainId, session.budgetRemaining, session.budgetUsed]);
 
     /**
      * Check if session has enough budget for an operation
