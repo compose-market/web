@@ -4,9 +4,6 @@ import { fetchAgentByWalletAddress } from "@/hooks/use-onchain";
 const INSTALL_DOMAIN_NAME = "ComposeLocalInstall";
 const INSTALL_DOMAIN_VERSION = "1";
 const INSTALL_VERIFIER = "0x0000000000000000000000000000000000000000" as const;
-const WALLET_AUTH_DOMAIN_NAME = "ComposeWalletAuthorization";
-const WALLET_AUTH_DOMAIN_VERSION = "1";
-const WALLET_AUTH_VERIFIER = "0x0000000000000000000000000000000000000000" as const;
 
 export interface SignedLocalInstallPayload {
   agentWallet: `0x${string}`;
@@ -24,21 +21,6 @@ export interface SignedLocalInstallEnvelope {
   signer: `0x${string}`;
 }
 
-export interface WalletAuthorizationPayload {
-  action: string;
-  userAddress: `0x${string}`;
-  chainId: number;
-  deviceId?: string;
-  issuedAt: number;
-  expiresAt: number;
-  nonce: string;
-}
-
-export interface WalletAuthorizationEnvelope {
-  payload: WalletAuthorizationPayload;
-  signature: `0x${string}`;
-}
-
 const INSTALL_TYPES = {
   LocalInstall: [
     { name: "agentWallet", type: "address" },
@@ -48,18 +30,6 @@ const INSTALL_TYPES = {
     { name: "expiresAt", type: "uint256" },
     { name: "nonce", type: "string" },
     { name: "composeKey", type: "string" },
-  ],
-} as const;
-
-const WALLET_AUTH_TYPES = {
-  WalletAuthorization: [
-    { name: "action", type: "string" },
-    { name: "userAddress", type: "address" },
-    { name: "chainId", type: "uint256" },
-    { name: "deviceId", type: "string" },
-    { name: "issuedAt", type: "uint256" },
-    { name: "expiresAt", type: "uint256" },
-    { name: "nonce", type: "string" },
   ],
 } as const;
 
@@ -81,10 +51,6 @@ export async function resolveAgentCardCid(agentWallet: string): Promise<string> 
 
 function toBase64Url(value: string): string {
   return btoa(value).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
-
-export function encodeWalletAuthorizationHeader(envelope: WalletAuthorizationEnvelope): string {
-  return toBase64Url(JSON.stringify(envelope));
 }
 
 export async function createSignedLocalInstallEnvelope(input: {
@@ -149,51 +115,5 @@ export async function createSignedLocalInstallDeepLink(input: {
   return {
     deepLinkUrl: `manowar://open?install=${encodeURIComponent(encoded)}`,
     envelope,
-  };
-}
-
-export async function createWalletAuthorizationEnvelope(input: {
-  account: Account;
-  userAddress: `0x${string}`;
-  action: string;
-  chainId: number;
-  deviceId?: string;
-  ttlMs?: number;
-}): Promise<WalletAuthorizationEnvelope> {
-  const issuedAt = Date.now();
-  const expiresAt = issuedAt + Math.max(30_000, Math.min(input.ttlMs ?? 2 * 60_000, 10 * 60_000));
-  const payload: WalletAuthorizationPayload = {
-    action: input.action,
-    userAddress: input.userAddress,
-    chainId: input.chainId,
-    deviceId: input.deviceId,
-    issuedAt,
-    expiresAt,
-    nonce: crypto.randomUUID(),
-  };
-
-  const signature = await input.account.signTypedData({
-    domain: {
-      name: WALLET_AUTH_DOMAIN_NAME,
-      version: WALLET_AUTH_DOMAIN_VERSION,
-      chainId: input.chainId,
-      verifyingContract: WALLET_AUTH_VERIFIER,
-    },
-    types: WALLET_AUTH_TYPES,
-    primaryType: "WalletAuthorization",
-    message: {
-      action: payload.action,
-      userAddress: payload.userAddress,
-      chainId: BigInt(payload.chainId),
-      deviceId: payload.deviceId || "",
-      issuedAt: BigInt(payload.issuedAt),
-      expiresAt: BigInt(payload.expiresAt),
-      nonce: payload.nonce,
-    },
-  });
-
-  return {
-    payload,
-    signature: signature as `0x${string}`,
   };
 }

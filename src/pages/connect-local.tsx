@@ -8,16 +8,12 @@ import { AlertTriangle, Check, Monitor, Loader2, Shield, X, Download } from "luc
 import { API_BASE_URL } from "@/lib/api";
 import {
   createSignedLocalInstallDeepLink,
-  createWalletAuthorizationEnvelope,
-  encodeWalletAuthorizationHeader,
   resolveAgentCardCid,
 } from "@/lib/local-install";
 import { useChain } from "@/contexts/ChainContext";
 
 const WEB_APP_URL = "https://compose.market";
 const FALLBACK_INSTALL_PATH = "/install-local";
-const WALLET_AUTH_ACTION_LOCAL_LINK = "local-link-create";
-
 interface LocalLinkTokenResponse {
   success: boolean;
   token: string;
@@ -130,23 +126,12 @@ export default function ConnectLocalPage() {
         return;
       }
 
-      if (!account) {
-        throw new Error("Wallet signer unavailable for local authorization");
-      }
-      const walletAuthorization = await createWalletAuthorizationEnvelope({
-        account,
-        userAddress: address.toLowerCase() as `0x${string}`,
-        action: WALLET_AUTH_ACTION_LOCAL_LINK,
-        chainId: paymentChainId,
-        deviceId: mode === "local-first" ? deviceId || undefined : undefined,
-      });
       const response = await fetch(`${API_BASE_URL}/api/local/link-token`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "x-session-user-address": address,
           "x-chain-id": String(paymentChainId),
-          "x-wallet-authorization": encodeWalletAuthorizationHeader(walletAuthorization),
         },
         body: JSON.stringify({
           deviceId: mode === "local-first" ? deviceId : undefined,
