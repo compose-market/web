@@ -474,7 +474,7 @@ export function PluginTester({
 
             const headers: Record<string, string> = { "Content-Type": "application/json" };
 
-            const response = await fetchWithPayment(`${API_BASE}/api/mcp/servers/${encodeURIComponent(selectedMcpServer)}/call`, {
+            const response = await fetchWithPayment(`${CONNECTOR_URL}/mcp/servers/${encodeURIComponent(selectedMcpServer)}/call`, {
                 method: "POST",
                 headers,
                 body: JSON.stringify({ tool: selectedTool, args }),
