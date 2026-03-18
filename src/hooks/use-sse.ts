@@ -23,7 +23,7 @@ export interface SessionExpiredEvent {
     timestamp: number;
 }
 
-export function useWs(userAddress: string | undefined, chainId: number) {
+export function useWs(userAddress: string | undefined, chainId: number, composeKeyToken?: string | null) {
     const sourceRef = useRef<EventSource | null>(null);
     const reconnectRef = useRef<NodeJS.Timeout | null>(null);
     const { toast } = useToast();
@@ -40,11 +40,12 @@ export function useWs(userAddress: string | undefined, chainId: number) {
     }, []);
 
     const connect = useCallback(() => {
-        if (!userAddress || sourceRef.current) return;
+        if (!userAddress || !composeKeyToken || sourceRef.current) return;
 
         const params = new URLSearchParams({
             userAddress,
             chainId: String(chainId),
+            token: composeKeyToken,
         });
         const source = new EventSource(`${SESSION_EVENTS_URL}?${params.toString()}`);
         sourceRef.current = source;
@@ -103,13 +104,13 @@ export function useWs(userAddress: string | undefined, chainId: number) {
                 }, RECONNECT_MS);
             }
         };
-    }, [userAddress, chainId, toast, disconnect]);
+    }, [userAddress, chainId, composeKeyToken, toast, disconnect]);
 
     useEffect(() => {
-        if (!userAddress) return;
+        if (!userAddress || !composeKeyToken) return;
         connect();
         return () => disconnect();
-    }, [userAddress, connect, disconnect]);
+    }, [userAddress, composeKeyToken, connect, disconnect]);
 
     return { connect, disconnect };
 }

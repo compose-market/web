@@ -548,7 +548,9 @@ export function parseJsonResponse(data: unknown): MultimodalResult {
     if (typeof rawContent === "string") {
       content = rawContent;
     } else if (Array.isArray(rawContent)) {
-      content = rawContent.map(p => p.text || "").join("");
+      content = rawContent
+        .map((part) => ("text" in part ? part.text : ""))
+        .join("");
     } else {
       content = "";
     }

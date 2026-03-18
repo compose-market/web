@@ -190,7 +190,7 @@ export function SessionIndicator() {
 
 function SessionManageDialog({ open, onOpenChange }: SessionManageDialogProps) {
   const { account } = useWalletAccount();
-  const { session } = useSession();
+  const { session, ensureComposeKeyToken } = useSession();
   const [sessions, setSessions] = useState<ComposeKeyRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -203,9 +203,15 @@ function SessionManageDialog({ open, onOpenChange }: SessionManageDialogProps) {
 
     setLoading(true);
     try {
+      const composeKeyToken = await ensureComposeKeyToken();
+      if (!composeKeyToken) {
+        throw new Error("Compose Key token unavailable");
+      }
       const response = await fetch(`${API_BASE_URL}/api/keys`, {
         headers: {
+          Authorization: `Bearer ${composeKeyToken}`,
           "x-session-user-address": account.address,
+          "x-chain-id": String(session.chainId || 0),
         },
       });
 
@@ -223,7 +229,7 @@ function SessionManageDialog({ open, onOpenChange }: SessionManageDialogProps) {
     } finally {
       setLoading(false);
     }
-  }, [account?.address]);
+  }, [account?.address, ensureComposeKeyToken, session.chainId]);
 
   useEffect(() => {
     if (open) {
@@ -237,10 +243,16 @@ function SessionManageDialog({ open, onOpenChange }: SessionManageDialogProps) {
     }
 
     try {
+      const composeKeyToken = await ensureComposeKeyToken();
+      if (!composeKeyToken) {
+        throw new Error("Compose Key token unavailable");
+      }
       const response = await fetch(`${API_BASE_URL}/api/keys/${keyId}`, {
         method: "DELETE",
         headers: {
+          Authorization: `Bearer ${composeKeyToken}`,
           "x-session-user-address": account.address,
+          "x-chain-id": String(session.chainId || 0),
         },
       });
 
@@ -331,7 +343,7 @@ function SessionManageDialog({ open, onOpenChange }: SessionManageDialogProps) {
 }
 
 function ComposeKeyDialog({ open, onOpenChange }: ComposeKeyDialogProps) {
-  const { session } = useSession();
+  const { session, ensureComposeKeyToken } = useSession();
   const { account } = useWalletAccount();
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
@@ -345,13 +357,17 @@ function ComposeKeyDialog({ open, onOpenChange }: ComposeKeyDialogProps) {
 
     setIsGenerating(true);
     try {
+      const composeKeyToken = await ensureComposeKeyToken();
+      if (!composeKeyToken) {
+        throw new Error("Compose Key token unavailable");
+      }
       const response = await fetch(`${API_BASE_URL}/api/keys`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${composeKeyToken}`,
           "x-session-user-address": account.address,
-          "x-session-active": "true",
-          "x-session-budget-remaining": String(session.budgetRemaining),
+          "x-chain-id": String(session.chainId || 0),
         },
         body: JSON.stringify({
           budgetLimit: session.budgetRemaining,

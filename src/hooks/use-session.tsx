@@ -27,12 +27,20 @@ import {
 import { useChain } from "@/contexts/ChainContext";
 import { SESSION_BUDGET_EVENT, SESSION_INVALID_EVENT } from "@/lib/payment";
 import { submitCronosTransaction, encodeContractCall } from "@/lib/cronos/aa";
+import {
+    createWalletAuthorizationEnvelope,
+    encodeWalletAuthorizationHeader,
+} from "@/lib/local-install";
 import { useWs } from "./use-sse";
 import type { Address } from "viem";
 
 // API endpoint for Compose Keys
 const API_BASE = (import.meta.env.VITE_API_URL || "https://api.compose.market").replace(/\/+$/, "");
 const SESSION_STORAGE_PREFIX = "compose_session";
+const WALLET_AUTH_ACTION = {
+    sessionCreate: "compose-session-create",
+    sessionRead: "compose-session-read",
+} as const;
 
 type SessionSyncReason = "startup" | "token" | "manual" | "invalid" | "poll";
 
@@ -222,7 +230,25 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const [error, setError] = useState<string | null>(null);
     const posthog = usePostHog();
 
-    useWs(session.isActive ? account?.address : undefined, session.chainId ?? paymentChainId);
+    const buildWalletAuthorizationHeader = useCallback(async (
+        action: typeof WALLET_AUTH_ACTION[keyof typeof WALLET_AUTH_ACTION],
+        chainId: number,
+    ): Promise<string> => {
+        if (!account?.address) {
+            throw new Error("Wallet account is required");
+        }
+
+        const envelope = await createWalletAuthorizationEnvelope({
+            account,
+            userAddress: account.address.toLowerCase() as `0x${string}`,
+            action,
+            chainId,
+        });
+
+        return encodeWalletAuthorizationHeader(envelope);
+    }, [account]);
+
+    useWs(session.isActive ? account?.address : undefined, session.chainId ?? paymentChainId, session.composeKeyToken);
 
     // Identify user when wallet connects
     useEffect(() => {
@@ -258,11 +284,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             const clearOnMissing = options?.clearOnMissing ?? reason !== "token";
 
             try {
+                const headers: Record<string, string> = {
+                    "x-session-user-address": account.address,
+                    "x-chain-id": targetChainId.toString(),
+                };
+                if (session.composeKeyToken) {
+                    headers.Authorization = `Bearer ${session.composeKeyToken}`;
+                } else {
+                    headers["x-wallet-authorization"] = await buildWalletAuthorizationHeader(
+                        WALLET_AUTH_ACTION.sessionRead,
+                        targetChainId,
+                    );
+                }
+
                 const response = await fetch(`${API_BASE}/api/session`, {
-                    headers: {
-                        "x-session-user-address": account.address,
-                        "x-chain-id": targetChainId.toString(),
-                    },
+                    headers,
                 });
 
                 if (!response.ok) {
@@ -290,7 +326,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 return null;
             }
         },
-        [account?.address, paymentChainId, clearSessionState, session.chainId]
+        [account, buildWalletAuthorizationHeader, clearSessionState, paymentChainId, session.chainId, session.composeKeyToken]
     );
 
     // Load local session immediately, then reconcile with backend.
@@ -583,12 +619,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
                     // Register session with backend to create Compose Key for on-chain settlement
                     console.log("[Session] Creating Compose Key for on-chain settlement...");
+                    const walletAuthorization = await buildWalletAuthorizationHeader(
+                        WALLET_AUTH_ACTION.sessionCreate,
+                        paymentChainId,
+                    );
                     const keysResponse = await fetch(`${API_BASE}/api/keys`, {
                         method: "POST",
                         headers: {
                             "Content-Type": "application/json",
                             "x-session-user-address": account.address,
-                            "x-session-active": "true",
+                            "x-chain-id": String(paymentChainId),
+                            "x-wallet-authorization": walletAuthorization,
                         },
                         body: JSON.stringify({
                             budgetLimit: budgetWei,
@@ -670,12 +711,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                     // Register session with backend to create Compose Key for session bypass
                     // This enables <100ms latency by skipping x402 payment flow
                     console.log("[Session] Creating Compose Key for session bypass...");
+                    const walletAuthorization = await buildWalletAuthorizationHeader(
+                        WALLET_AUTH_ACTION.sessionCreate,
+                        paymentChainId,
+                    );
                     const keysResponse = await fetch(`${API_BASE}/api/keys`, {
                         method: "POST",
                         headers: {
                             "Content-Type": "application/json",
                             "x-session-user-address": account.address,
-                            "x-session-active": "true",
+                            "x-chain-id": String(paymentChainId),
+                            "x-wallet-authorization": walletAuthorization,
                         },
                         body: JSON.stringify({
                             budgetLimit: budgetWei,
@@ -734,7 +780,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 setIsCreating(false);
             }
         },
-        [account, paymentChainId, adminWallet, posthog]
+        [account, adminWallet, buildWalletAuthorizationHeader, paymentChainId, posthog]
     );
 
     /**
