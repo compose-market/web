@@ -86,18 +86,18 @@ export default function Market() {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="bg-sidebar-accent border border-sidebar-border p-1 mb-4 sm:mb-6 lg:mb-8 w-full sm:w-auto">
           <TabsTrigger
-            value="workflows"
-            className="flex-1 sm:flex-none data-[state=active]:bg-cyan-500 data-[state=active]:text-black font-bold font-mono tracking-wide px-2 sm:px-6 lg:px-8 text-[10px] sm:text-sm min-w-0"
-          >
-            <Layers className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2 shrink-0" />
-            <span className="truncate">WORKFLOWS</span>
-          </TabsTrigger>
-          <TabsTrigger
             value="agents"
             className="flex-1 sm:flex-none data-[state=active]:bg-cyan-500 data-[state=active]:text-black font-bold font-mono tracking-wide px-2 sm:px-6 lg:px-8 text-[10px] sm:text-sm min-w-0"
           >
             <Bot className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2 shrink-0" />
             <span className="truncate">AGENTS</span>
+          </TabsTrigger>
+          <TabsTrigger
+            value="workflows"
+            className="flex-1 sm:flex-none data-[state=active]:bg-cyan-500 data-[state=active]:text-black font-bold font-mono tracking-wide px-2 sm:px-6 lg:px-8 text-[10px] sm:text-sm min-w-0"
+          >
+            <Layers className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2 shrink-0" />
+            <span className="truncate">WORKFLOWS</span>
           </TabsTrigger>
           <TabsTrigger
             value="rfas"
@@ -108,12 +108,12 @@ export default function Market() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="workflows" className="mt-0">
-          <WorkflowsTab searchQuery={deferredQuery} />
-        </TabsContent>
-
         <TabsContent value="agents" className="mt-0">
           <AgentsTab searchQuery={deferredQuery} />
+        </TabsContent>
+
+        <TabsContent value="workflows" className="mt-0">
+          <WorkflowsTab searchQuery={deferredQuery} />
         </TabsContent>
 
         <TabsContent value="rfas" className="mt-0">
