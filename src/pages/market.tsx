@@ -59,15 +59,15 @@ export default function Market() {
   return (
     <div className="space-y-4 sm:space-y-6 lg:space-y-8">
       {/* Page Header */}
-      <div className="flex flex-col gap-1 sm:gap-2 border-b border-sidebar-border pb-4 sm:pb-6">
-        <div className="flex items-center gap-4">
-          <h1 className="text-xl sm:text-2xl font-display font-bold text-white">
+      <div className="cm-page-header">
+        <div className="cm-page-header__title-row">
+          <h1 className="cm-page-header__title">
             <span className="text-fuchsia-500 mr-2">//</span>
             MARKET
           </h1>
-          <div className="hidden md:flex h-px w-32 bg-gradient-to-r from-fuchsia-500 to-transparent"></div>
+          <div className="cm-page-header__rule hidden md:block"></div>
         </div>
-        <p className="text-muted-foreground font-mono text-xs sm:text-sm">
+        <p className="cm-page-header__subtitle">
           Discover workflows and RFA bounties on the Manowar protocol.
         </p>
       </div>
@@ -172,8 +172,8 @@ function WorkflowsTab({ searchQuery }: { searchQuery: string }) {
   return (
     <div className="space-y-4">
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
+      <div className="cm-filter-bar">
+        <div className="cm-filter-bar__actions">
           <Select value={sort} onValueChange={(v) => setSort(v as typeof sort)}>
             <SelectTrigger className="w-full sm:w-[160px] bg-background/50 border-sidebar-border h-9 text-sm">
               <SelectValue placeholder="Sort by" />
@@ -185,7 +185,7 @@ function WorkflowsTab({ searchQuery }: { searchQuery: string }) {
             </SelectContent>
           </Select>
         </div>
-        <div className="flex items-center justify-between sm:justify-end gap-2">
+        <div className="cm-filter-bar__actions">
           {workflows && (
             <Badge variant="outline" className="font-mono text-[10px] sm:text-xs">
               {filteredWorkflows.length} workflows
@@ -204,7 +204,7 @@ function WorkflowsTab({ searchQuery }: { searchQuery: string }) {
 
       {/* Loading State */}
       {isLoading && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+        <div className="cm-card-grid">
           {[...Array(6)].map((_, i) => (
             <Card key={i} className="glass-panel">
               <CardHeader className="pb-2">
@@ -237,7 +237,7 @@ function WorkflowsTab({ searchQuery }: { searchQuery: string }) {
 
       {/* Workflows Grid */}
       {!isLoading && filteredWorkflows.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+        <div className="cm-card-grid">
           {filteredWorkflows.map((workflow) => (
             <WorkflowCard key={workflow.id} workflow={workflow} />
           ))}
@@ -246,9 +246,9 @@ function WorkflowsTab({ searchQuery }: { searchQuery: string }) {
 
       {/* Empty State */}
       {filteredWorkflows.length === 0 && !isLoading && (
-        <div className="text-center py-12 sm:py-20">
-          <Layers className="w-10 h-10 sm:w-12 sm:h-12 mx-auto text-muted-foreground/30 mb-4" />
-          <p className="text-muted-foreground text-sm sm:text-base">
+        <div className="cm-empty-state-inline">
+          <Layers className="cm-empty-state-inline__icon" />
+          <p className="cm-empty-state-inline__text">
             {searchQuery ? "No workflows match your search" : "No workflows available yet"}
           </p>
           <Link href="/compose">
@@ -738,7 +738,7 @@ function AgentsTab({ searchQuery }: { searchQuery: string }) {
 
       {/* Loading State */}
       {isLoading && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+        <div className="cm-card-grid">
           {[...Array(6)].map((_, i) => (
             <Card key={i} className="glass-panel">
               <CardHeader className="pb-2">
@@ -771,7 +771,7 @@ function AgentsTab({ searchQuery }: { searchQuery: string }) {
 
       {/* Agents Grid */}
       {!isLoading && filteredAgents.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+        <div className="cm-card-grid">
           {filteredAgents.map((agent) => (
             <AgentCard key={agent.id} agent={agent} />
           ))}

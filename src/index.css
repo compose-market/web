@@ -129,89 +129,15 @@
     color: transparent;
   }
 
-  /* Infinite Marquee for Partner Logos */
-  @keyframes marquee-scroll {
-    0% {
-      transform: translateX(0);
-    }
-
-    100% {
-      transform: translateX(-50%);
-    }
-  }
-
-  @keyframes marquee-scroll-reverse {
-    0% {
-      transform: translateX(-50%);
-    }
-
-    100% {
-      transform: translateX(0);
-    }
-  }
-
-  .marquee-track {
-    animation: marquee-scroll linear infinite;
-    will-change: transform;
-  }
-
-  .marquee-track-reverse {
-    animation: marquee-scroll-reverse linear infinite;
-    will-change: transform;
-  }
-
-  /* Safe Area Utilities */
-  .safe-area-top {
-    padding-top: env(safe-area-inset-top);
-  }
-
-  .safe-area-bottom {
-    padding-bottom: env(safe-area-inset-bottom);
-  }
-
-  .safe-area-left {
-    padding-left: env(safe-area-inset-left);
-  }
-
-  .safe-area-right {
-    padding-right: env(safe-area-inset-right);
-  }
-
-  .safe-area-x {
-    padding-left: env(safe-area-inset-left);
-    padding-right: env(safe-area-inset-right);
-  }
-
-  .safe-area-y {
-    padding-top: env(safe-area-inset-top);
-    padding-bottom: env(safe-area-inset-bottom);
-  }
-
-  /* Touch-friendly utilities */
-  .touch-manipulation {
-    touch-action: manipulation;
-  }
-
-  .no-select {
-    -webkit-user-select: none;
-    user-select: none;
-  }
-
-  /* Hide scrollbar but keep functionality */
-  .scrollbar-hide {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
-
-  .scrollbar-hide::-webkit-scrollbar {
-    display: none;
-  }
-
-  /* Mobile-friendly text truncation */
-  .text-truncate-mobile {
-    @apply truncate;
-    max-width: 100%;
-  }
+  /*
+   * Shared utilities (marquee, safe-area, touch, scrollbar-hide, text-truncate)
+   * are now provided by @compose-market/theme/css (utilities module).
+   * The cm-* prefixed classes are available globally via the theme import.
+   *
+   * Legacy class aliases for backward compatibility with existing Tailwind usage:
+   */
+  .marquee-track { animation: cm-marquee-scroll linear infinite; will-change: transform; }
+  .marquee-track-reverse { animation: cm-marquee-scroll-reverse linear infinite; will-change: transform; }
 
   /* xs breakpoint utility (for very small screens) */
   @media (min-width: 475px) {

@@ -5,12 +5,12 @@
  * Shows: identity, coordinator, agents (with fold pattern), stats, lease info, and endpoints.
  * 
  * Fold Pattern: Main Card → Agent List → Individual AgentCard
+ * 
+ * Styling: uses @compose-market/theme BEM classes (cm-workflow-card*).
  */
 import React, { useState } from "react";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -29,7 +29,6 @@ import {
     ExternalLink,
     DollarSign,
     Package,
-    Zap,
     Globe,
     Layers,
     Bot,
@@ -81,7 +80,6 @@ export function WorkflowCard({ workflow, onCopyEndpoint }: WorkflowCardProps) {
     const formatPrice = (price: string | number) => {
         const num = typeof price === "string" ? parseFloat(price) : price;
         if (isNaN(num)) return "0";
-        // Use max 4 decimals but trim trailing zeros
         return num.toFixed(4).replace(/\.?0+$/, "") || "0";
     };
 
@@ -106,7 +104,7 @@ export function WorkflowCard({ workflow, onCopyEndpoint }: WorkflowCardProps) {
         cloneable: agentCard.cloneable || false,
         isClone: false,
         parentAgentId: 0,
-        agentCardUri: "", // Not available in nested context
+        agentCardUri: "",
         metadata: agentCard,
         isWarped: false,
     });
@@ -147,9 +145,9 @@ export function WorkflowCard({ workflow, onCopyEndpoint }: WorkflowCardProps) {
         const onchainAgent = agentCardToOnchainAgent(selectedAgent, selectedAgentIndex!);
         return (
             <TooltipProvider>
-                <Card className="glass-panel border-fuchsia-500/30 h-full flex flex-col overflow-hidden">
+                <div className="cm-workflow-card">
                     {/* Back Header */}
-                    <div className="p-2 sm:p-3 border-b border-sidebar-border shrink-0">
+                    <div className="cm-workflow-card__fold-header">
                         <Button
                             variant="ghost"
                             size="sm"
@@ -160,11 +158,11 @@ export function WorkflowCard({ workflow, onCopyEndpoint }: WorkflowCardProps) {
                             <span className="text-xs">Back to Agents</span>
                         </Button>
                     </div>
-                    {/* Embedded AgentCard - same component as agent.tsx */}
-                    <div className="flex-1 min-h-0 overflow-y-auto">
+                    {/* Embedded AgentCard */}
+                    <div className="cm-workflow-card__fold-body">
                         <AgentCard agent={onchainAgent} />
                     </div>
-                </Card>
+                </div>
             </TooltipProvider>
         );
     }
@@ -175,9 +173,9 @@ export function WorkflowCard({ workflow, onCopyEndpoint }: WorkflowCardProps) {
     if (cardView === "agents") {
         return (
             <TooltipProvider>
-                <Card className="glass-panel border-fuchsia-500/30 h-full flex flex-col overflow-hidden">
+                <div className="cm-workflow-card">
                     {/* Back Header */}
-                    <div className="p-2 sm:p-3 border-b border-sidebar-border shrink-0 flex items-center justify-between">
+                    <div className="cm-workflow-card__fold-header">
                         <Button
                             variant="ghost"
                             size="sm"
@@ -187,16 +185,16 @@ export function WorkflowCard({ workflow, onCopyEndpoint }: WorkflowCardProps) {
                             <ArrowLeft className="w-3.5 h-3.5 mr-1" />
                             <span className="text-xs">Back</span>
                         </Button>
-                        <div className="flex items-center gap-1.5">
-                            <Bot className="w-4 h-4 text-cyan-400" />
-                            <span className="text-xs sm:text-sm text-muted-foreground font-medium">
+                        <div className="cm-workflow-card__agents-label">
+                            <Bot className="cm-workflow-card__agents-label-icon" />
+                            <span className="cm-workflow-card__agents-label-text">
                                 Agents ({agents.length})
                             </span>
                         </div>
                     </div>
 
                     {/* Agent List */}
-                    <ScrollArea className="flex-1 min-h-0">
+                    <ScrollArea className="cm-workflow-card__fold-body">
                         <div className="p-2 sm:p-3 space-y-2">
                             {agents.map((agent, idx) => {
                                 const avatarUrl = getAgentAvatarUrl(agent);
@@ -206,7 +204,7 @@ export function WorkflowCard({ workflow, onCopyEndpoint }: WorkflowCardProps) {
                                     <button
                                         key={idx}
                                         onClick={() => handleAgentClick(idx)}
-                                        className="w-full p-2 sm:p-3 bg-background/50 border border-sidebar-border rounded-lg hover:border-cyan-500/50 hover:bg-cyan-500/5 transition-all flex items-center gap-2 sm:gap-3 text-left group"
+                                        className="cm-workflow-card__agent-preview"
                                     >
                                         <Avatar className="w-8 h-8 sm:w-10 sm:h-10 shrink-0 border border-cyan-500/30">
                                             <AvatarImage src={avatarUrl || undefined} alt={agent.name} />
@@ -214,21 +212,21 @@ export function WorkflowCard({ workflow, onCopyEndpoint }: WorkflowCardProps) {
                                                 {initials}
                                             </AvatarFallback>
                                         </Avatar>
-                                        <div className="flex-1 min-w-0">
-                                            <p className="font-medium text-white text-xs sm:text-sm truncate group-hover:text-cyan-400 transition-colors">
+                                        <div className="cm-workflow-card__agent-preview-copy">
+                                            <p className="cm-workflow-card__agent-preview-name">
                                                 {agent.name || `Agent ${idx + 1}`}
                                             </p>
-                                            <p className="text-[10px] sm:text-xs text-muted-foreground truncate">
+                                            <p className="cm-workflow-card__agent-preview-model">
                                                 {agent.model || "Unknown model"}
                                             </p>
                                         </div>
-                                        <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-cyan-400 shrink-0" />
+                                        <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
                                     </button>
                                 );
                             })}
                         </div>
                     </ScrollArea>
-                </Card>
+                </div>
             </TooltipProvider>
         );
     }
@@ -238,25 +236,24 @@ export function WorkflowCard({ workflow, onCopyEndpoint }: WorkflowCardProps) {
     // =========================================================================
     return (
         <TooltipProvider>
-            <Card className="glass-panel border-fuchsia-500/30 h-full flex flex-col overflow-hidden">
-                {/* Banner - responsive height */}
-                {bannerUrl && (
+            <div className="cm-workflow-card cm-workflow-card--interactive">
+                {/* Banner */}
+                {bannerUrl ? (
                     <div
-                        className="h-20 md:h-24 bg-cover bg-center shrink-0"
+                        className="cm-workflow-card__banner"
                         style={{ backgroundImage: `url(${bannerUrl})` }}
                     />
-                )}
-                {!bannerUrl && (
-                    <div className="h-14 md:h-16 bg-gradient-to-br from-fuchsia-500/20 via-cyan-500/10 to-transparent shrink-0" />
+                ) : (
+                    <div className="cm-workflow-card__banner cm-workflow-card__banner--placeholder" />
                 )}
 
-                <CardContent className="p-3 sm:p-4 md:p-5 flex flex-col gap-3 md:gap-4 flex-1 overflow-y-auto">
+                <div className="cm-workflow-card__body">
                     {/* Header: Title + Actions */}
-                    <div className="flex items-start gap-2 sm:gap-3">
-                        <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5 sm:gap-2">
-                                <Layers className="w-4 h-4 sm:w-5 sm:h-5 text-fuchsia-400 shrink-0" />
-                                <h3 className="font-semibold text-white truncate text-sm md:text-base">
+                    <div className="cm-workflow-card__header">
+                        <div className="cm-workflow-card__header-copy">
+                            <div className="cm-workflow-card__title-row">
+                                <Layers className="cm-workflow-card__icon" />
+                                <h3 className="cm-workflow-card__title">
                                     {workflow.title || `Workflow #${workflow.id}`}
                                 </h3>
                                 <Tooltip>
@@ -271,14 +268,14 @@ export function WorkflowCard({ workflow, onCopyEndpoint }: WorkflowCardProps) {
                                     <TooltipContent>View on Explorer</TooltipContent>
                                 </Tooltip>
                             </div>
-                            <p className="text-muted-foreground text-xs md:text-sm line-clamp-2 mt-1">
+                            <p className="cm-workflow-card__description">
                                 {workflow.description || "No description available"}
                             </p>
                         </div>
                     </div>
 
                     {/* Badges */}
-                    <div className="flex flex-wrap gap-1 sm:gap-1.5">
+                    <div className="cm-workflow-card__badges">
                         {workflow.hasActiveRfa && (
                             <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30 text-[10px] sm:text-xs">
                                 <AlertTriangle className="w-2.5 h-2.5 sm:w-3 sm:h-3 mr-0.5 sm:mr-1" />
@@ -293,40 +290,40 @@ export function WorkflowCard({ workflow, onCopyEndpoint }: WorkflowCardProps) {
                         )}
                     </div>
 
-                    {/* Stats Row - responsive grid */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2 text-center">
+                    {/* Stats Row */}
+                    <div className="cm-workflow-card__stats">
                         <Tooltip>
                             <TooltipTrigger asChild>
-                                <div className="p-1.5 sm:p-2 bg-background/50 border border-sidebar-border rounded-lg cursor-default">
-                                    <DollarSign className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-green-400 mx-auto" />
-                                    <p className="font-mono text-xs sm:text-sm text-green-400 mt-0.5 sm:mt-1">${formatPrice(workflow.totalPrice)}</p>
+                                <div className="cm-workflow-card__stat">
+                                    <DollarSign className="cm-workflow-card__stat-icon" style={{ color: "hsl(var(--chart-2))" }} />
+                                    <p className="cm-workflow-card__stat-value" style={{ color: "hsl(var(--chart-2))" }}>${formatPrice(workflow.totalPrice)}</p>
                                 </div>
                             </TooltipTrigger>
                             <TooltipContent>Total Workflow Price</TooltipContent>
                         </Tooltip>
                         <Tooltip>
                             <TooltipTrigger asChild>
-                                <div className="p-1.5 sm:p-2 bg-background/50 border border-sidebar-border rounded-lg cursor-default">
-                                    <Package className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-400 mx-auto" />
-                                    <p className="font-mono text-xs sm:text-sm text-cyan-400 mt-0.5 sm:mt-1">{unitsDisplay}</p>
+                                <div className="cm-workflow-card__stat">
+                                    <Package className="cm-workflow-card__stat-icon" style={{ color: "hsl(var(--primary))" }} />
+                                    <p className="cm-workflow-card__stat-value" style={{ color: "hsl(var(--primary))" }}>{unitsDisplay}</p>
                                 </div>
                             </TooltipTrigger>
                             <TooltipContent>Available Units</TooltipContent>
                         </Tooltip>
                         <Tooltip>
                             <TooltipTrigger asChild>
-                                <div className="p-1.5 sm:p-2 bg-background/50 border border-sidebar-border rounded-lg cursor-default">
-                                    <Bot className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-fuchsia-400 mx-auto" />
-                                    <p className="font-mono text-xs sm:text-sm text-fuchsia-400 mt-0.5 sm:mt-1">{agents.length}</p>
+                                <div className="cm-workflow-card__stat">
+                                    <Bot className="cm-workflow-card__stat-icon" style={{ color: "hsl(var(--accent))" }} />
+                                    <p className="cm-workflow-card__stat-value" style={{ color: "hsl(var(--accent))" }}>{agents.length}</p>
                                 </div>
                             </TooltipTrigger>
                             <TooltipContent>Agents in Workflow</TooltipContent>
                         </Tooltip>
                         <Tooltip>
                             <TooltipTrigger asChild>
-                                <div className="p-1.5 sm:p-2 bg-background/50 border border-sidebar-border rounded-lg cursor-default">
-                                    <Globe className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-400 mx-auto" />
-                                    <p className="font-mono text-xs sm:text-sm text-cyan-400 mt-0.5 sm:mt-1">{chainAbbr}</p>
+                                <div className="cm-workflow-card__stat">
+                                    <Globe className="cm-workflow-card__stat-icon" style={{ color: "hsl(var(--primary))" }} />
+                                    <p className="cm-workflow-card__stat-value" style={{ color: "hsl(var(--primary))" }}>{chainAbbr}</p>
                                 </div>
                             </TooltipTrigger>
                             <TooltipContent>{chainInfo.name}</TooltipContent>
@@ -335,31 +332,31 @@ export function WorkflowCard({ workflow, onCopyEndpoint }: WorkflowCardProps) {
 
                     {/* Coordinator Model */}
                     {workflow.hasCoordinator && workflow.coordinatorModel && (
-                        <div className="flex items-center gap-2 sm:gap-3 p-2 sm:p-3 bg-background/50 border border-sidebar-border rounded-lg">
-                            <Cpu className="w-4 h-4 sm:w-5 sm:h-5 text-fuchsia-400 shrink-0" />
-                            <div className="min-w-0 flex-1">
-                                <span className="text-[10px] sm:text-xs text-muted-foreground uppercase block">Coordinator</span>
-                                <span className="font-mono text-xs sm:text-sm text-fuchsia-400 truncate block" title={workflow.coordinatorModel}>
+                        <div className="cm-workflow-card__coordinator">
+                            <Cpu className="cm-workflow-card__coordinator-icon" />
+                            <div className="cm-workflow-card__coordinator-copy">
+                                <span className="cm-workflow-card__coordinator-label">Coordinator</span>
+                                <span className="cm-workflow-card__coordinator-value" title={workflow.coordinatorModel}>
                                     {workflow.coordinatorModel}
                                 </span>
                             </div>
                         </div>
                     )}
 
-                    {/* Agents - Flexible container matching tools pattern */}
+                    {/* Agents fold section */}
                     {agents.length > 0 && (
-                        <div className="flex-1 min-h-0 p-2 sm:p-3 bg-background/50 border border-sidebar-border rounded-lg flex flex-col">
+                        <div className="cm-workflow-card__agents">
                             <button
                                 onClick={() => setCardView("agents")}
-                                className="flex items-center justify-between mb-1.5 sm:mb-2 shrink-0 hover:opacity-80 transition-opacity"
+                                className="cm-workflow-card__agents-header"
                             >
-                                <div className="flex items-center gap-1.5 sm:gap-2">
-                                    <Bot className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-400" />
-                                    <span className="text-[10px] sm:text-xs text-muted-foreground uppercase">Agents ({agents.length})</span>
+                                <div className="cm-workflow-card__agents-label">
+                                    <Bot className="cm-workflow-card__agents-label-icon" />
+                                    <span className="cm-workflow-card__agents-label-text">Agents ({agents.length})</span>
                                 </div>
-                                <ChevronRight className="w-4 h-4 text-muted-foreground hover:text-cyan-400 transition-colors" />
+                                <ChevronRight className="w-4 h-4 text-muted-foreground" />
                             </button>
-                            <div className="flex flex-wrap gap-1 sm:gap-1.5 content-start overflow-y-auto">
+                            <div className="cm-workflow-card__agents-badges">
                                 {agents.map((agent, idx) => (
                                     <Badge
                                         key={idx}
@@ -373,31 +370,31 @@ export function WorkflowCard({ workflow, onCopyEndpoint }: WorkflowCardProps) {
                         </div>
                     )}
 
-                    {/* Lease Info - if enabled */}
+                    {/* Lease Info */}
                     {workflow.leaseEnabled && (
-                        <div className="flex items-center gap-3 sm:gap-4 p-2 sm:p-3 bg-background/50 border border-sidebar-border rounded-lg text-xs sm:text-sm">
-                            <div className="flex items-center gap-1.5 sm:gap-2">
+                        <div className="cm-workflow-card__lease">
+                            <div className="cm-workflow-card__lease-item">
                                 <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-400" />
-                                <span className="text-muted-foreground">Duration:</span>
-                                <span className="font-mono text-cyan-400">{workflow.leaseDuration} days</span>
+                                <span className="cm-workflow-card__lease-label">Duration:</span>
+                                <span className="cm-workflow-card__lease-value text-cyan-400">{workflow.leaseDuration} days</span>
                             </div>
-                            <div className="flex items-center gap-1.5 sm:gap-2">
+                            <div className="cm-workflow-card__lease-item">
                                 <Percent className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-green-400" />
-                                <span className="text-muted-foreground">Creator:</span>
-                                <span className="font-mono text-green-400">{workflow.leasePercent}%</span>
+                                <span className="cm-workflow-card__lease-label">Creator:</span>
+                                <span className="cm-workflow-card__lease-value text-green-400">{workflow.leasePercent}%</span>
                             </div>
                         </div>
                     )}
 
-                    {/* API Endpoint - Backend proxies to Pinata */}
+                    {/* API Endpoint */}
                     {apiEndpoint && (
-                        <div className="pt-2 sm:pt-3 border-t border-sidebar-border mt-auto shrink-0">
-                            <div className="flex items-center gap-1.5 sm:gap-2 mb-1.5 sm:mb-2">
-                                <Globe className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-fuchsia-400" />
-                                <span className="text-[10px] sm:text-xs text-muted-foreground uppercase">A2A Endpoint</span>
+                        <div className="cm-workflow-card__endpoint-section">
+                            <div className="cm-workflow-card__endpoint-header">
+                                <Globe className="cm-workflow-card__endpoint-header-icon" />
+                                <span className="cm-workflow-card__endpoint-label">A2A Endpoint</span>
                             </div>
-                            <div className="flex items-center gap-1.5 sm:gap-2 p-1.5 sm:p-2 bg-background border border-sidebar-border rounded-lg font-mono text-[10px] sm:text-xs">
-                                <code className="flex-1 truncate text-fuchsia-400">{apiEndpoint}</code>
+                            <div className="cm-workflow-card__endpoint-row">
+                                <code className="cm-workflow-card__endpoint-code">{apiEndpoint}</code>
                                 <Tooltip>
                                     <TooltipTrigger asChild>
                                         <Button
@@ -413,46 +410,46 @@ export function WorkflowCard({ workflow, onCopyEndpoint }: WorkflowCardProps) {
                                 </Tooltip>
                             </div>
                             {/* Creator */}
-                            <div className="flex items-center gap-1.5 sm:gap-2 mt-2 sm:mt-3 text-[10px] sm:text-xs text-muted-foreground">
+                            <div className="cm-workflow-card__creator">
                                 <span>Creator:</span>
                                 <a
                                     href={`${CHAIN_CONFIG[workflowChainId].explorer}/address/${workflow.creator}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="text-fuchsia-400 hover:underline font-mono"
+                                    className="cm-workflow-card__creator-value"
                                 >
                                     {`${workflow.creator.slice(0, 6)}...${workflow.creator.slice(-4)}`}
                                 </a>
                             </div>
                         </div>
                     )}
-                </CardContent>
-            </Card>
+                </div>
+            </div>
         </TooltipProvider>
     );
 }
 
 export function WorkflowCardSkeleton() {
     return (
-        <Card className="glass-panel border-fuchsia-500/30 h-full">
-            <div className="h-16 bg-gradient-to-br from-fuchsia-500/20 via-cyan-500/10 to-transparent" />
-            <CardContent className="p-5 space-y-4">
-                <div className="flex items-start gap-3">
-                    <Skeleton className="w-5 h-5 rounded" />
-                    <div className="flex-1 space-y-2">
-                        <Skeleton className="h-5 w-32" />
-                        <Skeleton className="h-4 w-full" />
+        <div className="cm-workflow-card-skeleton">
+            <div className="cm-workflow-card-skeleton__banner" />
+            <div className="cm-workflow-card-skeleton__body">
+                <div className="cm-workflow-card-skeleton__row">
+                    <div className="cm-workflow-card-skeleton__block" style={{ width: 20, height: 20 }} />
+                    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
+                        <div className="cm-workflow-card-skeleton__block" style={{ width: "60%", height: 20 }} />
+                        <div className="cm-workflow-card-skeleton__block" style={{ width: "100%", height: 16 }} />
                     </div>
                 </div>
-                <div className="grid grid-cols-4 gap-2">
-                    <Skeleton className="h-14" />
-                    <Skeleton className="h-14" />
-                    <Skeleton className="h-14" />
-                    <Skeleton className="h-14" />
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+                    <div className="cm-workflow-card-skeleton__block" style={{ height: 56 }} />
+                    <div className="cm-workflow-card-skeleton__block" style={{ height: 56 }} />
+                    <div className="cm-workflow-card-skeleton__block" style={{ height: 56 }} />
+                    <div className="cm-workflow-card-skeleton__block" style={{ height: 56 }} />
                 </div>
-                <Skeleton className="h-14" />
-                <Skeleton className="h-20" />
-            </CardContent>
-        </Card>
+                <div className="cm-workflow-card-skeleton__block" style={{ height: 56 }} />
+                <div className="cm-workflow-card-skeleton__block" style={{ height: 80 }} />
+            </div>
+        </div>
     );
 }

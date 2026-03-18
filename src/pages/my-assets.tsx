@@ -82,12 +82,12 @@ export default function MyAssetsPage() {
   if (!account) {
     return (
       <div className="max-w-4xl mx-auto pb-20 px-1">
-        <div className="mb-6 sm:mb-8 space-y-3 sm:space-y-4 border-b border-sidebar-border pb-4 sm:pb-6">
-          <h1 className="text-xl sm:text-2xl font-display font-bold text-white">
+        <div className="cm-page-header">
+          <h1 className="cm-page-header__title">
             <span className="text-cyan-500 mr-2">//</span>
             MY ASSETS
           </h1>
-          <p className="text-muted-foreground font-mono text-xs sm:text-sm">
+          <p className="cm-page-header__subtitle">
             View and manage your on-chain agents and workflows.
           </p>
         </div>
@@ -117,11 +117,11 @@ export default function MyAssetsPage() {
       <div className="mb-6 sm:mb-8 space-y-3 sm:space-y-4 border-b border-sidebar-border pb-4 sm:pb-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h1 className="text-xl sm:text-2xl font-display font-bold text-white">
+            <h1 className="cm-page-header__title">
               <span className="text-cyan-500 mr-2">//</span>
               MY ASSETS
             </h1>
-            <p className="text-muted-foreground font-mono text-xs sm:text-sm mt-1">
+            <p className="cm-page-header__subtitle mt-1">
               Manage your on-chain Agents and Workflows.
             </p>
           </div>
@@ -196,7 +196,7 @@ export default function MyAssetsPage() {
         {/* Agents Tab */}
         <TabsContent value="agents" className="space-y-4">
           {isLoadingAgents && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+            <div className="cm-card-grid cm-card-grid--2col">
               {Array.from({ length: 4 }).map((_, i) => (
                 <Card key={i} className="bg-background border-sidebar-border">
                   <CardContent className="p-4 sm:p-5 space-y-3 sm:space-y-4">
@@ -215,7 +215,7 @@ export default function MyAssetsPage() {
           )}
 
           {!isLoadingAgents && agents && agents.length > 0 && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+            <div className="cm-card-grid cm-card-grid--2col">
               {agents.map((agent) => (
                 <AgentAssetCard key={agent.id} agent={agent} chainId={paymentChainId} />
               ))}
@@ -244,7 +244,7 @@ export default function MyAssetsPage() {
         {/* Workflows Tab */}
         <TabsContent value="workflows" className="space-y-4">
           {isLoadingWorkflows && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+            <div className="cm-card-grid cm-card-grid--2col">
               {Array.from({ length: 2 }).map((_, i) => (
                 <Card key={i} className="bg-background border-sidebar-border">
                   <CardContent className="p-4 sm:p-5 space-y-3 sm:space-y-4">
@@ -258,7 +258,7 @@ export default function MyAssetsPage() {
           )}
 
           {!isLoadingWorkflows && workflows && workflows.length > 0 && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+            <div className="cm-card-grid cm-card-grid--2col">
               {workflows.map((workflow) => (
                 <WorkflowAssetCard key={workflow.id} workflow={workflow} chainId={paymentChainId} />
               ))}
@@ -448,7 +448,7 @@ function AgentAssetCard({ agent, chainId }: { agent: OnchainAgent; chainId: numb
             )}
           </div>
 
-          <div className="grid grid-cols-3 gap-1.5 sm:gap-3 text-[10px] sm:text-xs font-mono">
+          <div className="cm-stat-grid cm-stat-grid--3col">
             <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
               <DollarSign className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-green-400" />
               <p className="text-foreground font-bold truncate">{agent.licensePriceFormatted}</p>
@@ -565,7 +565,7 @@ function WorkflowAssetCard({ workflow, chainId }: { workflow: OnchainWorkflow; c
             )}
           </div>
 
-          <div className="grid grid-cols-3 gap-1.5 sm:gap-3 text-[10px] sm:text-xs font-mono">
+          <div className="cm-stat-grid cm-stat-grid--3col">
             <div className="text-center p-1.5 sm:p-2 rounded-sm bg-sidebar-accent">
               <DollarSign className="w-3 h-3 sm:w-3.5 sm:h-3.5 mx-auto mb-0.5 sm:mb-1 text-green-400" />
               <p className="text-foreground font-bold truncate">${workflow.totalPrice}</p>
