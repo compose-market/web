@@ -21,8 +21,8 @@ import Registry from "@/pages/registry";
 import MyAssets from "@/pages/my-assets";
 import Playground from "@/pages/playground";
 import Workflow from "@/pages/workflow";
-import ConnectDesktop from "@/pages/connect-desktop";
-import InstallDesktop from "@/pages/install-desktop";
+import ConnectLocal from "@/pages/connect-local";
+import InstallLocal from "@/pages/install-local";
 
 function normalizeStandalonePathname(value: string): string {
   const withoutQuery = value.split("?")[0]?.split("#")[0] || "/";
@@ -33,9 +33,9 @@ function normalizeStandalonePathname(value: string): string {
 function isStandaloneAppRoute(pathname: string): boolean {
   const normalized = normalizeStandalonePathname(pathname);
   return (
-    normalized === "/connect-desktop"
-    || normalized.startsWith("/connect-desktop/")
-    || normalized === "/install-desktop"
+    normalized === "/connect-local"
+    || normalized.startsWith("/connect-local/")
+    || normalized === "/install-local"
   );
 }
 
@@ -45,9 +45,9 @@ function Router() {
   if (isStandaloneAppRoute(location)) {
     return (
       <Switch>
-        <Route path="/connect-desktop/:rest*" component={ConnectDesktop} />
-        <Route path="/connect-desktop" component={ConnectDesktop} />
-        <Route path="/install-desktop" component={InstallDesktop} />
+        <Route path="/connect-local/:rest*" component={ConnectLocal} />
+        <Route path="/connect-local" component={ConnectLocal} />
+        <Route path="/install-local" component={InstallLocal} />
       </Switch>
     );
   }

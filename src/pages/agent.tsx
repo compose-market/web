@@ -578,7 +578,7 @@ export default function AgentDetailPage() {
             variant="outline"
             className="h-7 px-2 text-xs border-cyan-500/40 text-cyan-300 hover:text-cyan-200"
           >
-            <Link href={`/connect-desktop?agent_wallet=${encodeURIComponent(agentWallet || "")}`}>
+            <Link href={`/connect-local?agent_wallet=${encodeURIComponent(agentWallet || "")}`}>
               <Download className="w-3 h-3 mr-1" />
               Install locally
             </Link>
