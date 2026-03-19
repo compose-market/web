@@ -7,6 +7,7 @@ import {
     ReactNode
 } from "react";
 import { usePostHog } from "@posthog/react";
+import { mpTrack, mpError } from "@/lib/mixpanel";
 import { useActiveAccount, useAdminWallet } from "thirdweb/react";
 import { getContract } from "thirdweb";
 import { addSessionKey, getAllActiveSigners } from "thirdweb/extensions/erc4337";
@@ -637,6 +638,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                         path: "cronos",
                     });
 
+                    mpTrack("Purchase", {
+                        revenue: budgetUSDC,
+                        currency: "USDC",
+                    });
+
                     return true;
                 } else {
                     // ===========================================================
@@ -726,6 +732,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                         path: "thirdweb",
                     });
 
+                    mpTrack("Purchase", {
+                        revenue: budgetUSDC,
+                        currency: "USDC",
+                    });
+
                     return true;
                 }
             } catch (err) {
@@ -735,6 +746,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                     chain_id: paymentChainId,
                     budget_usdc: budgetUSDC,
                 });
+                mpError("session_create", err instanceof Error ? err.message : String(err));
                 setError(err instanceof Error ? err.message : "Failed to create session");
                 return false;
             } finally {

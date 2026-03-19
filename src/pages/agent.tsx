@@ -9,6 +9,7 @@
  */
 import { useState, useCallback, useRef } from "react";
 import { usePostHog } from "@posthog/react";
+import { mpTrack, mpError } from "@/lib/mixpanel";
 import { useParams } from "wouter";
 import { Link } from "wouter";
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
@@ -171,6 +172,11 @@ export default function AgentDetailPage() {
       has_attachment: attachedFiles.length > 0,
       attachment_type: attachedFiles[0]?.type ?? null,
       chain_id: paymentChainId,
+    });
+
+    mpTrack("Launch AI");
+    mpTrack("AI Prompt Sent and Prompt Text", {
+      "Prompt Text": inputValue.trim().slice(0, 500),
     });
 
     // Create assistant placeholder
@@ -434,6 +440,7 @@ export default function AgentDetailPage() {
       }
 
       setChatError(errorMsg);
+      mpError("agent_chat", errorMsg, { agent_wallet: agentWallet });
       setMessages(prev =>
         prev.map(m => m.id === assistantId ? { ...m, content: `Error: ${errorMsg}` } : m)
       );

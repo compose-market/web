@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { useState, useMemo, useEffect } from "react";
 import { ChevronDown, LogOut, Copy, Check, ExternalLink, AlertTriangle } from "lucide-react";
 import { registerOnCronos } from "@/lib/cronos/aa";
+import { mpIdentify, mpReset } from "@/lib/mixpanel";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -65,6 +66,13 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
   const { paymentChainId } = useChain();
   const { formatted: totalBalance, isLoading: balanceLoading } = useTotalBalance(account?.address);
   const [copied, setCopied] = useState(false);
+
+  // Mixpanel identity — fires Sign Up (first time) or Sign In (returning)
+  useEffect(() => {
+    if (account?.address) {
+      mpIdentify(account.address);
+    }
+  }, [account?.address]);
 
   // Dynamically resolve the user's selected payment chain for display/contracts
   const selectedPaymentChain = useMemo(() => {
@@ -221,6 +229,7 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
   };
 
   const handleDisconnect = () => {
+    mpReset();
     wallet?.disconnect();
   };
 

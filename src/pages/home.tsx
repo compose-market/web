@@ -4,6 +4,7 @@ import { ArrowRight, Cpu, Hexagon, Layers, ShieldCheck, Zap } from "lucide-react
 import { GlitchText, WorkflowCube } from "@/components/brand/Logo";
 import { PartnershipSection } from "@/components/partners";
 import { usePostHog } from "@posthog/react";
+import { mpTrack } from "@/lib/mixpanel";
 
 export default function Home() {
   const posthog = usePostHog();
@@ -35,13 +36,13 @@ export default function Home() {
 
           <div className="relative z-10 flex flex-col sm:flex-row gap-3 sm:gap-4 w-full sm:w-auto px-4 sm:px-0">
             <Link href="/market" className="w-full sm:w-auto">
-              <Button size="lg" onClick={() => posthog?.capture("home_cta_clicked", { cta: "explore_market" })} className="w-full sm:w-auto h-11 sm:h-12 md:h-13 px-6 sm:px-8 text-sm sm:text-base font-bold font-mono tracking-wider bg-cyan-500 text-black hover:bg-cyan-400 transition-colors shadow-[0_0_20px_rgba(6,182,212,0.4)]">
+              <Button size="lg" onClick={() => { posthog?.capture("home_cta_clicked", { cta: "explore_market" }); mpTrack("Conversion Event", { "Conversion Type": "explore_market" }); }} className="w-full sm:w-auto h-11 sm:h-12 md:h-13 px-6 sm:px-8 text-sm sm:text-base font-bold font-mono tracking-wider bg-cyan-500 text-black hover:bg-cyan-400 transition-colors shadow-[0_0_20px_rgba(6,182,212,0.4)]">
                 EXPLORE MARKET
                 <ArrowRight className="ml-2 w-4 h-4" />
               </Button>
             </Link>
             <Link href="/compose" className="w-full sm:w-auto">
-              <Button size="lg" variant="outline" onClick={() => posthog?.capture("home_cta_clicked", { cta: "start_composing" })} className="w-full sm:w-auto h-11 sm:h-12 md:h-13 px-6 sm:px-8 text-sm sm:text-base font-bold font-mono tracking-wider border-sidebar-border text-foreground hover:border-fuchsia-500 hover:text-fuchsia-400 transition-colors">
+              <Button size="lg" variant="outline" onClick={() => { posthog?.capture("home_cta_clicked", { cta: "start_composing" }); mpTrack("Conversion Event", { "Conversion Type": "start_composing" }); }} className="w-full sm:w-auto h-11 sm:h-12 md:h-13 px-6 sm:px-8 text-sm sm:text-base font-bold font-mono tracking-wider border-sidebar-border text-foreground hover:border-fuchsia-500 hover:text-fuchsia-400 transition-colors">
                 START COMPOSING
               </Button>
             </Link>
@@ -154,7 +155,7 @@ export default function Home() {
               <p className="text-sm sm:text-base text-muted-foreground max-w-md">Join the symbiotic network. Deploy your agent or compose a new organism today.</p>
             </div>
             <Link href="/create-agent" className="w-full md:w-auto shrink-0">
-              <Button size="lg" onClick={() => posthog?.capture("home_cta_clicked", { cta: "mint_agent" })} className="w-full md:w-auto h-12 sm:h-14 lg:h-16 px-6 sm:px-8 lg:px-10 text-base sm:text-lg lg:text-xl font-display bg-fuchsia-500 text-white hover:bg-fuchsia-600 shadow-[0_0_25px_-5px_hsl(var(--accent))] border border-white/10">
+              <Button size="lg" onClick={() => { posthog?.capture("home_cta_clicked", { cta: "mint_agent" }); mpTrack("Conversion Event", { "Conversion Type": "mint_agent" }); }} className="w-full md:w-auto h-12 sm:h-14 lg:h-16 px-6 sm:px-8 lg:px-10 text-base sm:text-lg lg:text-xl font-display bg-fuchsia-500 text-white hover:bg-fuchsia-600 shadow-[0_0_25px_-5px_hsl(var(--accent))] border border-white/10">
                 MINT AGENT
                 <Cpu className="ml-2 sm:ml-3 w-5 h-5 sm:w-6 sm:h-6" />
               </Button>

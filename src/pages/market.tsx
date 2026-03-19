@@ -6,6 +6,7 @@
 import { useState, useDeferredValue } from "react";
 import * as React from "react";
 import { usePostHog } from "@posthog/react";
+import { mpTrack } from "@/lib/mixpanel";
 import { Link } from "wouter";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -78,7 +79,12 @@ export default function Market() {
         <Input
           placeholder="Search workflows and bounties..."
           value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          onChange={(e) => {
+            setSearchQuery(e.target.value);
+            if (e.target.value.trim()) {
+              mpTrack("Search", { "Search Query": e.target.value.trim() });
+            }
+          }}
           className="pl-10 bg-background/50 border-sidebar-border font-mono text-sm"
         />
       </div>
@@ -399,6 +405,11 @@ const WorkflowCard = React.memo(function WorkflowCard({ workflow }: { workflow: 
                 workflow_title: workflow.title,
                 total_price: workflow.totalPrice,
                 workflow_wallet: workflow.walletAddress,
+              });
+              mpTrack("Purchase", {
+                transaction_id: `market_${workflow.id}`,
+                revenue: Number(workflow.totalPrice) || 0,
+                currency: "USDC",
               });
               /* TODO: Purchase */
             }}

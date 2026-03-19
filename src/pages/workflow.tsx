@@ -9,6 +9,7 @@
  */
 import { useState, useCallback, useRef } from "react";
 import { usePostHog } from "@posthog/react";
+import { mpTrack, mpError } from "@/lib/mixpanel";
 import { useParams } from "wouter";
 import { Link } from "wouter";
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
@@ -152,6 +153,11 @@ export default function ManowarPage() {
             has_attachment: attachedFiles.length > 0,
             continuous: continuousEnabled,
             chain_id: paymentChainId,
+        });
+
+        mpTrack("Launch AI");
+        mpTrack("AI Prompt Sent and Prompt Text", {
+            "Prompt Text": inputValue.trim().slice(0, 500),
         });
 
         // Create assistant placeholder
@@ -412,6 +418,7 @@ export default function ManowarPage() {
             // Backend handles state via Temporal workflows (resumable via run state endpoint)
 
             setChatError(errorMsg);
+            mpError("workflow_execution", errorMsg, { workflow_wallet: workflowWallet });
             setMessages(prev =>
                 prev.map(m => m.id === assistantId ? { ...m, content: `Error: ${errorMsg}` } : m)
             );

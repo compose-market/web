@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { usePostHog } from "@posthog/react";
+import { mpTrack, mpError } from "@/lib/mixpanel";
 import { useForm, type SubmitHandler, type ControllerRenderProps } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -567,12 +568,22 @@ export default function CreateAgent() {
       tx_hash: result.transactionHash,
     });
 
+    mpTrack("Conversion Event", {
+      "Conversion Type": "agent_minted",
+    });
+    mpTrack("Purchase", {
+      transaction_id: result.transactionHash,
+      revenue: parseFloat(values.licensePrice),
+      currency: "USDC",
+    });
+
     setLocation("/my-assets");
   };
 
   const handleMintError = (error: Error) => {
     console.error("Mint error:", error);
     posthog?.captureException(error, { $exception_message: "agent_mint_failed" });
+    mpError("agent_mint", error.message);
     setMintStep("idle");
     toast({
       title: "Minting Failed",

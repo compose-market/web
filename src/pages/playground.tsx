@@ -10,6 +10,7 @@
  */
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { usePostHog } from "@posthog/react";
+import { mpTrack } from "@/lib/mixpanel";
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
 import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
@@ -305,6 +306,11 @@ export default function PlaygroundPage() {
       attachment_type: attachedFiles[0]?.type ?? null,
       output_type: outputType,
       chain_id: paymentChainId,
+    });
+
+    mpTrack("Launch AI");
+    mpTrack("AI Prompt Sent and Prompt Text", {
+      "Prompt Text": inputValue.trim().slice(0, 500),
     });
 
     setMessages((prev) => [...prev, userMessage]);

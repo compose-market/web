@@ -13,6 +13,7 @@
 
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import { usePostHog } from "@posthog/react";
+import { mpTrack, mpError } from "@/lib/mixpanel";
 import { useLocation } from "wouter";
 import {
   ReactFlow,
@@ -424,6 +425,13 @@ function MintWorkflowDialog({
           path: "cronos",
         });
 
+        mpTrack("Conversion Event", { "Conversion Type": "workflow_published" });
+        mpTrack("Purchase", {
+          transaction_id: result.txHash,
+          revenue: Number(totalAgentPriceFormatted),
+          currency: "USDC",
+        });
+
         onOpenChange(false);
         setLocation("/my-assets");
       } else {
@@ -474,6 +482,13 @@ function MintWorkflowDialog({
           path: "thirdweb",
         });
 
+        mpTrack("Conversion Event", { "Conversion Type": "workflow_published" });
+        mpTrack("Purchase", {
+          transaction_id: result.transactionHash,
+          revenue: Number(totalAgentPriceFormatted),
+          currency: "USDC",
+        });
+
         onOpenChange(false);
         setLocation("/my-assets");
       }
@@ -482,6 +497,7 @@ function MintWorkflowDialog({
         $exception_message: "workflow_publish_failed",
         chain_id: selectedChainId,
       });
+      mpError("workflow_publish", error instanceof Error ? error.message : String(error));
       toast({
         title: "Minting Failed",
         description: error instanceof Error ? error.message : "Unknown error",
