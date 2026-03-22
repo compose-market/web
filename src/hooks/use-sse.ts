@@ -23,7 +23,7 @@ export interface SessionExpiredEvent {
     timestamp: number;
 }
 
-export function useWs(userAddress: string | undefined, chainId: number, _composeKeyToken?: string | null) {
+export function useWs(userAddress: string | undefined, chainId: number) {
     const sourceRef = useRef<EventSource | null>(null);
     const reconnectRef = useRef<NodeJS.Timeout | null>(null);
     const { toast } = useToast();
@@ -49,16 +49,11 @@ export function useWs(userAddress: string | undefined, chainId: number, _compose
         const source = new EventSource(`${SESSION_EVENTS_URL}?${params.toString()}`);
         sourceRef.current = source;
 
-        source.onopen = () => {
-            console.log("[session-events] Connected");
-        };
-
         source.addEventListener("session-expired", (event: MessageEvent<string>) => {
             try {
                 const data = JSON.parse(event.data) as SessionExpiredEvent;
 
                 if (data.action === "session-expired") {
-                    console.log("[session-events] Session expired notification");
                     toast({
                         title: "Session Expired",
                         description: data.message || "Session expired, create a new session to use our services",
@@ -79,10 +74,10 @@ export function useWs(userAddress: string | undefined, chainId: number, _compose
                     userAddress: string;
                     chainId: number;
                     expiresAt?: number;
+                    budgetLimit?: number | string;
+                    budgetUsed?: number | string;
+                    budgetLocked?: number | string;
                     budgetRemaining?: number | string;
-                    sessionId?: string;
-                    duration?: number;
-                    timestamp?: number;
                 };
 
                 window.dispatchEvent(new CustomEvent("session-active", { detail: data }));

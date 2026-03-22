@@ -1,93 +1,81 @@
 import {
-    useState,
-    useCallback,
-    useEffect,
     createContext,
+    useCallback,
     useContext,
-    ReactNode
+    useEffect,
+    useRef,
+    useState,
+    type ReactNode,
 } from "react";
 import { usePostHog } from "@posthog/react";
-import { mpTrack, mpError } from "@/lib/mixpanel";
-import { useActiveAccount, useAdminWallet } from "thirdweb/react";
-import { getContract } from "thirdweb";
-import { addSessionKey, getAllActiveSigners } from "thirdweb/extensions/erc4337";
-import { approve, allowance, balanceOf } from "thirdweb/extensions/erc20";
-import { sendTransaction } from "thirdweb";
-import {
-    thirdwebClient,
-    paymentChain,
-    paymentToken,
-    TREASURY_WALLET,
-    SESSION_BUDGET_PRESETS,
-    inferencePriceWei,
-    CHAIN_OBJECTS,
-    USDC_ADDRESSES,
-    CHAIN_IDS,
-    isCronosChain,
-} from "@/lib/chains";
+import { useActiveAccount } from "thirdweb/react";
 import { useChain } from "@/contexts/ChainContext";
+import { mpError, mpTrack } from "@/lib/mixpanel";
+import {
+    CHAIN_OBJECTS,
+    SESSION_BUDGET_PRESETS,
+    TREASURY_WALLET,
+    USDC_ADDRESSES,
+    inferencePriceWei,
+    thirdwebClient,
+} from "@/lib/chains";
 import { SESSION_BUDGET_EVENT, SESSION_INVALID_EVENT } from "@/lib/payment";
-import { submitCronosTransaction, encodeContractCall } from "@/lib/cronos/aa";
 import { useWs } from "./use-sse";
-import type { Address } from "viem";
 
-// API endpoint for Compose Keys
 const API_BASE = (import.meta.env.VITE_API_URL || "https://api.compose.market").replace(/\/+$/, "");
 const SESSION_STORAGE_PREFIX = "compose_session";
 
-type SessionSyncReason = "startup" | "token" | "manual" | "invalid" | "poll";
+type SessionThirdwebDeps = {
+    getContract: typeof import("thirdweb").getContract;
+    sendTransaction: typeof import("thirdweb").sendTransaction;
+    allowance: typeof import("thirdweb/extensions/erc20").allowance;
+    approve: typeof import("thirdweb/extensions/erc20").approve;
+    balanceOf: typeof import("thirdweb/extensions/erc20").balanceOf;
+};
 
-function normalizeSessionUserAddress(userAddress: string): string {
-    return userAddress.trim().toLowerCase();
-}
+type NumericValue = number | string;
 
-function createScopedSessionStorageKey(userAddress: string, chainId: number): string {
-    return `${SESSION_STORAGE_PREFIX}:${normalizeSessionUserAddress(userAddress)}:${chainId}`;
-}
-
-function shouldBootstrapSessionFromBackend(
-    reason: SessionSyncReason,
-    hasStoredSession: boolean,
-): boolean {
-    if (reason === "startup") {
-        return hasStoredSession;
-    }
-
-    return true;
-}
+let sessionThirdwebDepsPromise: Promise<SessionThirdwebDeps> | null = null;
 
 export interface SessionState {
     isActive: boolean;
-    budgetLimit: number; // in USDC wei (6 decimals)
+    budgetLimit: number;
     budgetUsed: number;
+    budgetLocked: number;
     budgetRemaining: number;
     expiresAt: number | null;
-    sessionKeyAddress: string | null;
-    chainId: number | null; // Track which chain the session was created on
-    composeKeyToken: string | null; // JWT token for backend authentication (Compose Key)
+    chainId: number | null;
+    composeKeyToken: string | null;
 }
 
 interface StoredSession {
     budgetLimit: number;
     budgetUsed: number;
+    budgetLocked: number;
+    budgetRemaining: number;
     expiresAt: number;
-    sessionKeyAddress: string;
-    userAddress: string;
     chainId: number;
-    // NOTE: composeKeyToken only kept in memory 
-    // Then fetched fresh from backend on reload
+    userAddress: string;
 }
 
 interface ApiSessionResponse {
     hasSession: boolean;
-    keyId?: string;
     token?: string;
-    budgetLimit?: string | number;
-    budgetUsed?: string | number;
-    budgetLocked?: string | number;
-    budgetRemaining?: string | number;
+    budgetLimit?: NumericValue;
+    budgetUsed?: NumericValue;
+    budgetLocked?: NumericValue;
+    budgetRemaining?: NumericValue;
     expiresAt?: number;
-    chainId?: string | number;
+    chainId?: NumericValue;
+}
+
+interface SessionUpdate {
+    chainId?: number;
+    expiresAt?: number;
+    budgetLimit?: NumericValue;
+    budgetUsed?: NumericValue;
+    budgetLocked?: NumericValue;
+    budgetRemaining?: NumericValue;
 }
 
 interface SessionContextValue {
@@ -110,76 +98,21 @@ const defaultSession: SessionState = {
     isActive: false,
     budgetLimit: 0,
     budgetUsed: 0,
+    budgetLocked: 0,
     budgetRemaining: 0,
     expiresAt: null,
-    sessionKeyAddress: null,
     chainId: null,
     composeKeyToken: null,
 };
 
-// Create context with undefined default to enforce Provider usage
 const SessionContext = createContext<SessionContextValue | undefined>(undefined);
 
-/**
- * Load session from localStorage
- */
-function loadStoredSession(userAddress: string, expectedChainId: number): SessionState | null {
-    const storageKey = createScopedSessionStorageKey(userAddress, expectedChainId);
-    const stored = localStorage.getItem(storageKey);
-    if (!stored) return null;
-
-    try {
-        const data: StoredSession = JSON.parse(stored);
-
-        // Validate session belongs to current user, correct chain, and hasn't expired
-        if (
-            normalizeSessionUserAddress(data.userAddress) === normalizeSessionUserAddress(userAddress) &&
-            data.expiresAt > Date.now() &&
-            data.chainId === expectedChainId
-        ) {
-            return {
-                isActive: true,
-                budgetLimit: data.budgetLimit,
-                budgetUsed: data.budgetUsed,
-                budgetRemaining: data.budgetLimit - data.budgetUsed,
-                expiresAt: data.expiresAt,
-                sessionKeyAddress: data.sessionKeyAddress,
-                chainId: data.chainId,
-                composeKeyToken: null, // Token fetched separately from backend
-            };
-        }
-
-        // Session expired, different user, or different chain - clear it
-        localStorage.removeItem(storageKey);
-        return null;
-    } catch {
-        localStorage.removeItem(storageKey);
-        return null;
-    }
+function normalizeSessionUserAddress(userAddress: string): string {
+    return userAddress.trim().toLowerCase();
 }
 
-/**
- * Save session to localStorage
- */
-function saveSession(session: SessionState, userAddress: string): void {
-    if (!session.isActive || !session.chainId) {
-        return;
-    }
-
-    const data: StoredSession = {
-        budgetLimit: session.budgetLimit,
-        budgetUsed: session.budgetUsed,
-        expiresAt: session.expiresAt || 0,
-        sessionKeyAddress: session.sessionKeyAddress || "",
-        userAddress: normalizeSessionUserAddress(userAddress),
-        chainId: session.chainId || paymentChain.id,
-    };
-    localStorage.setItem(createScopedSessionStorageKey(userAddress, session.chainId), JSON.stringify(data));
-}
-
-function clearStoredSession(userAddress: string, chainId: number | null | undefined): void {
-    if (!chainId) return;
-    localStorage.removeItem(createScopedSessionStorageKey(userAddress, chainId));
+function createScopedSessionStorageKey(userAddress: string, chainId: number): string {
+    return `${SESSION_STORAGE_PREFIX}:${normalizeSessionUserAddress(userAddress)}:${chainId}`;
 }
 
 function parseSessionNumber(value: unknown, fieldName: string): number {
@@ -197,568 +130,557 @@ function parseSessionNumber(value: unknown, fieldName: string): number {
     throw new Error(`Invalid session field: ${fieldName}`);
 }
 
-function buildSessionStateFromApi(data: ApiSessionResponse, fallbackChainId: number): SessionState {
+function buildSessionState(input: {
+    budgetLimit: NumericValue;
+    budgetUsed: NumericValue;
+    budgetLocked?: NumericValue;
+    budgetRemaining: NumericValue;
+    expiresAt: number | null;
+    chainId: number;
+    composeKeyToken: string | null;
+}): SessionState {
+    const budgetLimit = parseSessionNumber(input.budgetLimit, "budgetLimit");
+    const budgetUsed = parseSessionNumber(input.budgetUsed, "budgetUsed");
+    const budgetLocked = parseSessionNumber(input.budgetLocked ?? 0, "budgetLocked");
+    const budgetRemaining = parseSessionNumber(input.budgetRemaining, "budgetRemaining");
+    const expiresAt = input.expiresAt;
+
     return {
-        isActive: true,
-        budgetLimit: parseSessionNumber(data.budgetLimit, "budgetLimit"),
-        budgetUsed: parseSessionNumber(data.budgetUsed, "budgetUsed"),
-        budgetRemaining: parseSessionNumber(data.budgetRemaining, "budgetRemaining"),
-        expiresAt: typeof data.expiresAt === "number" ? data.expiresAt : null,
-        sessionKeyAddress: TREASURY_WALLET,
-        chainId: data.chainId ? parseSessionNumber(data.chainId, "chainId") : fallbackChainId,
-        composeKeyToken: typeof data.token === "string" ? data.token : null,
+        isActive: (budgetRemaining > 0 || budgetLocked > 0) && (expiresAt === null || expiresAt > Date.now()),
+        budgetLimit,
+        budgetUsed,
+        budgetLocked,
+        budgetRemaining,
+        expiresAt,
+        chainId: input.chainId,
+        composeKeyToken: input.composeKeyToken,
     };
 }
 
-/**
- * Session Provider Component
- * Wraps the app and provides global session state
- */
+function buildSessionStateFromApi(
+    data: ApiSessionResponse,
+    fallbackChainId: number,
+    currentToken: string | null,
+): SessionState {
+    return buildSessionState({
+        budgetLimit: data.budgetLimit ?? 0,
+        budgetUsed: data.budgetUsed ?? 0,
+        budgetLocked: data.budgetLocked ?? 0,
+        budgetRemaining: data.budgetRemaining ?? 0,
+        expiresAt: typeof data.expiresAt === "number" ? data.expiresAt : null,
+        chainId: data.chainId ? parseSessionNumber(data.chainId, "chainId") : fallbackChainId,
+        composeKeyToken: typeof data.token === "string" ? data.token : currentToken,
+    });
+}
+
+function mergeSessionUpdate(previous: SessionState, update: SessionUpdate, fallbackChainId: number): SessionState {
+    return buildSessionState({
+        budgetLimit: update.budgetLimit ?? previous.budgetLimit,
+        budgetUsed: update.budgetUsed ?? previous.budgetUsed,
+        budgetLocked: update.budgetLocked ?? previous.budgetLocked,
+        budgetRemaining: update.budgetRemaining ?? previous.budgetRemaining,
+        expiresAt: typeof update.expiresAt === "number" ? update.expiresAt : previous.expiresAt,
+        chainId: typeof update.chainId === "number" ? update.chainId : previous.chainId ?? fallbackChainId,
+        composeKeyToken: previous.composeKeyToken,
+    });
+}
+
+function loadStoredSession(userAddress: string, chainId: number): SessionState | null {
+    const stored = localStorage.getItem(createScopedSessionStorageKey(userAddress, chainId));
+    if (!stored) {
+        return null;
+    }
+
+    try {
+        const data = JSON.parse(stored) as StoredSession;
+        if (
+            normalizeSessionUserAddress(data.userAddress) !== normalizeSessionUserAddress(userAddress) ||
+            data.chainId !== chainId ||
+            data.expiresAt <= Date.now()
+        ) {
+            localStorage.removeItem(createScopedSessionStorageKey(userAddress, chainId));
+            return null;
+        }
+
+        return buildSessionState({
+            budgetLimit: data.budgetLimit,
+            budgetUsed: data.budgetUsed,
+            budgetLocked: data.budgetLocked,
+            budgetRemaining: data.budgetRemaining,
+            expiresAt: data.expiresAt,
+            chainId: data.chainId,
+            composeKeyToken: null,
+        });
+    } catch {
+        localStorage.removeItem(createScopedSessionStorageKey(userAddress, chainId));
+        return null;
+    }
+}
+
+function saveStoredSession(session: SessionState, userAddress: string): void {
+    if (!session.isActive || !session.chainId) {
+        return;
+    }
+
+    const value: StoredSession = {
+        budgetLimit: session.budgetLimit,
+        budgetUsed: session.budgetUsed,
+        budgetLocked: session.budgetLocked,
+        budgetRemaining: session.budgetRemaining,
+        expiresAt: session.expiresAt ?? 0,
+        chainId: session.chainId,
+        userAddress: normalizeSessionUserAddress(userAddress),
+    };
+
+    localStorage.setItem(
+        createScopedSessionStorageKey(userAddress, session.chainId),
+        JSON.stringify(value),
+    );
+}
+
+function clearStoredSession(userAddress: string, chainId: number | null | undefined): void {
+    if (!chainId) {
+        return;
+    }
+
+    localStorage.removeItem(createScopedSessionStorageKey(userAddress, chainId));
+}
+
+function getSessionName(_chainId: number): string {
+    return `Session ${new Date().toISOString().slice(0, 10)}`;
+}
+
+function scheduleDeferredSessionSync(callback: () => void): () => void {
+    if (typeof window === "undefined") {
+        callback();
+        return () => undefined;
+    }
+
+    if ("requestIdleCallback" in window) {
+        const id = window.requestIdleCallback(callback, { timeout: 1_500 });
+        return () => window.cancelIdleCallback?.(id);
+    }
+
+    const timeoutId = globalThis.setTimeout(callback, 250);
+    return () => globalThis.clearTimeout(timeoutId);
+}
+
+async function loadSessionThirdwebDeps(): Promise<SessionThirdwebDeps> {
+    if (!sessionThirdwebDepsPromise) {
+        sessionThirdwebDepsPromise = Promise.all([
+            import("thirdweb"),
+            import("thirdweb/extensions/erc20"),
+        ]).then(([thirdweb, erc20]) => ({
+            getContract: thirdweb.getContract,
+            sendTransaction: thirdweb.sendTransaction,
+            allowance: erc20.allowance,
+            approve: erc20.approve,
+            balanceOf: erc20.balanceOf,
+        }));
+    }
+
+    return sessionThirdwebDepsPromise;
+}
+
 export function SessionProvider({ children }: { children: ReactNode }) {
     const account = useActiveAccount();
-    const adminWallet = useAdminWallet(); // EOA signer for Smart Account (needed for Cronos AA)
     const { paymentChainId } = useChain();
+    const posthog = usePostHog();
     const [session, setSession] = useState<SessionState>(defaultSession);
     const [isCreating, setIsCreating] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const posthog = usePostHog();
+    const accountRef = useRef<string | null>(null);
+    const sessionRef = useRef<SessionState>(defaultSession);
+    const syncRef = useRef<{
+        account: string;
+        chainId: number;
+        promise: Promise<SessionState | null>;
+    } | null>(null);
 
-    useWs(session.isActive ? account?.address : undefined, session.chainId ?? paymentChainId, session.composeKeyToken);
+    useWs(session.isActive ? account?.address : undefined, session.chainId ?? paymentChainId);
 
-    // Identify user when wallet connects
     useEffect(() => {
-        if (account?.address) {
-            posthog?.identify(account.address, {
-                wallet_address: account.address,
-            });
+        accountRef.current = account?.address ?? null;
+    }, [account?.address]);
+
+    useEffect(() => {
+        sessionRef.current = session;
+    }, [session]);
+
+    useEffect(() => {
+        if (!account?.address) {
+            return;
         }
+
+        posthog?.identify(account.address, {
+            wallet_address: account.address,
+        });
     }, [account?.address, posthog]);
 
-    const clearSessionState = useCallback((options?: { removePersisted?: boolean; chainId?: number | null }) => {
-        if (options?.removePersisted !== false && account?.address) {
-            clearStoredSession(account.address, options?.chainId ?? session.chainId ?? paymentChainId);
+    const clearSessionState = useCallback((chainId?: number | null) => {
+        if (account?.address) {
+            clearStoredSession(account.address, chainId ?? session.chainId ?? paymentChainId);
         }
         setSession(defaultSession);
     }, [account?.address, paymentChainId, session.chainId]);
 
-    const syncSessionFromBackend = useCallback(
-        async (
-            reason: SessionSyncReason,
-            options?: { clearOnMissing?: boolean; chainId?: number }
-        ): Promise<SessionState | null> => {
-            if (!account?.address) {
-                return null;
-            }
+    const syncSessionFromBackend = useCallback(async (options?: {
+        chainId?: number;
+        clearOnMissing?: boolean;
+    }): Promise<SessionState | null> => {
+        if (!account?.address) {
+            return null;
+        }
 
-            const targetChainId = options?.chainId ?? session.chainId ?? paymentChainId;
-            const hasStoredSession = Boolean(loadStoredSession(account.address, targetChainId));
-            if (!shouldBootstrapSessionFromBackend(reason, hasStoredSession)) {
-                return null;
-            }
+        const requestedAddress = account.address;
+        const currentSession = sessionRef.current;
+        const targetChainId = options?.chainId ?? currentSession.chainId ?? paymentChainId;
+        const activeSync = syncRef.current;
+        if (
+            activeSync &&
+            activeSync.account === requestedAddress &&
+            activeSync.chainId === targetChainId
+        ) {
+            return activeSync.promise;
+        }
 
-            const clearOnMissing = options?.clearOnMissing ?? reason !== "token";
-
+        const request = (async (): Promise<SessionState | null> => {
             try {
                 const headers: Record<string, string> = {
-                    "x-session-user-address": account.address,
-                    "x-chain-id": targetChainId.toString(),
+                    "x-session-user-address": requestedAddress,
+                    "x-chain-id": String(targetChainId),
                 };
-                if (session.composeKeyToken) {
-                    headers.Authorization = `Bearer ${session.composeKeyToken}`;
+
+                if (currentSession.composeKeyToken) {
+                    headers.Authorization = `Bearer ${currentSession.composeKeyToken}`;
                 }
 
-                const response = await fetch(`${API_BASE}/api/session`, {
-                    headers,
-                });
-
+                const response = await fetch(`${API_BASE}/api/session`, { headers });
                 if (!response.ok) {
-                    if (clearOnMissing && response.status === 409) {
-                        clearSessionState({ chainId: targetChainId });
-                    }
                     return null;
                 }
 
                 const data = await response.json() as ApiSessionResponse;
                 if (!data.hasSession) {
-                    if (clearOnMissing) {
-                        clearSessionState({ chainId: targetChainId });
+                    if (options?.clearOnMissing !== false && accountRef.current === requestedAddress) {
+                        clearStoredSession(requestedAddress, targetChainId);
+                        setSession(defaultSession);
                     }
                     return null;
                 }
 
-                const restoredSession = buildSessionStateFromApi(data, targetChainId);
+                const nextSession = buildSessionStateFromApi(
+                    data,
+                    targetChainId,
+                    currentSession.composeKeyToken,
+                );
 
-                setSession(restoredSession);
-                saveSession(restoredSession, account.address);
-                return restoredSession;
+                if (accountRef.current === requestedAddress) {
+                    saveStoredSession(nextSession, requestedAddress);
+                    setSession(nextSession);
+                }
+
+                return nextSession;
             } catch (fetchError) {
-                console.warn("[Session] Backend fetch failed");
+                console.warn("[session] backend sync failed", fetchError);
                 return null;
             }
-        },
-        [account, clearSessionState, paymentChainId, session.chainId, session.composeKeyToken]
-    );
+        })();
 
-    // Load local session immediately, then reconcile with backend.
+        syncRef.current = {
+            account: requestedAddress,
+            chainId: targetChainId,
+            promise: request,
+        };
+
+        try {
+            return await request;
+        } finally {
+            if (syncRef.current?.promise === request) {
+                syncRef.current = null;
+            }
+        }
+    }, [account?.address, paymentChainId]);
+
     useEffect(() => {
         if (!account?.address) {
             setSession(defaultSession);
             return;
         }
 
-        const stored = loadStoredSession(account.address, paymentChainId);
-        if (stored) {
-            setSession((prev) => ({
-                ...stored,
-                composeKeyToken: prev.composeKeyToken && prev.chainId === stored.chainId ? prev.composeKeyToken : null,
-            }));
-        } else {
-            setSession(defaultSession);
-        }
+        const storedSession = loadStoredSession(account.address, paymentChainId);
+        setSession(storedSession ?? defaultSession);
 
-        void syncSessionFromBackend("startup", {
-            clearOnMissing: true,
-            chainId: stored?.chainId ?? paymentChainId,
+        const cancelDeferredSync = scheduleDeferredSessionSync(() => {
+            void syncSessionFromBackend({
+                chainId: paymentChainId,
+                clearOnMissing: true,
+            });
         });
+
+        return cancelDeferredSync;
     }, [account?.address, paymentChainId, syncSessionFromBackend]);
 
-    /**
-     * Ensure the active session has a Compose Key token available for bypass.
-     * If the in-memory token is missing, refresh from backend session state.
-     */
     const ensureComposeKeyToken = useCallback(async (): Promise<string | null> => {
         if (!account?.address) {
             return null;
         }
 
-        if (session.isActive && session.composeKeyToken) {
-            return session.composeKeyToken;
+        const currentSession = sessionRef.current;
+        if (currentSession.isActive && currentSession.composeKeyToken) {
+            return currentSession.composeKeyToken;
         }
 
-        const refreshed = await syncSessionFromBackend("token", {
+        const refreshedSession = await syncSessionFromBackend({
+            chainId: currentSession.chainId ?? paymentChainId,
             clearOnMissing: false,
-            chainId: session.chainId ?? paymentChainId,
         });
-        return refreshed?.composeKeyToken || null;
-    }, [account?.address, paymentChainId, session.isActive, session.composeKeyToken, session.chainId, syncSessionFromBackend]);
 
-    // Keep frontend session in sync with backend expiration/budget changes.
+        return refreshedSession?.composeKeyToken ?? null;
+    }, [account?.address, paymentChainId, syncSessionFromBackend]);
+
     useEffect(() => {
-        if (!account?.address || !session.isActive) return;
+        if (!account?.address || !session.isActive) {
+            return;
+        }
 
-        const sync = () => {
-            void syncSessionFromBackend("poll", {
-                clearOnMissing: true,
-                chainId: session.chainId ?? paymentChainId,
-            });
-        };
+        function handleVisibilityChange(): void {
+            if (!document.hidden) {
+                void syncSessionFromBackend({
+                    chainId: session.chainId ?? paymentChainId,
+                    clearOnMissing: true,
+                });
+            }
+        }
 
-        const intervalId = window.setInterval(sync, 15000);
-        const onVisibilityChange = () => {
-            if (!document.hidden) sync();
-        };
-
-        window.addEventListener("visibilitychange", onVisibilityChange);
-
-        return () => {
-            window.clearInterval(intervalId);
-            window.removeEventListener("visibilitychange", onVisibilityChange);
-        };
+        document.addEventListener("visibilitychange", handleVisibilityChange);
+        return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
     }, [account?.address, paymentChainId, session.chainId, session.isActive, syncSessionFromBackend]);
 
-    // Update session budget immediately from backend payment response headers.
     useEffect(() => {
-        if (!account?.address) return;
+        if (!account?.address) {
+            return;
+        }
 
-        const handleBudgetEvent = (event: Event) => {
+        const accountAddress = account.address;
+
+        function persistLiveSessionUpdate(update: SessionUpdate): void {
+            setSession((previous) => {
+                const nextSession = mergeSessionUpdate(
+                    previous,
+                    update,
+                    update.chainId ?? previous.chainId ?? paymentChainId,
+                );
+
+                if (nextSession.isActive && nextSession.chainId) {
+                    saveStoredSession(nextSession, accountAddress);
+                } else {
+                    clearStoredSession(accountAddress, nextSession.chainId ?? previous.chainId);
+                }
+
+                return nextSession;
+            });
+        }
+
+        function handleBudgetEvent(event: Event): void {
             const detail = (event as CustomEvent<{
+                budgetLimit?: number;
                 budgetRemaining?: number;
                 budgetUsed?: number;
-                budgetLimit?: number;
+                budgetLocked?: number;
             }>).detail;
 
-            if (!detail || typeof detail.budgetRemaining !== "number") return;
-            const budgetRemaining = detail.budgetRemaining;
-
-            setSession((prev) => {
-                if (!prev.isActive) return prev;
-
-                const nextBudgetLimit = typeof detail.budgetLimit === "number" ? detail.budgetLimit : prev.budgetLimit;
-                const nextBudgetUsed =
-                    typeof detail.budgetUsed === "number"
-                        ? detail.budgetUsed
-                        : Math.max(0, nextBudgetLimit - budgetRemaining);
-                const nextBudgetRemaining = Math.max(0, budgetRemaining);
-                const stillValidByTime = prev.expiresAt ? prev.expiresAt > Date.now() : true;
-
-                const updated: SessionState = {
-                    ...prev,
-                    budgetLimit: nextBudgetLimit,
-                    budgetUsed: nextBudgetUsed,
-                    budgetRemaining: nextBudgetRemaining,
-                    isActive: nextBudgetRemaining > 0 && stillValidByTime,
-                };
-
-                saveSession(updated, account.address);
-                return updated;
-            });
-        };
-
-        const handleInvalidEvent = (event: Event) => {
-            const detail = (event as CustomEvent<{ reason?: string }>).detail;
-            if (!detail?.reason) {
+            if (!detail || typeof detail.budgetRemaining !== "number") {
                 return;
             }
 
-            void syncSessionFromBackend("invalid", {
-                clearOnMissing: true,
+            persistLiveSessionUpdate(detail);
+        }
+
+        function handleInvalidEvent(): void {
+            void syncSessionFromBackend({
                 chainId: session.chainId ?? paymentChainId,
+                clearOnMissing: true,
             });
-        };
+        }
 
-        const handleSessionActive = (event: Event) => {
-            const detail = (event as CustomEvent<{
-                chainId?: number;
-                expiresAt?: number;
-                budgetRemaining?: string | number;
-            }>).detail;
-
+        function handleSessionActive(event: Event): void {
+            const detail = (event as CustomEvent<SessionUpdate>).detail;
             if (!detail) {
                 return;
             }
 
-            void syncSessionFromBackend("manual", {
-                clearOnMissing: true,
-                chainId: detail.chainId ?? session.chainId ?? paymentChainId,
-            });
-        };
+            persistLiveSessionUpdate(detail);
+        }
 
-        const handleSessionExpired = (event: Event) => {
+        function handleSessionExpired(event: Event): void {
             const detail = (event as CustomEvent<{ chainId?: number }>).detail;
-            console.log("[session] Received session-expired event from session stream");
-            clearSessionState({
-                chainId: detail?.chainId ?? session.chainId ?? paymentChainId,
-            });
-        };
+            clearSessionState(detail?.chainId ?? session.chainId ?? paymentChainId);
+        }
 
         window.addEventListener(SESSION_BUDGET_EVENT, handleBudgetEvent as EventListener);
-        window.addEventListener(SESSION_INVALID_EVENT, handleInvalidEvent as EventListener);
+        window.addEventListener(SESSION_INVALID_EVENT, handleInvalidEvent);
         window.addEventListener("session-active", handleSessionActive as EventListener);
         window.addEventListener("session-expired", handleSessionExpired as EventListener);
 
         return () => {
             window.removeEventListener(SESSION_BUDGET_EVENT, handleBudgetEvent as EventListener);
-            window.removeEventListener(SESSION_INVALID_EVENT, handleInvalidEvent as EventListener);
+            window.removeEventListener(SESSION_INVALID_EVENT, handleInvalidEvent);
             window.removeEventListener("session-active", handleSessionActive as EventListener);
             window.removeEventListener("session-expired", handleSessionExpired as EventListener);
         };
     }, [account?.address, clearSessionState, paymentChainId, session.chainId, syncSessionFromBackend]);
 
-    // Listen for storage changes from other tabs/windows
     useEffect(() => {
-        if (!account?.address) return;
+        if (!account?.address) {
+            return;
+        }
 
-        const handleStorageChange = (e: StorageEvent) => {
-            const activeStorageKey = createScopedSessionStorageKey(account.address, session.chainId ?? paymentChainId);
-            const currentChainKey = createScopedSessionStorageKey(account.address, paymentChainId);
-            if (e.key === activeStorageKey || e.key === currentChainKey) {
-                if (e.newValue) {
-                    const stored = loadStoredSession(account.address, session.chainId ?? paymentChainId);
-                    if (stored) {
-                        setSession((prev) => ({
-                            ...stored,
-                            composeKeyToken: prev.composeKeyToken && prev.chainId === stored.chainId ? prev.composeKeyToken : null,
-                        }));
-                    }
-                } else {
-                    // Session was removed
-                    setSession(defaultSession);
-                }
+        const accountAddress = account.address;
+        const activeChainId = session.chainId ?? paymentChainId;
+        const storageKey = createScopedSessionStorageKey(accountAddress, activeChainId);
+
+        function handleStorageChange(event: StorageEvent): void {
+            if (event.key !== storageKey) {
+                return;
             }
-        };
+
+            if (!event.newValue) {
+                setSession(defaultSession);
+                return;
+            }
+
+            const storedSession = loadStoredSession(accountAddress, activeChainId);
+            if (!storedSession) {
+                setSession(defaultSession);
+                return;
+            }
+
+            setSession((previous) => ({
+                ...storedSession,
+                composeKeyToken: previous.composeKeyToken,
+            }));
+        }
 
         window.addEventListener("storage", handleStorageChange);
         return () => window.removeEventListener("storage", handleStorageChange);
     }, [account?.address, paymentChainId, session.chainId]);
 
-    /**
-     * Create a new session with a budget limit
-     * This requires ONE signature to approve spending
-     */
-    const createSession = useCallback(
-        async (budgetUSDC: number, durationHours: number = 24) => {
-            if (!account) {
-                setError("Wallet not connected");
-                return false;
+    const createSession = useCallback(async (budgetUSDC: number, durationHours: number = 24) => {
+        if (!account) {
+            setError("Wallet not connected");
+            return false;
+        }
+
+        setIsCreating(true);
+        setError(null);
+
+        try {
+            const budgetWei = Math.floor(budgetUSDC * 1_000_000);
+            const expiresAt = Date.now() + durationHours * 60 * 60 * 1000;
+            const activeChain = CHAIN_OBJECTS[paymentChainId as keyof typeof CHAIN_OBJECTS];
+            const usdcAddress = USDC_ADDRESSES[paymentChainId];
+            if (!activeChain || !usdcAddress) {
+                throw new Error(`Session payments are not configured for chain ${paymentChainId}`);
             }
 
-            setIsCreating(true);
-            setError(null);
+            const { getContract, sendTransaction, allowance, approve, balanceOf } = await loadSessionThirdwebDeps();
+            const usdcContract = getContract({
+                address: usdcAddress,
+                chain: activeChain,
+                client: thirdwebClient,
+            });
 
-            try {
-                const budgetWei = Math.floor(budgetUSDC * 1_000_000); // Convert to 6 decimals
-                const expiresAt = Date.now() + durationHours * 60 * 60 * 1000;
-
-                // Use the payment chain from context
-                const activeChain = CHAIN_OBJECTS[paymentChainId as keyof typeof CHAIN_OBJECTS] || paymentChain;
-                const usdcAddress = USDC_ADDRESSES[paymentChainId] || paymentToken.address;
-
-                // Get the smart account contract
-                const smartAccountContract = getContract({
-                    address: account.address,
-                    chain: activeChain,
-                    client: thirdwebClient,
-                });
-
-                // Get USDC contract
-                const usdcContract = getContract({
-                    address: usdcAddress,
-                    chain: activeChain,
-                    client: thirdwebClient,
-                });
-
-                // Check actual USDC balance before creating session
-                const balance = await balanceOf({
+            const [currentBalance, currentAllowance] = await Promise.all([
+                balanceOf({
                     contract: usdcContract,
                     address: account.address,
-                });
-
-                if (balance < BigInt(budgetWei)) {
-                    const balanceUSDC = Number(balance) / 1_000_000;
-                    throw new Error(
-                        `Insufficient USDC balance. You have $${balanceUSDC.toFixed(2)} but want to budget $${budgetUSDC.toFixed(2)}`
-                    );
-                }
-
-                // Step 1: Approve USDC spending for the treasury (one-time per session)
-                const currentAllowance = await allowance({
+                }),
+                allowance({
                     contract: usdcContract,
                     owner: account.address,
                     spender: TREASURY_WALLET,
+                }),
+            ]);
+
+            if (currentBalance < BigInt(budgetWei)) {
+                const balanceUSDC = Number(currentBalance) / 1_000_000;
+                throw new Error(
+                    `Insufficient USDC balance. You have $${balanceUSDC.toFixed(2)} but want to budget $${budgetUSDC.toFixed(2)}`,
+                );
+            }
+
+            if (currentAllowance < BigInt(budgetWei)) {
+                await sendTransaction({
+                    transaction: approve({
+                        contract: usdcContract,
+                        spender: TREASURY_WALLET,
+                        amountWei: BigInt(budgetWei),
+                    }),
+                    account,
                 });
+            }
 
-                // Check if this is a Cronos chain (no ThirdWeb bundler)
-                const useCronosAA = isCronosChain(paymentChainId);
+            const response = await fetch(`${API_BASE}/api/keys`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "x-session-user-address": account.address,
+                    "x-chain-id": String(paymentChainId),
+                },
+                body: JSON.stringify({
+                    budgetLimit: budgetWei,
+                    expiresAt,
+                    chainId: paymentChainId,
+                    purpose: "session",
+                    name: getSessionName(paymentChainId),
+                }),
+            });
 
-                if (useCronosAA) {
-                    // ===========================================================
-                    // CRONOS PATH: Use API AA endpoints (no bundler)
-                    // ===========================================================
-                    console.log("[Session] Using Cronos AA for session creation");
+            if (!response.ok) {
+                throw new Error(await response.text());
+            }
 
-                    // Step 1: Approve USDC spending via Cronos AA
-                    if (currentAllowance < BigInt(budgetWei)) {
-                        // ERC20 approve function signature
-                        const approveData = encodeContractCall({
-                            abi: [{
-                                name: "approve",
-                                type: "function",
-                                inputs: [
-                                    { name: "spender", type: "address" },
-                                    { name: "amount", type: "uint256" },
-                                ],
-                                outputs: [{ type: "bool" }],
-                            }] as const,
-                            functionName: "approve",
-                            args: [TREASURY_WALLET, BigInt(budgetWei)],
-                        });
+            const nextSession = buildSessionStateFromApi(
+                await response.json() as ApiSessionResponse,
+                paymentChainId,
+                null,
+            );
 
-                        // Get EOA signer for Cronos AA (Smart Accounts need raw ECDSA)
-                        const adminAddress = adminWallet?.getAccount()?.address as Address | undefined;
-                        const adminAccount = adminWallet?.getAccount();
+            saveStoredSession(nextSession, account.address);
+            setSession(nextSession);
 
-                        const approveResult = await submitCronosTransaction({
-                            account,
-                            to: usdcAddress as Address,
-                            data: approveData,
-                            chainId: paymentChainId,
-                            adminAddress,
-                            adminWallet: adminAccount,
-                        });
+            posthog?.capture("session_created", {
+                chain_id: paymentChainId,
+                budget_usdc: budgetUSDC,
+                duration_hours: durationHours,
+                path: "thirdweb",
+            });
 
-                        if (!approveResult.success) {
-                            throw new Error(`Failed to approve USDC: ${approveResult.error}`);
-                        }
-                        console.log("[Session] USDC approval tx:", approveResult.txHash);
-                    }
+            mpTrack("Purchase", {
+                revenue: budgetUSDC,
+                currency: "USDC",
+            });
 
-                    // Cronos x402 uses EIP-3009 TransferWithAuthorization for USDC payments.
-                    // Session key is tracked locally - USDC transfer is authorized via EIP-712
-                    // signature in facilitator.ts at payment time. No on-chain session key needed.
-                    console.log("[Session] Cronos session ready - USDC approval complete");
-
-                    // Register session with backend to create Compose Key for on-chain settlement
-                    console.log("[Session] Creating Compose Key for on-chain settlement...");
-                    const keysResponse = await fetch(`${API_BASE}/api/keys`, {
-                        method: "POST",
-                        headers: {
-                            "Content-Type": "application/json",
-                            "x-session-user-address": account.address,
-                            "x-chain-id": String(paymentChainId),
-                            "x-session-active": "true",
-                        },
-                        body: JSON.stringify({
-                            budgetLimit: budgetWei,
-                            expiresAt,
-                            chainId: paymentChainId,
-                            purpose: "session",
-                            name: `Cronos Session ${new Date().toISOString().slice(0, 10)}`,
-                        }),
-                    });
-
-                    if (!keysResponse.ok) {
-                        const errorBody = await keysResponse.text();
-                        throw new Error(`Failed to create Compose Key: ${errorBody}`);
-                    }
-
-                    const keyResult = await keysResponse.json();
-
-                    // Create new session state with Compose Key token
-                    const newSession: SessionState = {
-                        isActive: true,
-                        budgetLimit: budgetWei,
-                        budgetUsed: 0,
-                        budgetRemaining: budgetWei,
-                        expiresAt,
-                        sessionKeyAddress: TREASURY_WALLET,
-                        chainId: paymentChainId,
-                        composeKeyToken: keyResult.token,
-                    };
-
-                    // Save to localStorage first
-                    saveSession(newSession, account.address);
-
-                    // Then update React state
-                    setSession(newSession);
-
-                    posthog?.capture("session_created", {
-                        chain_id: paymentChainId,
-                        budget_usdc: budgetUSDC,
-                        duration_hours: durationHours,
-                        path: "cronos",
-                    });
-
-                    mpTrack("Purchase", {
-                        revenue: budgetUSDC,
-                        currency: "USDC",
-                    });
-
-                    return true;
-                } else {
-                    // ===========================================================
-                    // THIRDWEB PATH: Use bundler (Avalanche, etc.)
-                    // ===========================================================
-                    if (currentAllowance < BigInt(budgetWei)) {
-                        const approveTx = approve({
-                            contract: usdcContract,
-                            spender: TREASURY_WALLET,
-                            amountWei: BigInt(budgetWei),
-                        });
-
-                        await sendTransaction({
-                            transaction: approveTx,
-                            account,
-                        });
-                    }
-
-                    // Create session key for the treasury to pull payments
-                    const sessionKeyTx = addSessionKey({
-                        contract: smartAccountContract,
-                        account,
-                        sessionKeyAddress: TREASURY_WALLET,
-                        permissions: {
-                            approvedTargets: [usdcAddress],
-                            nativeTokenLimitPerTransaction: "0",
-                            permissionStartTimestamp: new Date(Date.now()),
-                            permissionEndTimestamp: new Date(expiresAt),
-                        },
-                    });
-
-                    await sendTransaction({
-                        transaction: sessionKeyTx,
-                        account,
-                    });
-
-                    // Register session with backend to create Compose Key for session bypass
-                    // This enables <100ms latency by skipping x402 payment flow
-                    console.log("[Session] Creating Compose Key for session bypass...");
-                    const keysResponse = await fetch(`${API_BASE}/api/keys`, {
-                        method: "POST",
-                        headers: {
-                            "Content-Type": "application/json",
-                            "x-session-user-address": account.address,
-                            "x-chain-id": String(paymentChainId),
-                            "x-session-active": "true",
-                        },
-                        body: JSON.stringify({
-                            budgetLimit: budgetWei,
-                            expiresAt,
-                            chainId: paymentChainId,
-                            purpose: "session",
-                            name: `Session ${new Date().toISOString().slice(0, 10)}`,
-                        }),
-                    });
-
-                    if (!keysResponse.ok) {
-                        const errorBody = await keysResponse.text();
-                        throw new Error(`Failed to create Compose Key: ${errorBody}`);
-                    }
-
-                    const keyResult = await keysResponse.json();
-                    const composeKeyToken: string = keyResult.token;
-
-                    // Create new session state with Compose Key token
-                    const newSession: SessionState = {
-                        isActive: true,
-                        budgetLimit: budgetWei,
-                        budgetUsed: 0,
-                        budgetRemaining: budgetWei,
-                        expiresAt,
-                        sessionKeyAddress: TREASURY_WALLET,
-                        chainId: paymentChainId,
-                        composeKeyToken,
-                    };
-
-                    // Save to localStorage first
-                    saveSession(newSession, account.address);
-
-                    // Then update React state
-                    setSession(newSession);
-
-                    posthog?.capture("session_created", {
-                        chain_id: paymentChainId,
-                        budget_usdc: budgetUSDC,
-                        duration_hours: durationHours,
-                        path: "thirdweb",
-                    });
-
-                    mpTrack("Purchase", {
-                        revenue: budgetUSDC,
-                        currency: "USDC",
-                    });
-
-                    return true;
-                }
-            } catch (err) {
-                console.error("[Session] Failed to create session:", err);
-                posthog?.captureException(err instanceof Error ? err : new Error(String(err)), {
+            return true;
+        } catch (createError) {
+            const errorMessage = createError instanceof Error ? createError.message : "Failed to create session";
+            posthog?.captureException(
+                createError instanceof Error ? createError : new Error(String(createError)),
+                {
                     $exception_message: "session_create_failed",
                     chain_id: paymentChainId,
                     budget_usdc: budgetUSDC,
-                });
-                mpError("session_create", err instanceof Error ? err.message : String(err));
-                setError(err instanceof Error ? err.message : "Failed to create session");
-                return false;
-            } finally {
-                setIsCreating(false);
-            }
-        },
-        [account, adminWallet, paymentChainId, posthog]
-    );
+                },
+            );
+            mpError("session_create", errorMessage);
+            setError(errorMessage);
+            return false;
+        } finally {
+            setIsCreating(false);
+        }
+    }, [account, paymentChainId, posthog]);
 
-    /**
-     * End the current session
-     */
     const endSession = useCallback(() => {
         posthog?.capture("session_ended", {
             chain_id: session.chainId,
@@ -766,25 +688,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             budget_used: session.budgetUsed,
         });
         clearSessionState();
-    }, [clearSessionState, posthog, session.chainId, session.budgetRemaining, session.budgetUsed]);
+    }, [clearSessionState, posthog, session.budgetRemaining, session.budgetUsed, session.chainId]);
 
-    /**
-     * Check if session has enough budget for an operation
-     * @param requiredWei - Required amount. Defaults to inferencePriceWei
-     */
-    const hasBudget = useCallback(
-        (requiredWei: number = inferencePriceWei) => {
-            return session.isActive && session.budgetRemaining >= requiredWei;
-        },
-        [session]
-    );
+    const hasBudget = useCallback((requiredWei: number = inferencePriceWei) => (
+        session.isActive && session.budgetRemaining >= requiredWei
+    ), [session.budgetRemaining, session.isActive]);
 
-    /**
-     * Format budget display ($X.XX)
-     */
-    const formatBudget = useCallback((weiAmount: number) => {
-        return `$${(weiAmount / 1_000_000).toFixed(2)}`;
-    }, []);
+    const formatBudget = useCallback((weiAmount: number) => `$${(weiAmount / 1_000_000).toFixed(2)}`, []);
 
     const value: SessionContextValue = {
         session,
@@ -796,7 +706,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         hasBudget,
         formatBudget,
         budgetPresets: SESSION_BUDGET_PRESETS,
-        // Convenience aliases for direct access
         sessionActive: session.isActive,
         budgetRemaining: session.budgetRemaining,
         budgetLimit: session.budgetLimit,
@@ -810,52 +719,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     );
 }
 
-/**
- * Hook for accessing session state and actions
- * Must be used within a SessionProvider
- */
 export function useSession(): SessionContextValue {
     const context = useContext(SessionContext);
-    if (context === undefined) {
+    if (!context) {
         throw new Error("useSession must be used within a SessionProvider");
     }
+
     return context;
-}
-
-/**
- * Get active session keys for the current account
- */
-export function useActiveSessionKeys() {
-    const account = useActiveAccount();
-    const { paymentChainId } = useChain();
-    const [signers, setSigners] = useState<string[]>([]);
-    const [loading, setLoading] = useState(false);
-
-    useEffect(() => {
-        if (!account?.address) return;
-
-        const fetchSigners = async () => {
-            setLoading(true);
-            try {
-                const activeChain = CHAIN_OBJECTS[paymentChainId as keyof typeof CHAIN_OBJECTS] || paymentChain;
-
-                const contract = getContract({
-                    address: account.address,
-                    chain: activeChain,
-                    client: thirdwebClient,
-                });
-
-                const activeSigners = await getAllActiveSigners({ contract });
-                setSigners(activeSigners.map((s) => s.signer));
-            } catch (err) {
-                console.error("Failed to fetch session keys:", err);
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchSigners();
-    }, [account?.address, paymentChainId]);
-
-    return { signers, loading };
 }
