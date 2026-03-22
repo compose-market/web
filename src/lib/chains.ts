@@ -1,60 +1,26 @@
 /**
  * Chain Configuration
  * 
- * Single source of truth for all EVM chain configuration on the frontend.
- * Mirrors backend/api/shared/config/chains.ts structure.
- * 
- * @module lib/chains
+ * Frontend chain configuration.
  */
 
-import { createThirdwebClient, getContract, defineChain } from "thirdweb";
+import { createThirdwebClient, getContract } from "thirdweb";
 import { avalancheFuji, avalanche, arbitrumSepolia, arbitrum, bscTestnet, bsc } from "thirdweb/chains";
 import type { SmartWalletOptions } from "thirdweb/wallets";
+import {
+    CHAIN_IDS,
+    USDC_ADDRESSES,
+    SUPPORTED_CHAIN_IDS,
+} from "./performance/chains-data";
 
-// =============================================================================
-// Chain IDs
-// =============================================================================
+export {
+    CHAIN_CONFIG,
+    CHAIN_IDS,
+    SUPPORTED_CHAIN_IDS,
+    USDC_ADDRESSES,
+} from "./performance/chains-data";
 
-/**
- * Supported chain IDs (numeric)
- * Avalanche is the default chain for x402 payments
- */
-export const CHAIN_IDS = {
-    // Avalanche (default for x402 payments)
-    avalancheFuji: 43113,
-    avalanche: 43114,
-    // Cronos
-    cronosTestnet: 338,
-    cronos: 25,
-    // Arbitrum
-    arbitrumTestnet: 421614,
-    arbitrum: 42161,
-    // BNB Chain
-    bscTestnet: 97,
-    bsc: 56,
-} as const;
-
-export type ChainId = (typeof CHAIN_IDS)[keyof typeof CHAIN_IDS];
-
-// =============================================================================
-// Cronos Chain Definitions (not pre-exported from thirdweb/chains)
-// =============================================================================
-
-export const cronosTestnet = defineChain({
-    id: 338,
-    name: "Cronos Testnet",
-    nativeCurrency: { name: "Test CRO", symbol: "tCRO", decimals: 18 },
-    rpc: "https://evm-t3.cronos.org",
-    blockExplorers: [{ name: "Cronos Explorer", url: "https://explorer.cronos.org/testnet" }],
-});
-
-export const cronos = defineChain({
-    id: 25,
-    name: "Cronos",
-    nativeCurrency: { name: "Cronos", symbol: "CRO", decimals: 18 },
-    rpc: "https://evm.cronos.org",
-    blockExplorers: [{ name: "Cronos Explorer", url: "https://explorer.cronos.org" }],
-});
+export type { ChainId } from "./performance/chains-data";
 
 // =============================================================================
 // Chain Objects Map
@@ -63,8 +29,6 @@ export const cronos = defineChain({
 export const CHAIN_OBJECTS = {
     [CHAIN_IDS.avalancheFuji]: avalancheFuji,
     [CHAIN_IDS.avalanche]: avalanche,
-    [CHAIN_IDS.cronosTestnet]: cronosTestnet,
-    [CHAIN_IDS.cronos]: cronos,
     [CHAIN_IDS.arbitrumTestnet]: arbitrumSepolia,
     [CHAIN_IDS.arbitrum]: arbitrum,
     [CHAIN_IDS.bscTestnet]: bscTestnet,
@@ -72,119 +36,20 @@ export const CHAIN_OBJECTS = {
 } as const;
 
 // =============================================================================
-// USDC Addresses (ERC-3009 compatible for gasless x402)
-// =============================================================================
-
-export const USDC_ADDRESSES: Record<number, `0x${string}`> = {
-    // Avalanche
-    [CHAIN_IDS.avalancheFuji]: "0x5425890298aed601595a70AB815c96711a31Bc65",
-    [CHAIN_IDS.avalanche]: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
-    // Cronos - devUSDC.e / USDC.e
-    [CHAIN_IDS.cronosTestnet]: "0xc01efAaF7C5C61bEbFAeb358E1161b537b8bC0e0",
-    [CHAIN_IDS.cronos]: "0xc21223249CA28397B4B6541dfFaEcC539BfF0c59",
-    // Arbitrum
-    [CHAIN_IDS.arbitrumTestnet]: "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
-    [CHAIN_IDS.arbitrum]: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
-    // BNB Chain
-    [CHAIN_IDS.bscTestnet]: "0x64544969ed7ebf5f083679233325356ebe738930",
-    [CHAIN_IDS.bsc]: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
-};
-
-// =============================================================================
-// Chain UI Configuration
-// =============================================================================
-
-export const CHAIN_CONFIG: Record<number, {
-    name: string;
-    isTestnet: boolean;
-    explorer: string;
-    color: string;
-}> = {
-    [CHAIN_IDS.avalancheFuji]: {
-        name: "Avalanche Fuji",
-        isTestnet: true,
-        explorer: "https://testnet.snowtrace.io",
-        color: "red",
-    },
-    [CHAIN_IDS.avalanche]: {
-        name: "Avalanche C-Chain",
-        isTestnet: false,
-        explorer: "https://snowtrace.io",
-        color: "red",
-    },
-    [CHAIN_IDS.cronosTestnet]: {
-        name: "Cronos Testnet",
-        isTestnet: true,
-        explorer: "https://explorer.cronos.org/testnet",
-        color: "blue",
-    },
-    [CHAIN_IDS.cronos]: {
-        name: "Cronos",
-        isTestnet: false,
-        explorer: "https://explorer.cronos.org",
-        color: "blue",
-    },
-    [CHAIN_IDS.arbitrumTestnet]: {
-        name: "Arbitrum Sepolia",
-        isTestnet: true,
-        explorer: "https://sepolia.arbiscan.io",
-        color: "cyan",
-    },
-    [CHAIN_IDS.arbitrum]: {
-        name: "Arbitrum One",
-        isTestnet: false,
-        explorer: "https://arbiscan.io",
-        color: "cyan",
-    },
-    [CHAIN_IDS.bscTestnet]: {
-        name: "BNB Smart Chain Testnet",
-        isTestnet: true,
-        explorer: "https://testnet.bscscan.com",
-        color: "yellow",
-    },
-    [CHAIN_IDS.bsc]: {
-        name: "BNB Smart Chain",
-        isTestnet: false,
-        explorer: "https://bscscan.com",
-        color: "yellow",
-    },
-};
-
-// =============================================================================
-// x402 Facilitator Configuration
-// =============================================================================
-
-/**
- * Check if a chain uses Cronos Labs facilitator
- * Cronos chains use REST API facilitator, others use ThirdWeb on-chain contracts
- */
-export function isCronosChain(chainId: number): boolean {
-    return chainId === CHAIN_IDS.cronosTestnet || chainId === CHAIN_IDS.cronos;
-}
-
-/**
- * Get Cronos network identifier for facilitator API
- */
-export function getCronosNetworkString(chainId: number): "cronos-testnet" | "cronos-mainnet" {
-    switch (chainId) {
-        case CHAIN_IDS.cronosTestnet:
-            return "cronos-testnet";
-        case CHAIN_IDS.cronos:
-            return "cronos-mainnet";
-        default:
-            throw new Error(`Chain ${chainId} is not a Cronos chain`);
-    }
-}
-
-// =============================================================================
 // Supported Chains (chains with deployed contracts)
 // =============================================================================
 
 export const SUPPORTED_CHAINS = [
     { id: CHAIN_IDS.avalancheFuji, chain: avalancheFuji },
-    { id: CHAIN_IDS.cronosTestnet, chain: cronosTestnet },
     { id: CHAIN_IDS.arbitrumTestnet, chain: arbitrumSepolia },
 ] as const;
+
+if (
+    SUPPORTED_CHAINS.length !== SUPPORTED_CHAIN_IDS.length
+    || !SUPPORTED_CHAINS.every(({ id }, index) => id === SUPPORTED_CHAIN_IDS[index])
+) {
+    throw new Error("SUPPORTED_CHAINS and SUPPORTED_CHAIN_IDS are out of sync");
+}
 
 // =============================================================================
 // Contract Addresses (Multi-chain)
@@ -210,7 +75,6 @@ const SHARED_COMPOSE_CONTRACTS = {
 
 export const CONTRACT_ADDRESSES = {
     [CHAIN_IDS.avalancheFuji]: { ...SHARED_COMPOSE_CONTRACTS },
-    [CHAIN_IDS.cronosTestnet]: { ...SHARED_COMPOSE_CONTRACTS },
     [CHAIN_IDS.arbitrumTestnet]: { ...SHARED_COMPOSE_CONTRACTS },
 } as const;
 
@@ -298,14 +162,9 @@ export const paymentToken = {
 // Account Abstraction (ERC-4337)
 // =============================================================================
 
-// Cronos SimpleAccountFactory (for chains without ThirdWeb bundler support)
-const cronosSimpleAccountFactory = import.meta.env.VITE_CRONOSTEST_SIMPLE_ACCOUNT_FACTORY as `0x${string}`;
-
 export const accountAbstraction: SmartWalletOptions = {
     chain: paymentChain,
     sponsorGas: true,
-    // Cronos requires explicit factory since ThirdWeb has no default bundler
-    ...(cronosSimpleAccountFactory && { factoryAddress: cronosSimpleAccountFactory }),
 };
 
 // =============================================================================

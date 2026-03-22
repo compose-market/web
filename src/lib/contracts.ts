@@ -9,7 +9,6 @@ import { getContract, prepareContractCall } from "thirdweb";
 import {
   thirdwebClient,
   paymentChain,
-  CHAIN_IDS,
   CHAIN_OBJECTS,
   CONTRACT_ADDRESSES,
   getContractAddress,

@@ -11,7 +11,6 @@ import {
     API_BASE_URL,
     TIMEOUT_CONFIG,
     type MultimodalResult,
-    type MultimodalType,
     type VideoJobResponse,
     parseSSEStream,
     parseJsonResponse,

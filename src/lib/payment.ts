@@ -3,33 +3,9 @@ export const SESSION_INVALID_EVENT = "compose:session-invalid";
 
 export interface PaymentFetchParams {
   chainId: number;
-  sessionToken?: string;
-}
-
-function readSessionInvalidation(response: Pick<Response, "headers">): {
-  invalid: boolean;
-  reason: string | null;
-} {
-  const reason = response.headers.get("x-compose-session-invalid");
-  if (!reason) {
-    return {
-      invalid: false,
-      reason: null,
-    };
-  }
-
-  return {
-    invalid: true,
-    reason,
-  };
-}
-
-function requireSessionToken(sessionToken: string | undefined): string {
-  if (!sessionToken) {
-    throw new Error("Compose key sessionToken is required");
-  }
-
-  return sessionToken;
+  sessionToken: string;
+  sessionUserAddress?: string;
+  sessionBudgetRemaining?: number;
 }
 
 function syncBudgetState(response: Response): void {
@@ -37,15 +13,14 @@ function syncBudgetState(response: Response): void {
     return;
   }
 
-  const budgetRemainingHeader = response.headers.get("x-compose-key-budget-remaining");
-  const budgetUsedHeader = response.headers.get("x-compose-key-budget-used");
-  const budgetLimitHeader = response.headers.get("x-compose-key-budget-limit");
-  const budgetReservedHeader = response.headers.get("x-compose-key-budget-reserved");
-
+  const budgetRemainingHeader = response.headers.get("x-session-budget-remaining");
+  const budgetUsedHeader = response.headers.get("x-session-budget-used");
+  const budgetLimitHeader = response.headers.get("x-session-budget-limit");
+  const budgetLockedHeader = response.headers.get("x-session-budget-locked");
   const budgetRemaining = budgetRemainingHeader ? Number.parseInt(budgetRemainingHeader, 10) : NaN;
   const budgetUsed = budgetUsedHeader ? Number.parseInt(budgetUsedHeader, 10) : NaN;
   const budgetLimit = budgetLimitHeader ? Number.parseInt(budgetLimitHeader, 10) : NaN;
-  const budgetReserved = budgetReservedHeader ? Number.parseInt(budgetReservedHeader, 10) : NaN;
+  const budgetLocked = budgetLockedHeader ? Number.parseInt(budgetLockedHeader, 10) : NaN;
 
   if (Number.isFinite(budgetRemaining) && budgetRemaining >= 0) {
     window.dispatchEvent(
@@ -54,19 +29,19 @@ function syncBudgetState(response: Response): void {
           budgetRemaining,
           budgetUsed: Number.isFinite(budgetUsed) && budgetUsed >= 0 ? budgetUsed : undefined,
           budgetLimit: Number.isFinite(budgetLimit) && budgetLimit >= 0 ? budgetLimit : undefined,
-          budgetReserved: Number.isFinite(budgetReserved) && budgetReserved >= 0 ? budgetReserved : undefined,
+          budgetLocked: Number.isFinite(budgetLocked) && budgetLocked >= 0 ? budgetLocked : undefined,
         },
       }),
     );
   }
 
-  const invalidation = readSessionInvalidation(response);
-  if (invalidation.invalid) {
+  const reason = response.headers.get("x-compose-session-invalid");
+  if (reason) {
     window.dispatchEvent(
       new CustomEvent(SESSION_INVALID_EVENT, {
         detail: {
           status: response.status,
-          reason: invalidation.reason,
+          reason,
         },
       }),
     );
@@ -79,12 +54,21 @@ export function createPaymentFetch(params: PaymentFetchParams): (input: RequestI
     throw new Error("chainId is required");
   }
 
-  const sessionToken = requireSessionToken(params.sessionToken);
+  const sessionToken = params.sessionToken;
+  const hasSessionContext = typeof params.sessionUserAddress === "string"
+    && params.sessionUserAddress.length > 0
+    && Number.isFinite(params.sessionBudgetRemaining)
+    && (params.sessionBudgetRemaining as number) >= 0;
 
   return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const headers = new Headers(init?.headers);
     headers.set("Authorization", `Bearer ${sessionToken}`);
     headers.set("X-Chain-ID", String(chainId));
+    if (hasSessionContext) {
+      headers.set("X-Session-Active", "true");
+      headers.set("X-Session-User-Address", params.sessionUserAddress!);
+      headers.set("X-Session-Budget-Remaining", String(params.sessionBudgetRemaining!));
+    }
 
     const response = await fetch(input, {
       ...init,
