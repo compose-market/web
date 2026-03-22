@@ -13,7 +13,6 @@ import { mpTrack, mpError } from "@/lib/mixpanel";
 import { useParams } from "wouter";
 import { Link } from "wouter";
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
-import { inferencePriceWei, isCronosChain } from "@/lib/chains";
 import { createPaymentFetch } from "@/lib/payment";
 import { useChain } from "@/contexts/ChainContext";
 import { Button } from "@/components/ui/button";
@@ -82,11 +81,11 @@ export default function AgentDetailPage() {
     conversationId: `agent-${agentWallet || 'unknown'}`,
     onError: (err) => setChatError(err),
   });
-  const { messages, setMessages, scrollContainerRef, messagesEndRef, isNearBottom,
+  const { messages, setMessages, scrollContainerRef, messagesEndRef,
     streamedTextRef, currentAssistantIdRef, updateAssistantMessage, handleJsonResponse,
     scheduleStreamUpdate, flushStreamContent,
     // Attachments
-    attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, isUploading, clearFiles,
+    attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, clearFiles,
     // Recording
     isRecording, recordingSupported, startRecording, stopRecording,
   } = chat;
@@ -183,7 +182,6 @@ export default function AgentDetailPage() {
     const assistantId = crypto.randomUUID();
     setMessages(prev => [...prev, { id: assistantId, role: "assistant", content: "", timestamp: Date.now() }]);
     const composeRunId = crypto.randomUUID();
-    let resolvedThreadId: string | null = null;
     const runStorageKey = `agent-active-run:${agentWallet || "unknown"}`;
 
     try {
@@ -198,6 +196,8 @@ export default function AgentDetailPage() {
       const fetchWithPayment = createPaymentFetch({
         chainId: paymentChainId,
         sessionToken: activeComposeKeyToken,
+        sessionUserAddress: sessionActive ? account.address : undefined,
+        sessionBudgetRemaining: sessionActive ? budgetRemaining : undefined,
       });
 
       const attachmentPart = buildAttachmentPart(attached);
@@ -213,7 +213,6 @@ export default function AgentDetailPage() {
           threadId = `thread-${backpackUserId}-${agentWallet}-${crypto.randomUUID()}`;
           sessionStorage.setItem(threadKey, threadId);
         }
-        resolvedThreadId = threadId;
 
         const headers: Record<string, string> = {
           "Content-Type": "application/json",

@@ -11,9 +11,7 @@ import { useState, useCallback, useRef } from "react";
 import { usePostHog } from "@posthog/react";
 import { mpTrack, mpError } from "@/lib/mixpanel";
 import { useParams } from "wouter";
-import { Link } from "wouter";
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
-import { inferencePriceWei, isCronosChain } from "@/lib/chains";
 import { createPaymentFetch } from "@/lib/payment";
 import { useChain } from "@/contexts/ChainContext";
 import { Button } from "@/components/ui/button";
@@ -176,6 +174,8 @@ export default function ManowarPage() {
             const fetchWithPayment = createPaymentFetch({
                 chainId: paymentChainId,
                 sessionToken: activeComposeKeyToken,
+                sessionUserAddress: sessionActive ? account.address : undefined,
+                sessionBudgetRemaining: sessionActive ? budgetRemaining : undefined,
             });
 
             const attachmentPart = buildAttachmentPart(attached);

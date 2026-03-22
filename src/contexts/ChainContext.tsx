@@ -4,7 +4,7 @@
  * Manages selected chain for deployments and payments across the app.
  */
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
-import { CHAIN_IDS, SUPPORTED_CHAINS } from "@/lib/chains";
+import { CHAIN_IDS, SUPPORTED_CHAIN_IDS } from "@/lib/performance/chains-data";
 
 // =============================================================================
 // Types
@@ -44,7 +44,7 @@ export function ChainProvider({ children }: { children: ReactNode }) {
             if (stored) {
                 const parsed = parseInt(stored);
                 // Validate it's a supported chain
-                if (SUPPORTED_CHAINS.some(c => c.id === parsed)) {
+                if (SUPPORTED_CHAIN_IDS.includes(parsed as (typeof SUPPORTED_CHAIN_IDS)[number])) {
                     return parsed;
                 }
             }
@@ -103,5 +103,5 @@ export function useChain() {
  * Get chain info by ID
  */
 export function getChainInfo(chainId: number) {
-    return SUPPORTED_CHAINS.find(c => c.id === chainId);
+    return SUPPORTED_CHAIN_IDS.find((id) => id === chainId) ?? null;
 }

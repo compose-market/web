@@ -1,31 +1,75 @@
 /**
  * Multi-Chain Balance Hook
- * 
+ *
  * Fetches USDC balances from ALL supported chains in parallel.
  * Used for cross-chain liquidity detection for x402 payments.
  */
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { readContract } from "thirdweb";
 import { SUPPORTED_CHAINS, getUsdcContractForChain, CHAIN_CONFIG } from "@/lib/chains";
-
-// =============================================================================
-// Types
-// =============================================================================
 
 export interface ChainBalance {
     chainId: number;
     chainName: string;
     balance: bigint;
-    formatted: string; // Human readable (e.g., "123.45")
-    color: string; // For UI badge
+    formatted: string;
+    color: string;
 }
 
-// =============================================================================
-// Balance Fetching
-// =============================================================================
+interface MultiChainBalanceOptions {
+    enabled?: boolean;
+    deferUntilIdle?: boolean;
+    staleTime?: number;
+    refetchInterval?: number | false;
+}
+
+function useDeferredQueryEnabled(enabled: boolean, deferUntilIdle: boolean): boolean {
+    const [idleReady, setIdleReady] = useState(!deferUntilIdle);
+
+    useEffect(() => {
+        if (!enabled) {
+            setIdleReady(false);
+            return;
+        }
+
+        if (!deferUntilIdle) {
+            setIdleReady(true);
+            return;
+        }
+
+        if (typeof window === "undefined") {
+            setIdleReady(true);
+            return;
+        }
+
+        let cancelled = false;
+        const activate = () => {
+            if (!cancelled) {
+                setIdleReady(true);
+            }
+        };
+
+        if ("requestIdleCallback" in window) {
+            const id = window.requestIdleCallback(activate, { timeout: 1_500 });
+            return () => {
+                cancelled = true;
+                window.cancelIdleCallback?.(id);
+            };
+        }
+
+        const timeoutId = globalThis.setTimeout(activate, 250);
+        return () => {
+            cancelled = true;
+            globalThis.clearTimeout(timeoutId);
+        };
+    }, [enabled, deferUntilIdle]);
+
+    return enabled && idleReady;
+}
 
 async function fetchUsdcBalance(address: string, chainId: number): Promise<bigint> {
     try {
+        const { readContract } = await import("thirdweb");
         const contract = getUsdcContractForChain(chainId);
         const balance = await readContract({
             contract,
@@ -40,56 +84,49 @@ async function fetchUsdcBalance(address: string, chainId: number): Promise<bigin
 }
 
 function formatUsdcBalance(balance: bigint): string {
-    const num = Number(balance) / 1_000_000; // USDC has 6 decimals
+    const num = Number(balance) / 1_000_000;
     return num.toFixed(2);
 }
 
-// =============================================================================
-// Hooks
-// =============================================================================
+export function useMultiChainBalance(address: string | undefined, options: MultiChainBalanceOptions = {}) {
+    const queryEnabled = useDeferredQueryEnabled(
+        Boolean(address) && (options.enabled ?? true),
+        options.deferUntilIdle ?? false,
+    );
 
-/**
- * Fetch USDC balances from all supported chains
- * Returns array sorted by balance (highest first)
- */
-export function useMultiChainBalance(address: string | undefined) {
     return useQuery({
         queryKey: ["multichain-balance", address],
         queryFn: async (): Promise<ChainBalance[]> => {
-            if (!address) return [];
+            if (!address) {
+                return [];
+            }
 
-            // Fetch from all chains in parallel
-            const balancePromises = SUPPORTED_CHAINS.map(async ({ id: chainId }) => {
-                const balance = await fetchUsdcBalance(address, chainId);
-                const chainConfig = CHAIN_CONFIG[chainId];
-                return {
-                    chainId,
-                    chainName: chainConfig?.name || `Chain ${chainId}`,
-                    balance,
-                    formatted: formatUsdcBalance(balance),
-                    color: chainConfig?.color || "gray",
-                };
-            });
+            const balances = await Promise.all(
+                SUPPORTED_CHAINS.map(async ({ id: chainId }) => {
+                    const balance = await fetchUsdcBalance(address, chainId);
+                    const chainConfig = CHAIN_CONFIG[chainId];
+                    return {
+                        chainId,
+                        chainName: chainConfig?.name || `Chain ${chainId}`,
+                        balance,
+                        formatted: formatUsdcBalance(balance),
+                        color: chainConfig?.color || "gray",
+                    };
+                }),
+            );
 
-            const balances = await Promise.all(balancePromises);
-
-            // Sort by balance (highest first)
             return balances.sort((a, b) => {
                 if (a.balance > b.balance) return -1;
                 if (a.balance < b.balance) return 1;
                 return 0;
             });
         },
-        enabled: !!address,
-        staleTime: 30 * 1000, // 30 seconds
-        refetchInterval: 60 * 1000, // Refresh every minute
+        enabled: queryEnabled,
+        staleTime: options.staleTime ?? 30 * 1000,
+        refetchInterval: options.refetchInterval ?? 60 * 1000,
     });
 }
 
-/**
- * Find the chain with sufficient balance for a given amount
- * Returns the chainId with enough liquidity, or null if none found
- */
 export function useBestLiquidityChain(
     address: string | undefined,
     minAmount: bigint,
@@ -97,23 +134,20 @@ export function useBestLiquidityChain(
 ) {
     const { data: balances, isLoading, error } = useMultiChainBalance(address);
 
-    // Find best chain
     let bestChainId: number | null = null;
     let isPreferredChainUsed = false;
 
     if (balances && balances.length > 0) {
-        // First, check if preferred chain has enough balance
         if (preferredChainId) {
-            const preferred = balances.find(b => b.chainId === preferredChainId);
+            const preferred = balances.find((balance) => balance.chainId === preferredChainId);
             if (preferred && preferred.balance >= minAmount) {
                 bestChainId = preferredChainId;
                 isPreferredChainUsed = true;
             }
         }
 
-        // If preferred chain doesn't work, find any chain with sufficient balance
         if (!bestChainId) {
-            const chainWithBalance = balances.find(b => b.balance >= minAmount);
+            const chainWithBalance = balances.find((balance) => balance.balance >= minAmount);
             if (chainWithBalance) {
                 bestChainId = chainWithBalance.chainId;
             }
@@ -129,13 +163,10 @@ export function useBestLiquidityChain(
     };
 }
 
-/**
- * Get total USDC balance across all chains
- */
-export function useTotalBalance(address: string | undefined) {
-    const { data: balances, isLoading, error } = useMultiChainBalance(address);
+export function useTotalBalance(address: string | undefined, options: MultiChainBalanceOptions = {}) {
+    const { data: balances, isLoading, error } = useMultiChainBalance(address, options);
 
-    const total = balances?.reduce((sum, b) => sum + b.balance, BigInt(0)) || BigInt(0);
+    const total = balances?.reduce((sum, balance) => sum + balance.balance, BigInt(0)) || BigInt(0);
 
     return {
         total,

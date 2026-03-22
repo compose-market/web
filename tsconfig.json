@@ -1,6 +1,12 @@
 {
   "include": [
-    "src/**/*"
+    "src/**/*",
+    "tests/lyria-queue.test.ts",
+    "tests/app-routes.test.ts",
+    "tests/object-url.test.ts",
+    "tests/chains-data.test.ts",
+    "tests/cronos-removal.test.ts",
+    "tests/payment.test.ts"
   ],
   "exclude": [
     "node_modules",

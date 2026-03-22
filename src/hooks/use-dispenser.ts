@@ -11,6 +11,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { API_BASE_URL } from "@/lib/api";
+import { CHAIN_CONFIG } from "@/lib/chains";
 
 // =============================================================================
 // Types
@@ -150,12 +151,7 @@ export function useDispenserClaim() {
  * Get explorer URL for a transaction
  */
 export function getExplorerTxUrl(txHash: string, chainId: number): string {
-    const explorers: Record<number, string> = {
-        43113: "https://testnet.snowtrace.io",
-        338: "https://explorer.cronos.org/testnet",
-        421614: "https://sepolia.arbiscan.io",
-    };
-    const baseUrl = explorers[chainId];
+    const baseUrl = CHAIN_CONFIG[chainId]?.explorer;
     return baseUrl ? `${baseUrl}/tx/${txHash}` : "#";
 }
 
@@ -163,10 +159,11 @@ export function getExplorerTxUrl(txHash: string, chainId: number): string {
  * Get chain color for UI
  */
 export function getChainColor(chainId: number): string {
-    const colors: Record<number, string> = {
-        338: "text-blue-400",
-        43113: "text-red-400",
-        421614: "text-purple-400",
+    const colors: Record<string, string> = {
+        red: "text-red-400",
+        cyan: "text-cyan-400",
+        yellow: "text-yellow-400",
     };
-    return colors[chainId] || "text-cyan-400";
+    const colorKey = CHAIN_CONFIG[chainId]?.color;
+    return colorKey ? colors[colorKey] || "text-cyan-400" : "text-cyan-400";
 }

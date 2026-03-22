@@ -8,7 +8,7 @@
  * - MultimodalCanvas for chat interface
  * - PluginTester for plugin testing
  */
-import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { Suspense, lazy, useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { usePostHog } from "@posthog/react";
 import { mpTrack } from "@/lib/mixpanel";
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
@@ -20,9 +20,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import {
   Sheet,
   SheetContent,
@@ -31,7 +28,6 @@ import {
 } from "@/components/ui/sheet";
 import {
   Bot,
-  Loader2,
   Settings2,
   Sparkles,
   RefreshCw,
@@ -45,7 +41,6 @@ import { cn } from "@/lib/utils";
 import { MultimodalCanvas } from "@/components/chat";
 import { MirrorPane, type ModelParamsSchema } from "@/components/mirror-pane";
 import { ModelSelector } from "@/components/model-selector";
-import { PluginTester } from "@/components/plugin-tester";
 import { useChat } from "@/hooks/use-chat";
 import { useModels } from "@/hooks/use-model";
 import { useToast } from "@/hooks/use-toast";
@@ -83,6 +78,11 @@ function getTaskStyle(task?: string) {
 }
 
 const API_BASE = (import.meta.env.VITE_API_URL || "https://api.compose.market").replace(/\/+$/, "");
+const PANE_COLLAPSED_KEY = "playground_pane_collapsed";
+
+const LazyPluginTester = lazy(() =>
+  import("@/components/plugin-tester").then((module) => ({ default: module.PluginTester }))
+);
 
 function getDefaultParamValues(schema: ModelParamsSchema | null): Record<string, unknown> {
   if (!schema) {
@@ -152,7 +152,6 @@ export default function PlaygroundPage() {
   const [mobilePaneOpen, setMobilePaneOpen] = useState(false);
 
   // Desktop pane collapse state (persisted)
-  const PANE_COLLAPSED_KEY = "playground_pane_collapsed";
   const [paneCollapsed, setPaneCollapsed] = useState(() => {
     if (typeof window !== "undefined") {
       return localStorage.getItem(PANE_COLLAPSED_KEY) === "true";
@@ -174,6 +173,7 @@ export default function PlaygroundPage() {
   // Model Parameters State (for image/video models)
   const [modelParams, setModelParams] = useState<ModelParamsSchema | null>(null);
   const [paramValues, setParamValues] = useState<Record<string, unknown>>({});
+  const modelParamsCacheRef = useRef<Map<string, ModelParamsSchema | null>>(new Map());
 
   // Stable conversationId for file hooks
   const conversationId = useRef(`playground-${Date.now()}`).current;
@@ -184,7 +184,7 @@ export default function PlaygroundPage() {
     onError: (err) => setInferenceError(err),
   });
   const { messages, setMessages, scrollContainerRef, messagesEndRef,
-    streamedTextRef, currentAssistantIdRef, updateAssistantMessage, handleJsonResponse,
+    streamedTextRef, currentAssistantIdRef, updateAssistantMessage,
     scheduleStreamUpdate, flushStreamContent,
     // Attachments
     attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, uploadedCids, cleanupFiles, clearFiles,
@@ -216,35 +216,6 @@ export default function PlaygroundPage() {
     prevModelRef.current = selectedModel;
   }, [selectedModel, messages.length]);
 
-  // Fetch model params when selectedModel changes
-  useEffect(() => {
-    if (!selectedModel) {
-      setModelParams(null);
-      setParamValues({});
-      return;
-    }
-
-    const fetchParams = async () => {
-      try {
-        const response = await fetch(`${API_BASE}/v1/models/${encodeURIComponent(selectedModel)}/params`);
-        if (response.ok) {
-          const data = await response.json();
-          setModelParams(data);
-          setParamValues(getDefaultParamValues(data));
-        } else {
-          setModelParams(null);
-          setParamValues({});
-        }
-      } catch (err) {
-        console.error("[playground] Failed to fetch model params:", err);
-        setModelParams(null);
-        setParamValues({});
-      }
-    };
-
-    fetchParams();
-  }, [selectedModel]);
-
   // Get selected model info
   const selectedModelInfo = useMemo(
     () => models.find((model) => model.modelId === selectedModel) || null,
@@ -253,6 +224,62 @@ export default function PlaygroundPage() {
   const modelType = selectedModelInfo ? getPrimaryModelType(selectedModelInfo) : "chat-completions";
   const outputType = getModelOutputType(selectedModelInfo);
   const isGoogleModel = useMemo(() => isGoogleCatalogModel(selectedModelInfo), [selectedModelInfo]);
+
+  // Fetch model params when selectedModel changes
+  useEffect(() => {
+    if (!selectedModel || !selectedModelInfo) {
+      setModelParams(null);
+      setParamValues({});
+      return;
+    }
+
+    if (outputType !== "image" && outputType !== "video") {
+      setModelParams(null);
+      setParamValues({});
+      return;
+    }
+
+    const cached = modelParamsCacheRef.current.get(selectedModel);
+    if (cached !== undefined) {
+      setModelParams(cached);
+      setParamValues(getDefaultParamValues(cached));
+      return;
+    }
+
+    const abortController = new AbortController();
+
+    const fetchParams = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/v1/models/${encodeURIComponent(selectedModel)}/params`, {
+          signal: abortController.signal,
+        });
+        if (response.ok) {
+          const data = await response.json() as ModelParamsSchema;
+          const normalizedData = Object.keys(data.params).length > 0 ? data : null;
+          modelParamsCacheRef.current.set(selectedModel, normalizedData);
+          setModelParams(normalizedData);
+          setParamValues(getDefaultParamValues(normalizedData));
+        } else {
+          modelParamsCacheRef.current.set(selectedModel, null);
+          setModelParams(null);
+          setParamValues({});
+        }
+      } catch (err) {
+        if (abortController.signal.aborted) {
+          return;
+        }
+        console.error("[playground] Failed to fetch model params:", err);
+        setModelParams(null);
+        setParamValues({});
+      }
+    };
+
+    void fetchParams();
+
+    return () => {
+      abortController.abort();
+    };
+  }, [outputType, selectedModel, selectedModelInfo]);
 
   // Build tools object for API request - only include enabled tools
   const activeGoogleTools = useMemo(() => {
@@ -347,7 +374,9 @@ export default function PlaygroundPage() {
       // When session is active, uses session bypass for instant <100ms latency
       const fetchWithPayment = createPaymentFetch({
         chainId: paymentChainId,
-        sessionToken: activeComposeKeyToken || undefined,
+        sessionToken: activeComposeKeyToken!,
+        sessionUserAddress: sessionActive ? account.address : undefined,
+        sessionBudgetRemaining: sessionActive ? budgetRemaining : undefined,
       });
 
       const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -768,13 +797,21 @@ export default function PlaygroundPage() {
       {/* Plugins Test: Using extracted PluginTester component */}
       {activeTab === "plugins" && (
         <div className="flex-1 min-h-0">
-          <PluginTester
-            sessionActive={sessionActive}
-            budgetRemaining={budgetRemaining}
-            formatBudget={formatBudget}
-            initialSource={initialPluginSource}
-            initialPlugin={initialPlugin}
-          />
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                Loading plugin tester...
+              </div>
+            }
+          >
+            <LazyPluginTester
+              sessionActive={sessionActive}
+              budgetRemaining={budgetRemaining}
+              formatBudget={formatBudget}
+              initialSource={initialPluginSource}
+              initialPlugin={initialPlugin}
+            />
+          </Suspense>
         </div>
       )}
 

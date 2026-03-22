@@ -9,8 +9,13 @@
  * Provides O(1) message updates, RAF-batched streaming, and stick-to-bottom scroll.
  */
 import { useState, useRef, useCallback, useEffect } from "react";
-import { uploadConversationFile, fileToDataUrl, cleanupConversationFiles } from "@/lib/pinata";
+import { uploadConversationFile, cleanupConversationFiles } from "@/lib/pinata";
 import { type ChatMessage, type AttachedFile } from "@/lib/api";
+import {
+    createObjectUrlPreview,
+    revokeObjectUrlPreview,
+    revokeObjectUrlSet,
+} from "@/lib/performance/object-url";
 
 // Re-export types for convenience
 export type { ChatMessage, AttachedFile } from "@/lib/api";
@@ -108,6 +113,8 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
     const [uploadedCids, setUploadedCids] = useState<string[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const attachedFilesRef = useRef<AttachedFile[]>([]);
+    const previewUrlsRef = useRef<Set<string>>(new Set());
 
     // === Recording State ===
     const [isRecording, setIsRecording] = useState(false);
@@ -131,6 +138,10 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
             setRecordingSupported(false);
         }
     }, []);
+
+    useEffect(() => {
+        attachedFilesRef.current = attachedFiles;
+    }, [attachedFiles]);
 
     // ==========================================================================
     // Message Functions
@@ -316,9 +327,11 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
             : file.type.startsWith("video/")
                 ? "video"
                 : "audio";
+        let preview: string | undefined;
 
         try {
-            const preview = await fileToDataUrl(file);
+            preview = createObjectUrlPreview(file);
+            previewUrlsRef.current.add(preview);
 
             const newFile: AttachedFile = {
                 file,
@@ -328,8 +341,21 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
             };
 
             if (maxFiles === 1) {
+                revokeObjectUrlSet(attachedFilesRef.current.map((attachedFile) => attachedFile.preview));
+                previewUrlsRef.current.clear();
+                previewUrlsRef.current.add(preview);
                 setAttachedFiles([newFile]);
             } else {
+                const currentFiles = attachedFilesRef.current;
+                if (currentFiles.length >= maxFiles) {
+                    const filesToDrop = currentFiles.slice(0, currentFiles.length - maxFiles + 1);
+                    for (const attachedFile of filesToDrop) {
+                        revokeObjectUrlPreview(attachedFile.preview);
+                        if (attachedFile.preview) {
+                            previewUrlsRef.current.delete(attachedFile.preview);
+                        }
+                    }
+                }
                 setAttachedFiles(prev =>
                     prev.length >= maxFiles
                         ? [...prev.slice(1), newFile]
@@ -346,6 +372,11 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
 
         } catch (err) {
             console.error("File upload failed:", err);
+            const attachedPreview = attachedFilesRef.current.find((attachedFile) => attachedFile.file === file)?.preview ?? preview;
+            revokeObjectUrlPreview(attachedPreview);
+            if (attachedPreview) {
+                previewUrlsRef.current.delete(attachedPreview);
+            }
             setAttachedFiles(prev => prev.filter(f => f.file !== file));
             onError?.("Failed to upload file");
         }
@@ -354,10 +385,17 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     }, [maxFiles, onError]);
 
     const handleRemoveFile = useCallback((file: File) => {
+        const attachedFile = attachedFilesRef.current.find((currentFile) => currentFile.file === file);
+        revokeObjectUrlPreview(attachedFile?.preview);
+        if (attachedFile?.preview) {
+            previewUrlsRef.current.delete(attachedFile.preview);
+        }
         setAttachedFiles(prev => prev.filter(f => f.file !== file));
     }, []);
 
     const clearFiles = useCallback(() => {
+        revokeObjectUrlSet(attachedFilesRef.current.map((attachedFile) => attachedFile.preview));
+        previewUrlsRef.current.clear();
         setAttachedFiles([]);
         if (fileInputRef.current) {
             fileInputRef.current.value = "";
@@ -403,9 +441,11 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
 
                 const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
                 const audioFile = new File([audioBlob], `recording-${Date.now()}.webm`, { type: "audio/webm" });
+                let preview: string | undefined;
 
                 try {
-                    const preview = await fileToDataUrl(audioFile);
+                    preview = createObjectUrlPreview(audioFile);
+                    previewUrlsRef.current.add(preview);
 
                     const attachedFile: AttachedFile = {
                         file: audioFile,
@@ -416,8 +456,21 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
 
                     // Add to attached files
                     if (maxFiles === 1) {
+                        revokeObjectUrlSet(attachedFilesRef.current.map((currentFile) => currentFile.preview));
+                        previewUrlsRef.current.clear();
+                        previewUrlsRef.current.add(preview);
                         setAttachedFiles([attachedFile]);
                     } else {
+                        const currentFiles = attachedFilesRef.current;
+                        if (currentFiles.length >= maxFiles) {
+                            const filesToDrop = currentFiles.slice(0, currentFiles.length - maxFiles + 1);
+                            for (const currentFile of filesToDrop) {
+                                revokeObjectUrlPreview(currentFile.preview);
+                                if (currentFile.preview) {
+                                    previewUrlsRef.current.delete(currentFile.preview);
+                                }
+                            }
+                        }
                         setAttachedFiles(prev => [...prev, attachedFile]);
                     }
 
@@ -431,6 +484,13 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
 
                 } catch (err) {
                     console.error("Recording upload failed:", err);
+                    const attachedFile = attachedFilesRef.current.find((currentFile) => currentFile.file === audioFile);
+                    const attachedPreview = attachedFile?.preview ?? preview;
+                    revokeObjectUrlPreview(attachedPreview);
+                    if (attachedPreview) {
+                        previewUrlsRef.current.delete(attachedPreview);
+                    }
+                    setAttachedFiles(prev => prev.filter((currentFile) => currentFile.file !== audioFile));
                     onError?.("Failed to upload recording");
                 }
             };
@@ -463,6 +523,8 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
             if (mediaStreamRef.current) {
                 mediaStreamRef.current.getTracks().forEach((track) => track.stop());
             }
+            revokeObjectUrlSet(previewUrlsRef.current);
+            previewUrlsRef.current.clear();
         };
     }, []);
 

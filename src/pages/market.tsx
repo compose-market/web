@@ -21,10 +21,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useOnchainWorkflows, useWorkflowsWithRFA, useOnchainAgents, useOpenRFAs, type OnchainWorkflow, type OnchainAgent, type OnchainRFA } from "@/hooks/use-onchain";
+import { useOnchainWorkflows, useOnchainAgents, useOpenRFAs, type OnchainWorkflow, type OnchainAgent, type OnchainRFA } from "@/hooks/use-onchain";
 import { useTabs } from "@/hooks/use-tabs";
 import { getIpfsUrl } from "@/lib/pinata";
-import { RFA_CATEGORIES, RFA_BOUNTY_LIMITS, getContractAddress } from "@/lib/contracts";
+import { RFA_BOUNTY_LIMITS, getContractAddress } from "@/lib/contracts";
 import { CHAIN_CONFIG } from "@/lib/chains";
 import { RFADetails } from "@/components/RFADetails";
 import {
@@ -574,8 +574,6 @@ const RFACard = React.memo(function RFACard({
   onViewDetails: () => void;
 }) {
   const posthog = usePostHog();
-  // Get category info from skills (first skill hash)
-  const categoryId = rfa.requiredSkills.length > 0 ? rfa.requiredSkills[0] : null;
 
   // Calculate bounty breakdown
   const offerNum = parseFloat(rfa.offerAmount);

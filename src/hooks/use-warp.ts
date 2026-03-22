@@ -5,7 +5,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { readContract } from "thirdweb";
 import { keccak256, encodePacked, type Address } from "viem";
-import { getWarpContract, WarpABI, getAgentFactoryContract } from "@/lib/contracts";
+import { getWarpContract, getAgentFactoryContract } from "@/lib/contracts";
 
 // =============================================================================
 // Types
@@ -94,24 +94,6 @@ async function getWarpedAgentIdByHash(externalHash: `0x${string}`): Promise<numb
     return Number(warpedId);
   } catch (error) {
     console.error(`Failed to check warped agent ID for hash ${externalHash}:`, error);
-    return 0;
-  }
-}
-
-/**
- * Get total number of warped agents
- */
-async function getTotalWarped(): Promise<number> {
-  try {
-    const contract = getWarpContract();
-    const total = await readContract({
-      contract,
-      method: "function totalWarped() view returns (uint256)",
-      params: [],
-    });
-    return Number(total);
-  } catch (error) {
-    console.error("Failed to get total warped count:", error);
     return 0;
   }
 }
@@ -272,4 +254,3 @@ export function useBatchWarpStatus(agentIds: number[]) {
     staleTime: 60 * 1000,
   });
 }
-

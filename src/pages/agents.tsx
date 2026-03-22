@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { usePostHog } from "@posthog/react";
 import { Button } from "@/components/ui/button";
@@ -22,14 +22,13 @@ import {
   Zap,
   Filter,
   Star,
-  Activity,
   Shield,
   Globe,
   ArrowRightLeft,
   Eye,
 } from "lucide-react";
 import { useAgents } from "@/hooks/use-agents";
-import { useOnchainAgents, type OnchainAgent } from "@/hooks/use-onchain";
+import { useOnchainAgents } from "@/hooks/use-onchain";
 import { useIsExternalWarped } from "@/hooks/use-warp";
 import { getIpfsUrl } from "@/lib/pinata";
 import {
@@ -51,7 +50,7 @@ export default function AgentsPage() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
   // Debounce search
-  useMemo(() => {
+  useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search), 300);
     return () => clearTimeout(timer);
   }, [search]);
@@ -569,4 +568,3 @@ function AgentCard({ agent, onSelect }: { agent: ExtendedAgent; onSelect: (a: Ag
     </Card>
   );
 }
-

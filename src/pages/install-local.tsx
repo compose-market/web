@@ -4,45 +4,22 @@ import { useCallback, useEffect, useState } from "react";
 import { WalletConnector, useWalletAccount } from "@/components/connector";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { API_BASE_URL } from "@/lib/api";
-import { resolveAgentCardCid } from "@/lib/local-install";
-import { useChain } from "@/contexts/ChainContext";
-import { Download, ExternalLink, Loader2, Monitor, Shield } from "lucide-react";
+import { MESH_MAC_DOWNLOADS, MESH_RELEASES_URL } from "@/lib/mesh-release";
+import { Download, Monitor, Shield } from "lucide-react";
 
-const LOCAL_DOWNLOAD_URL = "https://compose.market";
-
-interface LocalLinkTokenResponse {
-  success: boolean;
-  token: string;
-  deepLinkUrl: string;
-  error?: string;
-}
-
-function normalizeWallet(value: string | null): string | null {
-  if (!value) return null;
-  const normalized = value.trim().toLowerCase();
-  return /^0x[a-f0-9]{40}$/.test(normalized) ? normalized : null;
-}
-
-function parseQuery(): { token: string | null; agentWallet: string | null } {
+function parseQuery(): { token: string | null } {
   const params = new URLSearchParams(window.location.search);
-  const token = params.get("token");
-  const agentWallet = normalizeWallet(params.get("agent_wallet"));
-  return { token, agentWallet };
+  return { token: params.get("token") };
 }
 
 export default function InstallLocalPage() {
-  const { isConnected, address } = useWalletAccount();
-  const { paymentChainId } = useChain();
+  const { isConnected } = useWalletAccount();
   const [token, setToken] = useState<string | null>(null);
-  const [agentWallet, setAgentWallet] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     const parsed = parseQuery();
     setToken(parsed.token);
-    setAgentWallet(parsed.agentWallet);
   }, []);
 
   const openLocal = useCallback(() => {
@@ -53,42 +30,9 @@ export default function InstallLocalPage() {
     window.location.href = `manowar://open?token=${encodeURIComponent(token)}`;
   }, [token]);
 
-  const remintAndOpen = useCallback(async () => {
-    if (!address) {
-      setError("Connect wallet first.");
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      const linkedAgentWallet = agentWallet ? (agentWallet.toLowerCase() as `0x${string}`) : null;
-      const response = await fetch(`${API_BASE_URL}/api/local/link-token`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-session-user-address": address,
-          "x-chain-id": String(paymentChainId),
-        },
-        body: JSON.stringify({
-          userAddress: address,
-          chainId: paymentChainId,
-          agentWallet: agentWallet || undefined,
-          agentCardCid: linkedAgentWallet ? await resolveAgentCardCid(linkedAgentWallet) : undefined,
-        }),
-      });
-      const data: LocalLinkTokenResponse = await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || "Failed to mint local install token.");
-      }
-      setToken(data.token);
-      window.history.replaceState({}, "", `/install-local?token=${encodeURIComponent(data.token)}${agentWallet ? `&agent_wallet=${agentWallet}` : ""}`);
-      window.location.href = data.deepLinkUrl;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to mint local install token.");
-    } finally {
-      setBusy(false);
-    }
-  }, [address, agentWallet, paymentChainId]);
+  const openDownload = useCallback((url: string) => {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }, []);
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
@@ -128,13 +72,34 @@ export default function InstallLocalPage() {
           </Button>
 
           <Button
-            variant="outline"
-            className="w-full"
-            onClick={() => window.open(LOCAL_DOWNLOAD_URL, "_blank", "noopener,noreferrer")}
+            className="w-full bg-cyan-500 text-black hover:bg-cyan-400"
+            onClick={() => openDownload(MESH_MAC_DOWNLOADS.appleSilicon.dmgUrl)}
           >
             <Download className="w-4 h-4 mr-2" />
-            Download Compose Mesh
+            Download for Apple Silicon
           </Button>
+
+          <Button
+            variant="outline"
+            className="w-full"
+            onClick={() => openDownload(MESH_MAC_DOWNLOADS.intel.dmgUrl)}
+          >
+            <Download className="w-4 h-4 mr-2" />
+            Download for Intel Mac
+          </Button>
+
+          <div className="rounded-sm border border-sidebar-border p-3 bg-sidebar-accent text-xs text-muted-foreground space-y-1">
+            <p>{MESH_MAC_DOWNLOADS.appleSilicon.label}: {MESH_MAC_DOWNLOADS.appleSilicon.hint}</p>
+            <p>{MESH_MAC_DOWNLOADS.intel.label}: {MESH_MAC_DOWNLOADS.intel.hint}</p>
+            <a
+              href={MESH_RELEASES_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center text-cyan-400 hover:text-cyan-300"
+            >
+              View all Compose Mesh releases
+            </a>
+          </div>
         </CardContent>
       </Card>
     </div>

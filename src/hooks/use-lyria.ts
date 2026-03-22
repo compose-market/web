@@ -16,6 +16,11 @@
  */
 
 import { useState, useRef, useCallback, useEffect } from "react";
+import {
+  consumeLyriaAudioQueue,
+  enqueueLyriaAudioChunk,
+  type LyriaQueueChunk,
+} from "@/lib/performance/lyria-queue";
 
 // =============================================================================
 // Types
@@ -34,20 +39,14 @@ export interface LyriaConfig {
   sampleRateHz?: number;
 }
 
-export interface LyriaAudioChunk {
-  type: "audio";
-  data: string; // Base64-encoded PCM16 data
-  format: "pcm16";
-  sampleRate: number;
-  channels: number;
-}
+export interface LyriaAudioChunk extends LyriaQueueChunk { }
 
 export interface LyriaMessage {
   type: string;
   [key: string]: any;
 }
 
-export type LyriaConnectionState = 
+export type LyriaConnectionState =
   | "idle"
   | "connecting"
   | "connected"
@@ -62,11 +61,11 @@ export interface UseLyriaWebSocketReturn {
   state: LyriaConnectionState;
   sessionId: string | null;
   error: string | null;
-  
+
   // Audio data
   audioQueue: LyriaAudioChunk[];
   currentConfig: LyriaConfig;
-  
+
   // Actions
   connect: () => void;
   disconnect: () => void;
@@ -77,8 +76,9 @@ export interface UseLyriaWebSocketReturn {
   pause: () => void;
   stop: () => void;
   reset: () => void;
-  
+
   // Clear audio queue (call after consuming audio)
+  consumeAudioQueue: (count: number) => void;
   clearAudioQueue: () => void;
 }
 
@@ -88,6 +88,7 @@ export interface UseLyriaWebSocketReturn {
 
 // Use the configured socket URL from environment, append /lyria path
 const SOCKET_URL = `${import.meta.env.VITE_SOCKET_URL}/lyria`;
+const MAX_QUEUED_AUDIO_CHUNKS = 120;
 
 // =============================================================================
 // Hook
@@ -103,31 +104,31 @@ export function useLyriaWebSocket(): UseLyriaWebSocketReturn {
     bpm: 90,
     temperature: 1.0,
   });
-  
+
   // Refs for WebSocket and pending prompts
   const wsRef = useRef<WebSocket | null>(null);
   const pendingPromptRef = useRef<string | null>(null);
   const pendingWeightedPromptsRef = useRef<WeightedPrompt[] | null>(null);
   const pendingConfigRef = useRef<LyriaConfig | null>(null);
-  
+
   // =============================================================================
   // WebSocket Message Handler
   // =============================================================================
-  
+
   const handleMessage = useCallback((event: MessageEvent) => {
     try {
       const message = JSON.parse(event.data) as LyriaMessage;
-      
+
       switch (message.type) {
         case "session":
           setSessionId(message.sessionId || null);
           console.log("[Lyria] Session created:", message.sessionId);
           break;
-          
+
         case "connected":
           setState("ready");
           console.log("[Lyria] Connected to Lyria RealTime");
-          
+
           // Send pending prompts/config if any
           if (pendingPromptRef.current) {
             setPrompt(pendingPromptRef.current);
@@ -136,13 +137,13 @@ export function useLyriaWebSocket(): UseLyriaWebSocketReturn {
             setWeightedPrompts(pendingWeightedPromptsRef.current);
             pendingWeightedPromptsRef.current = null;
           }
-          
+
           if (pendingConfigRef.current) {
             setConfig(pendingConfigRef.current);
             pendingConfigRef.current = null;
           }
           break;
-          
+
         case "audio":
           // Add audio chunk to queue
           const audioChunk: LyriaAudioChunk = {
@@ -152,13 +153,13 @@ export function useLyriaWebSocket(): UseLyriaWebSocketReturn {
             sampleRate: message.sampleRate || 48000,
             channels: message.channels || 2,
           };
-          setAudioQueue(prev => [...prev, audioChunk]);
+          setAudioQueue((prev) => enqueueLyriaAudioChunk(prev, audioChunk, MAX_QUEUED_AUDIO_CHUNKS));
           break;
-          
+
         case "status":
           console.log("[Lyria] Status update:", message);
           break;
-          
+
         case "ack":
           console.log("[Lyria] Acknowledged:", message.action);
           if (message.action === "play") {
@@ -172,18 +173,18 @@ export function useLyriaWebSocket(): UseLyriaWebSocketReturn {
             setCurrentConfig(message.config);
           }
           break;
-          
+
         case "error":
           console.error("[Lyria] Error:", message.message);
           setError(message.message || "Unknown error");
           setState("error");
           break;
-          
+
         case "closed":
           console.log("[Lyria] Stream closed");
           setState("closed");
           break;
-          
+
         default:
           console.log("[Lyria] Unknown message type:", message.type, message);
       }
@@ -191,40 +192,40 @@ export function useLyriaWebSocket(): UseLyriaWebSocketReturn {
       console.error("[Lyria] Failed to parse message:", err);
     }
   }, []);
-  
+
   // =============================================================================
   // Actions
   // =============================================================================
-  
+
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       console.log("[Lyria] Already connected");
       return;
     }
-    
+
     setState("connecting");
     setError(null);
-    
+
     try {
       const ws = new WebSocket(SOCKET_URL);
       wsRef.current = ws;
-      
+
       ws.onopen = () => {
         console.log("[Lyria] WebSocket connected");
         setState("connected");
-        
+
         // Send connect message to start Lyria session
         ws.send(JSON.stringify({ type: "connect" }));
       };
-      
+
       ws.onmessage = handleMessage;
-      
+
       ws.onerror = (event) => {
         console.error("[Lyria] WebSocket error:", event);
         setError("WebSocket connection failed");
         setState("error");
       };
-      
+
       ws.onclose = () => {
         console.log("[Lyria] WebSocket closed");
         setState("closed");
@@ -236,7 +237,7 @@ export function useLyriaWebSocket(): UseLyriaWebSocketReturn {
       setState("error");
     }
   }, [handleMessage]);
-  
+
   const disconnect = useCallback(() => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -249,62 +250,62 @@ export function useLyriaWebSocket(): UseLyriaWebSocketReturn {
     setAudioQueue([]);
     setError(null);
   }, []);
-  
+
   const setPrompt = useCallback((prompt: string) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       pendingPromptRef.current = prompt;
       return;
     }
-    
+
     ws.send(JSON.stringify({
       type: "prompt",
       prompt,
     }));
   }, []);
-  
+
   const setWeightedPrompts = useCallback((prompts: WeightedPrompt[]) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       pendingWeightedPromptsRef.current = prompts;
       return;
     }
-    
+
     ws.send(JSON.stringify({
       type: "prompt",
       weightedPrompts: prompts,
     }));
   }, []);
-  
+
   const setConfig = useCallback((config: LyriaConfig) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       pendingConfigRef.current = config;
       return;
     }
-    
+
     ws.send(JSON.stringify({
       type: "config",
       config,
     }));
-    
+
     setCurrentConfig(prev => ({ ...prev, ...config }));
   }, []);
-  
+
   const play = useCallback(() => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: "play" }));
     }
   }, []);
-  
+
   const pause = useCallback(() => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: "pause" }));
     }
   }, []);
-  
+
   const stop = useCallback(() => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -312,7 +313,7 @@ export function useLyriaWebSocket(): UseLyriaWebSocketReturn {
     }
     setAudioQueue([]);
   }, []);
-  
+
   const reset = useCallback(() => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -320,21 +321,25 @@ export function useLyriaWebSocket(): UseLyriaWebSocketReturn {
     }
     setAudioQueue([]);
   }, []);
-  
+
   const clearAudioQueue = useCallback(() => {
     setAudioQueue([]);
   }, []);
-  
+
+  const consumeAudioQueue = useCallback((count: number) => {
+    setAudioQueue((prev) => consumeLyriaAudioQueue(prev, count));
+  }, []);
+
   // =============================================================================
   // Cleanup on unmount
   // =============================================================================
-  
+
   useEffect(() => {
     return () => {
       disconnect();
     };
   }, [disconnect]);
-  
+
   return {
     state,
     sessionId,
@@ -350,6 +355,7 @@ export function useLyriaWebSocket(): UseLyriaWebSocketReturn {
     pause,
     stop,
     reset,
+    consumeAudioQueue,
     clearAudioQueue,
   };
 }

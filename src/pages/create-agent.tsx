@@ -17,7 +17,6 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -33,7 +32,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
-import { Cpu, DollarSign, ShieldCheck, Upload, ExternalLink, Sparkles, Plug, Search, X, ChevronRight, Loader2, Play, AlertCircle, CheckCircle2, Boxes, Brain, ArrowRightLeft, Plus, Globe, RefreshCw, Check } from "lucide-react";
+import { Cpu, DollarSign, ShieldCheck, Upload, Sparkles, Plug, Search, X, ChevronRight, Loader2, Play, AlertCircle, CheckCircle2, Boxes, Brain, ArrowRightLeft, Plus, Globe, RefreshCw, Check } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -52,25 +51,20 @@ import {
   uploadAgentAvatar,
   uploadAgentCard,
   getIpfsUri,
-  getIpfsUrl,
   fileToDataUrl,
   isPinataConfigured,
   type AgentCard
 } from "@/lib/pinata";
 import {
-  getAgentFactoryContract,
   computeDnaHash,
   deriveAgentWalletAddress,
   usdcToWei,
-  getContractAddress
 } from "@/lib/contracts";
-import { CHAIN_IDS, CHAIN_CONFIG, isCronosChain } from "@/lib/chains";
+import { CHAIN_CONFIG } from "@/lib/chains";
 import { useChain } from "@/contexts/ChainContext";
 import { NetworkSelector } from "@/components/ui/network-selector";
-import { useActiveAccount, useAdminWallet, useSendTransaction } from "thirdweb/react";
-import { accountAbstraction } from "../lib/chains";
+import { useActiveAccount, useSendTransaction } from "thirdweb/react";
 import { getAgentFactoryContractForChain, prepareMintAgentCall } from "@/lib/contracts";
-import { submitCronosTransaction, encodeContractCall } from "@/lib/cronos/aa";
 import { saveMintSuccessForShare } from "@/lib/share";
 
 interface SelectedPlugin {
@@ -141,7 +135,6 @@ export default function CreateAgent() {
   const account = useActiveAccount();
   const { mutateAsync: sendTransaction } = useSendTransaction();
   const { selectedChainId } = useChain();
-  const adminWallet = useAdminWallet(); // EOA signer for Smart Account (needed for Cronos AA deployment)
 
   // Parse URL params
   const urlParams = new URLSearchParams(searchString);
@@ -159,7 +152,6 @@ export default function CreateAgent() {
   // Avatar upload state
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
   const [mintStep, setMintStep] = useState<"idle" | "uploading" | "minting" | "done">("idle");
 
   // Avatar generation state
@@ -610,74 +602,13 @@ export default function CreateAgent() {
     // Step 2: Immediately trigger on-chain transaction (no second click needed)
     try {
       const contract = getAgentFactoryContractForChain(selectedChainId);
-      const factoryAddress = contract.address as `0x${string}`;
-
-      // Chain-aware transaction execution
-      if (isCronosChain(selectedChainId) && account) {
-        // Cronos: Use our custom AA Paymaster flow (no ThirdWeb bundler available)
-        console.log(`[mint] Using Cronos AA for chain ${selectedChainId}`);
-
-        const mintData = encodeContractCall({
-          abi: [{
-            name: "mintAgent",
-            type: "function",
-            inputs: [
-              { name: "dnaHash", type: "bytes32" },
-              { name: "licenses", type: "uint256" },
-              { name: "licensePrice", type: "uint256" },
-              { name: "cloneable", type: "bool" },
-              { name: "agentCardUri", type: "string" },
-            ],
-            outputs: [{ name: "agentId", type: "uint256" }],
-          }],
-          functionName: "mintAgent",
-          args: [
-            txData.dnaHash,
-            txData.licenses,
-            txData.licensePrice,
-            txData.cloneable,
-            txData.agentCardUri,
-          ],
-        });
-
-        // Get admin wallet for signing (Smart Accounts return wrapped EIP-1271 signatures)
-        const adminAddress = adminWallet?.getAccount()?.address as `0x${string}` | undefined;
-        const adminAccount = adminWallet?.getAccount();
-        if (adminAddress) {
-          console.log(`[mint] Admin wallet (EOA signer): ${adminAddress}`);
-        }
-
-        const result = await submitCronosTransaction({
-          account,
-          to: factoryAddress,
-          data: mintData,
-          value: BigInt(0),
-          chainId: selectedChainId,
-          adminAddress, // For first-time Cronos transactions to deploy Smart Account
-          adminWallet: adminAccount, // EOA for signing (raw ECDSA)
-        });
-
-        if (!result.success) {
-          throw new Error(result.error || "Cronos transaction failed");
-        }
-
-        // Handle success
-        await handleMintSuccess(txData, { transactionHash: result.txHash! });
-      } else {
-        // Fuji/other chains: Use ThirdWeb sendTransaction (bundler available)
-        console.log(`[mint] Using ThirdWeb for chain ${selectedChainId}`);
-        if (!account) {
-          throw new Error("Wallet account unavailable");
-        }
-
-        const transaction = prepareMintAgentCall(contract, txData);
-
-        // Send transaction (gasless sponsorship configured on ThirdWeb)
-        const result = await sendTransaction(transaction);
-
-        // Handle success
-        await handleMintSuccess(txData, { transactionHash: result.transactionHash });
+      if (!account) {
+        throw new Error("Wallet account unavailable");
       }
+
+      const transaction = prepareMintAgentCall(contract, txData);
+      const result = await sendTransaction(transaction);
+      await handleMintSuccess(txData, { transactionHash: result.transactionHash });
     } catch (error) {
       handleMintError(error instanceof Error ? error : new Error(String(error)));
     }

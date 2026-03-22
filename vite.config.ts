@@ -21,6 +21,9 @@ export default defineConfig(() => ({
     outDir: path.resolve(import.meta.dirname, "dist"),
     emptyOutDir: true,
     chunkSizeWarningLimit: 4000, // 4MB - mermaid/thirdweb are large but already code-split
+    modulePreload: {
+      resolveDependencies: (_url, deps) => deps.filter((dep) => !dep.includes("vendor-thirdweb")),
+    },
     rollupOptions: {
       output: {
         manualChunks(id: string) {

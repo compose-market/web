@@ -13,9 +13,6 @@ import {
   getAgentFactoryContractForChain,
   getWorkflowContractForChain,
   getWarpContractForChain,
-  AgentFactoryABI,
-  WorkflowABI,
-  WarpABI,
   formatUsdcPrice,
   weiToUsdc,
   type AgentData,
@@ -840,4 +837,3 @@ export function useRFAsForWorkflow(workflowId: number | null) {
     gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
   });
 }
-

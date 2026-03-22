@@ -21,7 +21,6 @@ import {
   Controls,
   MiniMap,
   ReactFlowProvider,
-  MarkerType,
 } from "@xyflow/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -32,7 +31,7 @@ import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import {
   Play, Loader2, CheckCircle2,
-  Plug, Settings, Bot, ExternalLink,
+  Plug, Settings, Bot,
   Sparkles, Upload, DollarSign, Clock, AlertCircle,
   ArrowRightLeft, Globe, Maximize2, RefreshCw, Check
 } from "lucide-react";
@@ -43,10 +42,9 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
-import { useActiveAccount, useActiveWallet, useAdminWallet, useSendTransaction } from "thirdweb/react";
+import { useActiveAccount, useActiveWallet, useSendTransaction } from "thirdweb/react";
 import { prepareContractCall } from "thirdweb";
 import { readContract } from "thirdweb";
-import { submitCronosTransaction, encodeContractCall } from "@/lib/cronos/aa";
 import { saveMintSuccessForShare } from "@/lib/share";
 import {
   getWorkflowContractForChain, getContractAddressForChain, getAgentFactoryContractForChain,
@@ -54,11 +52,11 @@ import {
   weiToUsdc, computeWorkflowDnaHash, deriveWorkflowWalletAddress
 } from "@/lib/contracts";
 import {
-  uploadWorkflowBanner, uploadWorkflowMetadata, getIpfsUri, getIpfsUrl,
+  uploadWorkflowBanner, uploadWorkflowMetadata, getIpfsUri,
   fileToDataUrl, isPinataConfigured, fetchFromIpfs,
   type WorkflowMetadata, type AgentCard
 } from "@/lib/pinata";
-import { CHAIN_IDS, CHAIN_CONFIG, thirdwebClient, getUsdcContractForChain, isCronosChain, getUsdcAddress } from "@/lib/chains";
+import { CHAIN_CONFIG, getUsdcContractForChain } from "@/lib/chains";
 import { useChain } from "@/contexts/ChainContext";
 import { NetworkSelector } from "@/components/ui/network-selector";
 import { API_BASE_URL } from "@/lib/api";
@@ -128,7 +126,6 @@ function MintWorkflowDialog({
   const wallet = useActiveWallet();
   const account = useActiveAccount();
   const { mutateAsync: sendTransaction } = useSendTransaction();
-  const adminWallet = useAdminWallet();
   const { selectedChainId } = useChain();
 
   const [title, setTitle] = useState(workflowName);
@@ -309,189 +306,61 @@ function MintWorkflowDialog({
       const workflowCardUri = getIpfsUri(metadataCid);
       const workflowAddress = getContractAddressForChain("Workflow", selectedChainId);
 
-      // Chain-aware transaction: routes to selected chain
-      if (isCronosChain(selectedChainId) && account) {
-        // Cronos: Use our custom AA Paymaster flow with batched transactions
-        const adminAddress = adminWallet?.getAccount()?.address as `0x${string}` | undefined;
-        const adminAccount = adminWallet?.getAccount();
-        const usdcContractAddress = getUsdcAddress(selectedChainId);
-
-        // Build mint calldata
-        const mintData = encodeContractCall({
-          abi: [{
-            type: "function",
-            name: "mintWorkflow",
-            inputs: [
-              {
-                type: "tuple",
-                name: "params",
-                components: [
-                  { type: "string", name: "title" },
-                  { type: "string", name: "description" },
-                  { type: "string", name: "banner" },
-                  { type: "string", name: "workflowCardUri" },
-                  { type: "uint256", name: "units" },
-                  { type: "bool", name: "leaseEnabled" },
-                  { type: "uint256", name: "leaseDuration" },
-                  { type: "uint8", name: "leasePercent" },
-                  { type: "bool", name: "hasCoordinator" },
-                  { type: "string", name: "coordinatorModel" },
-                ],
-              },
-              { type: "uint256[]", name: "agentIds" },
-            ],
-            outputs: [{ type: "uint256", name: "workflowId" }],
-          }],
-          functionName: "mintWorkflow",
-          args: [
-            {
-              title,
-              description,
-              banner: bannerImageUri,
-              workflowCardUri,
-              units: units ? BigInt(parseInt(units)) : BigInt(1),
-              leaseEnabled,
-              leaseDuration: BigInt(parseInt(leaseDuration) || 0),
-              leasePercent: parseInt(leasePercent) || 0,
-              hasCoordinator: !!coordinatorModel,
-              coordinatorModel: coordinatorModel || "",
-            },
-            agentIds.map(id => BigInt(id)),
-          ],
-        });
-
-        let result;
-
-        // Use batched transaction if USDC payment is needed (approve + mint in one UserOp)
-        if (totalAgentPrice > BigInt(0)) {
-          const { submitCronosBatchTransaction } = await import("@/lib/cronos/aa");
-
-          const approvalData = encodeContractCall({
-            abi: [{
-              type: "function",
-              name: "approve",
-              inputs: [
-                { type: "address", name: "spender" },
-                { type: "uint256", name: "amount" },
-              ],
-              outputs: [{ type: "bool" }],
-            }],
-            functionName: "approve",
-            args: [workflowAddress, totalAgentPrice],
-          });
-
-          // Single batched transaction: approve + mint
-          result = await submitCronosBatchTransaction({
-            account,
-            calls: [
-              { to: usdcContractAddress as `0x${string}`, data: approvalData as `0x${string}` },
-              { to: workflowAddress as `0x${string}`, data: mintData as `0x${string}` },
-            ],
-            chainId: selectedChainId,
-            adminAddress,
-            adminWallet: adminAccount,
-          });
-        } else {
-          // No payment needed, just mint
-          result = await submitCronosTransaction({
-            account,
-            to: workflowAddress as `0x${string}`,
-            data: mintData as `0x${string}`,
-            value: BigInt(0),
-            chainId: selectedChainId,
-            adminAddress,
-            adminWallet: adminAccount,
-          });
-        }
-
-        if (!result.success) {
-          throw new Error(result.error || "Cronos transaction failed");
-        }
-
-        saveMintSuccessForShare({
-          type: 'workflow',
-          name: title,
-          walletAddress,
-          txHash: result.txHash!,
-          chainId: selectedChainId,
-        });
-
-        posthog?.capture("workflow_published", {
-          workflow_title: title,
-          workflow_wallet: walletAddress,
-          chain_id: selectedChainId,
-          agent_count: agentIds.length,
-          tx_hash: result.txHash,
-          path: "cronos",
-        });
-
-        mpTrack("Conversion Event", { "Conversion Type": "workflow_published" });
-        mpTrack("Purchase", {
-          transaction_id: result.txHash,
-          revenue: Number(totalAgentPriceFormatted),
-          currency: "USDC",
-        });
-
-        onOpenChange(false);
-        setLocation("/my-assets");
-      } else {
-        // Fuji/other chains: Use ThirdWeb sendTransaction with AA
-        if (!account) {
-          throw new Error("Wallet account unavailable");
-        }
-        const workflowContract = getWorkflowContractForChain(selectedChainId);
-        const usdcContract = getUsdcContractForChain(selectedChainId);
-        const mintTransaction = prepareMintWorkflowCall(workflowContract, {
-          params: {
-            title,
-            description,
-            banner: bannerImageUri,
-            workflowCardUri,
-            units: units ? BigInt(parseInt(units)) : BigInt(1),
-            leaseEnabled,
-            leaseDuration: BigInt(parseInt(leaseDuration) || 0),
-            leasePercent: parseInt(leasePercent) || 0,
-            hasCoordinator: !!coordinatorModel,
-            coordinatorModel: coordinatorModel || "",
-          },
-          agentIds: agentIds.map(id => BigInt(id)),
-        });
-        if (totalAgentPrice > BigInt(0)) {
-          const approvalTx = prepareContractCall({
-            contract: usdcContract,
-            method: "function approve(address spender, uint256 amount) returns (bool)",
-            params: [workflowAddress, totalAgentPrice],
-          });
-          await sendTransaction(approvalTx);
-        }
-        const result = await sendTransaction(mintTransaction);
-        saveMintSuccessForShare({
-          type: 'workflow',
-          name: title,
-          walletAddress,
-          txHash: result.transactionHash,
-          chainId: selectedChainId,
-        });
-
-        posthog?.capture("workflow_published", {
-          workflow_title: title,
-          workflow_wallet: walletAddress,
-          chain_id: selectedChainId,
-          agent_count: agentIds.length,
-          tx_hash: result.transactionHash,
-          path: "thirdweb",
-        });
-
-        mpTrack("Conversion Event", { "Conversion Type": "workflow_published" });
-        mpTrack("Purchase", {
-          transaction_id: result.transactionHash,
-          revenue: Number(totalAgentPriceFormatted),
-          currency: "USDC",
-        });
-
-        onOpenChange(false);
-        setLocation("/my-assets");
+      if (!account) {
+        throw new Error("Wallet account unavailable");
       }
+      const workflowContract = getWorkflowContractForChain(selectedChainId);
+      const usdcContract = getUsdcContractForChain(selectedChainId);
+      const mintTransaction = prepareMintWorkflowCall(workflowContract, {
+        params: {
+          title,
+          description,
+          banner: bannerImageUri,
+          workflowCardUri,
+          units: units ? BigInt(parseInt(units)) : BigInt(1),
+          leaseEnabled,
+          leaseDuration: BigInt(parseInt(leaseDuration) || 0),
+          leasePercent: parseInt(leasePercent) || 0,
+          hasCoordinator: !!coordinatorModel,
+          coordinatorModel: coordinatorModel || "",
+        },
+        agentIds: agentIds.map(id => BigInt(id)),
+      });
+      if (totalAgentPrice > BigInt(0)) {
+        const approvalTx = prepareContractCall({
+          contract: usdcContract,
+          method: "function approve(address spender, uint256 amount) returns (bool)",
+          params: [workflowAddress, totalAgentPrice],
+        });
+        await sendTransaction(approvalTx);
+      }
+      const result = await sendTransaction(mintTransaction);
+      saveMintSuccessForShare({
+        type: 'workflow',
+        name: title,
+        walletAddress,
+        txHash: result.transactionHash,
+        chainId: selectedChainId,
+      });
+
+      posthog?.capture("workflow_published", {
+        workflow_title: title,
+        workflow_wallet: walletAddress,
+        chain_id: selectedChainId,
+        agent_count: agentIds.length,
+        tx_hash: result.transactionHash,
+        path: "thirdweb",
+      });
+
+      mpTrack("Conversion Event", { "Conversion Type": "workflow_published" });
+      mpTrack("Purchase", {
+        transaction_id: result.transactionHash,
+        revenue: Number(totalAgentPriceFormatted),
+        currency: "USDC",
+      });
+
+      onOpenChange(false);
+      setLocation("/my-assets");
     } catch (error) {
       posthog?.captureException(error instanceof Error ? error : new Error(String(error)), {
         $exception_message: "workflow_publish_failed",
@@ -903,6 +772,8 @@ function ComposeFlow() {
       const fetchWithPayment = createPaymentFetch({
         chainId: paymentChainId,
         sessionToken: activeComposeKeyToken,
+        sessionUserAddress: sessionActive ? account?.address : undefined,
+        sessionBudgetRemaining: sessionActive ? budgetRemaining : undefined,
       });
 
       const workflowPayload = {

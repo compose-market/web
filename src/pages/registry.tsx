@@ -5,7 +5,7 @@
  * Includes test console for GOAT plugins.
  */
 import { useState, useMemo } from "react";
-import { Link, useLocation } from "wouter";
+import { useLocation } from "wouter";
 import { usePostHog } from "@posthog/react";
 import {
   useRegistryServers,
@@ -686,4 +686,3 @@ export default function RegistryPage() {
     </div>
   );
 }
-

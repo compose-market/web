@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Link } from "wouter";
 import { usePostHog } from "@posthog/react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -33,9 +33,9 @@ import { useActiveAccount, useSendTransaction } from "thirdweb/react";
 import { prepareContractCall } from "thirdweb";
 import { useAgentsByCreator, useWorkflowsByCreator, useRFAsByPublisher, type OnchainAgent, type OnchainWorkflow, type OnchainRFA } from "@/hooks/use-onchain";
 import { getIpfsUrl } from "@/lib/pinata";
-import { CHAIN_CONFIG, CHAIN_IDS } from "@/lib/chains";
+import { CHAIN_CONFIG } from "@/lib/chains";
 import { useChain } from "@/contexts/ChainContext";
-import { getContractAddress, getRFAContract, RFA_BOUNTY_LIMITS } from "@/lib/contracts";
+import { getContractAddress, getRFAContract } from "@/lib/contracts";
 import { RFADetails } from "@/components/RFADetails";
 import { ShareSuccessDialog } from "@/components/share-dialog";
 import { getMintSuccessForShare, clearMintSuccessShare, type MintShareData } from "@/lib/share";
@@ -105,10 +105,8 @@ export default function MyAssetsPage() {
     );
   }
 
-  const isLoading = isLoadingAgents || isLoadingWorkflows || isLoadingRFAs;
   const agentCount = agents?.length || 0;
   const workflowCount = workflows?.length || 0;
-  const rfaCount = rfas?.length || 0;
   const openRfaCount = rfas?.filter(r => r.status === 'Open').length || 0;
 
   return (
@@ -217,7 +215,7 @@ export default function MyAssetsPage() {
           {!isLoadingAgents && agents && agents.length > 0 && (
             <div className="cm-card-grid cm-card-grid--2col">
               {agents.map((agent) => (
-                <AgentAssetCard key={agent.id} agent={agent} chainId={paymentChainId} />
+                <AgentAssetCard key={agent.id} agent={agent} />
               ))}
             </div>
           )}
@@ -260,7 +258,7 @@ export default function MyAssetsPage() {
           {!isLoadingWorkflows && workflows && workflows.length > 0 && (
             <div className="cm-card-grid cm-card-grid--2col">
               {workflows.map((workflow) => (
-                <WorkflowAssetCard key={workflow.id} workflow={workflow} chainId={paymentChainId} />
+                <WorkflowAssetCard key={workflow.id} workflow={workflow} />
               ))}
             </div>
           )}
@@ -357,7 +355,7 @@ export default function MyAssetsPage() {
   );
 }
 
-function AgentAssetCard({ agent, chainId }: { agent: OnchainAgent; chainId: number }) {
+function AgentAssetCard({ agent }: { agent: OnchainAgent }) {
   const metadata = agent.metadata;
   const name = metadata?.name || `Agent #${agent.id}`;
   const description = metadata?.description || "No description available";
@@ -483,7 +481,7 @@ function AgentAssetCard({ agent, chainId }: { agent: OnchainAgent; chainId: numb
   );
 }
 
-function WorkflowAssetCard({ workflow, chainId }: { workflow: OnchainWorkflow; chainId: number }) {
+function WorkflowAssetCard({ workflow }: { workflow: OnchainWorkflow }) {
   let bannerUrl: string | null = null;
   if (workflow.image && workflow.image.startsWith("ipfs://")) {
     bannerUrl = getIpfsUrl(workflow.image.replace("ipfs://", ""));
@@ -604,11 +602,6 @@ function RFAAssetCard({
   const posthog = usePostHog();
   const { mutateAsync: sendTransaction, isPending } = useSendTransaction();
   const [isCancelling, setIsCancelling] = useState(false);
-
-  // Calculate bounty breakdown
-  const offerNum = parseFloat(rfa.offerAmount);
-  const basicBounty = RFA_BOUNTY_LIMITS.BASIC_BOUNTY;
-  const readmeBonus = Math.max(0, offerNum - basicBounty);
 
   // Format dates
   const createdDate = new Date(rfa.createdAt * 1000);
