@@ -1,26 +1,23 @@
 "use client";
 
-import { ConnectButton, useActiveAccount, useActiveWallet, useAdminWallet } from "thirdweb/react";
+import { useEffect, useMemo, useState } from "react";
+import { ConnectButton, useActiveAccount, useActiveWallet } from "thirdweb/react";
 import { createWallet, inAppWallet } from "thirdweb/wallets";
 import type { SmartWalletOptions } from "thirdweb/wallets";
-import { thirdwebClient, CHAIN_OBJECTS, USDC_ADDRESSES, CHAIN_CONFIG, paymentToken as defaultPaymentToken, CHAIN_IDS } from "@/lib/chains";
-import { useChain } from "@/contexts/ChainContext";
-import { useTotalBalance } from "@/hooks/use-multichain";
-import { cn } from "@/lib/utils";
-import { useState, useMemo, useEffect } from "react";
-import { ChevronDown, LogOut, Copy, Check, ExternalLink, AlertTriangle } from "lucide-react";
-import { registerOnCronos } from "@/lib/cronos/aa";
-import { mpIdentify, mpReset } from "@/lib/mixpanel";
+import { ChevronDown, LogOut, Copy, Check, ExternalLink } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { thirdwebClient, CHAIN_OBJECTS, USDC_ADDRESSES, CHAIN_CONFIG } from "@/lib/chains";
+import { useChain } from "@/contexts/ChainContext";
+import { useTotalBalance } from "@/hooks/use-multichain";
+import { cn } from "@/lib/utils";
+import { mpIdentify, mpReset } from "@/lib/mixpanel";
 
-// Configure all supported authentication methods
 const wallets = [
-  // In-app wallet with social/email/passkey auth (creates embedded wallet)
   inAppWallet({
     auth: {
       options: [
@@ -35,7 +32,6 @@ const wallets = [
       ],
     },
   }),
-  // External wallets
   createWallet("io.metamask"),
   createWallet("com.coinbase.wallet"),
   createWallet("walletConnect"),
@@ -48,104 +44,73 @@ interface WalletConnectorProps {
   compact?: boolean;
 }
 
-/**
- * Brand-aligned wallet connector for Compose.Market
- * Supports: Email, Google, GitHub, X, Discord, Farcaster, Passkey, Guest + External wallets
- * 
- * ARCHITECTURE:
- * - Smart Account creation uses Avalanche Fuji (bundler available at 43113.bundler.thirdweb.com)
- * - Smart Account address is universal (same on ALL EVM chains via CREATE2)
- * - Avalanche Fuji is the default chain
- * - User can select a specific supported chain (from ChainContext), then used for display, contracts, and x402 payments
- * - This allows users to pay on chains not supported by Thirdweb (e.g., Cronos) while using a bundler-created Smart Account
- */
 export function WalletConnector({ className, compact = false }: WalletConnectorProps) {
   const account = useActiveAccount();
   const wallet = useActiveWallet();
-  const adminWallet = useAdminWallet();
   const { paymentChainId } = useChain();
-  const { formatted: totalBalance, isLoading: balanceLoading } = useTotalBalance(account?.address);
   const [copied, setCopied] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
-  // Mixpanel identity — fires Sign Up (first time) or Sign In (returning)
   useEffect(() => {
     if (account?.address) {
       mpIdentify(account.address);
     }
   }, [account?.address]);
 
-  // Dynamically resolve the user's selected payment chain for display/contracts
-  const selectedPaymentChain = useMemo(() => {
+  const smartAccountChain = useMemo(() => {
     return CHAIN_OBJECTS[paymentChainId as keyof typeof CHAIN_OBJECTS];
   }, [paymentChainId]);
 
-  // Smart Account chain - use user's selected payment chain
-  // The Smart Account address is deterministic (CREATE2) so it's the same on ALL chains
-  // But the accountAbstraction.chain must match the chain where transactions are sent
-  // ThirdWeb dashboard has gas sponsorship configured for both Fuji and Cronos Testnet
-  const smartAccountChain = useMemo(() => {
-    return CHAIN_OBJECTS[paymentChainId as keyof typeof CHAIN_OBJECTS] ||
-      CHAIN_OBJECTS[CHAIN_IDS.avalancheFuji as keyof typeof CHAIN_OBJECTS];
-  }, [paymentChainId]);
+  if (!smartAccountChain) {
+    throw new Error(`Unsupported payment chain: ${paymentChainId}`);
+  }
 
-  // Cronos Testnet uses different AA infrastructure than ThirdWeb's default deterministic addresses
-  // v0.7 Deployed 2026-01-29 with canonical EntryPoint
-  const CRONOS_TESTNET_AA_CONFIG = {
-    factoryAddress: (import.meta.env.VITE_CRONOSTEST_ACCOUNT_FACTORY) as `0x${string}`,
-    entrypointAddress: (import.meta.env.VITE_CRONOSTEST_ENTRYPOINT) as `0x${string}`,
-  };
-  // Build accountAbstraction config - use selected chain for bundler/paymaster
-  // For Cronos Testnet, override with chain-specific factory and entrypoint addresses
   const dynamicAccountAbstraction = useMemo(() => {
-    const config: SmartWalletOptions = {
+    return {
       chain: smartAccountChain,
       sponsorGas: true,
-    };
+    } satisfies SmartWalletOptions;
+  }, [smartAccountChain]);
 
-    // Override factory and entrypoint for Cronos Testnet (chain 338)
-    // ThirdWeb's default deterministic addresses are NOT deployed on Cronos
-    if (paymentChainId === CHAIN_IDS.cronosTestnet) {
-      config.factoryAddress = CRONOS_TESTNET_AA_CONFIG.factoryAddress;
-      config.overrides = {
-        entrypointAddress: CRONOS_TESTNET_AA_CONFIG.entrypointAddress,
-      };
-    }
-    return config;
-  }, [smartAccountChain, paymentChainId]);
-
-  // Get USDC token config for the selected chain
   const selectedPaymentToken = useMemo(() => {
     const usdcAddress = USDC_ADDRESSES[paymentChainId];
-    return usdcAddress ? {
+    if (!usdcAddress) {
+      throw new Error(`USDC is not configured for chain: ${paymentChainId}`);
+    }
+
+    return {
       address: usdcAddress,
       name: "USD Coin",
       symbol: "USDC",
       icon: "/tokens/usdc.svg",
-    } : defaultPaymentToken;
+    };
   }, [paymentChainId]);
 
-  // Get payment chain config for display
+  const { formatted: totalBalance, isLoading: balanceLoading } = useTotalBalance(account?.address, {
+    enabled: !!account,
+    deferUntilIdle: !menuOpen,
+  });
+
   const chainConfig = CHAIN_CONFIG[paymentChainId];
   const chainColor = chainConfig?.color === "red" ? "bg-red-400" : "bg-blue-400";
 
-  // Not connected - show ThirdWeb connect button
   if (!account) {
     return (
       <ConnectButton
         client={thirdwebClient}
         wallets={wallets}
-        chain={smartAccountChain}  // Use user's selected chain
+        chain={smartAccountChain}
         accountAbstraction={dynamicAccountAbstraction}
         connectButton={{
           label: "CONNECT",
           className: `
-            !bg-cyan-500 !text-black 
-            !font-bold !tracking-wider 
+            !bg-cyan-500 !text-black
+            !font-bold !tracking-wider
             !shadow-[0_0_15px_-3px_rgba(6,182,212,0.5)]
             hover:!bg-cyan-400
             !border-0 !rounded-sm
             ${className || ""}
-        `,
+          `,
           style: {
             fontFamily: "var(--font-display), Orbitron, sans-serif",
             textTransform: "uppercase",
@@ -167,7 +132,7 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
             [paymentChainId]: selectedPaymentToken.address,
           },
           className: `
-            !bg-cyan-500/10 !border-cyan-500/30 
+            !bg-cyan-500/10 !border-cyan-500/30
             !text-cyan-400 !font-mono
             hover:!bg-cyan-500/20
             !rounded-sm
@@ -182,10 +147,9 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
         theme={{
           type: "dark",
           colors: {
-            // Compose.Market brand colors - Cyan primary, Fuchsia accent
-            primaryButtonBg: "hsl(188 95% 43%)", // Cyan
-            primaryButtonText: "hsl(222 47% 3%)", // Dark bg
-            accentButtonBg: "hsl(292 85% 55%)", // Fuchsia accent
+            primaryButtonBg: "hsl(188 95% 43%)",
+            primaryButtonText: "hsl(222 47% 3%)",
+            accentButtonBg: "hsl(292 85% 55%)",
             accentButtonText: "hsl(0 0% 100%)",
             accentText: "hsl(188 95% 43%)",
             borderColor: "hsl(217 33% 15%)",
@@ -219,13 +183,12 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
     );
   }
 
-  // Connected - show custom display with payment chain & aggregated balance
   const shortAddress = `${account.address.slice(0, 6)}...${account.address.slice(-4)}`;
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(account.address);
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    globalThis.setTimeout(() => setCopied(false), 2_000);
   };
 
   const handleDisconnect = () => {
@@ -234,7 +197,7 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
   };
 
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={setMenuOpen}>
       <DropdownMenuTrigger asChild>
         <button
           className={cn(
@@ -245,23 +208,16 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
             className
           )}
         >
-          {/* Chain indicator */}
           <span className={cn("w-2 h-2 rounded-full animate-pulse", chainColor)} />
-
-          {/* Balance */}
           <span className="font-medium">
             {balanceLoading ? "..." : `$${totalBalance}`}
           </span>
-
-          {/* Address */}
           <span className="text-cyan-400/60 hidden sm:inline">{shortAddress}</span>
-
           <ChevronDown className="w-3 h-3 text-cyan-400/60" />
         </button>
       </DropdownMenuTrigger>
 
       <DropdownMenuContent align="end" className="w-64 bg-card border-sidebar-border">
-        {/* Header with chain & balance */}
         <div className="px-3 py-3 border-b border-sidebar-border">
           <div className="flex items-center gap-2 mb-2">
             <span className={cn("w-2.5 h-2.5 rounded-full", chainColor)} />
@@ -280,7 +236,6 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
           </p>
         </div>
 
-        {/* Address */}
         <div className="px-3 py-2 border-b border-sidebar-border">
           <div className="flex items-center justify-between">
             <span className="font-mono text-xs text-foreground">{shortAddress}</span>
@@ -312,7 +267,6 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
   );
 }
 
-// Hook to get connected account info
 export function useWalletAccount() {
   const account = useActiveAccount();
   const wallet = useActiveWallet();
@@ -325,5 +279,4 @@ export function useWalletAccount() {
   };
 }
 
-// Re-export for convenience
 export { useActiveAccount, useActiveWallet } from "thirdweb/react";
