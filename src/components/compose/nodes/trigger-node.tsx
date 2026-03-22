@@ -8,7 +8,7 @@
 import { Handle, Position, useNodeId, useReactFlow } from "@xyflow/react";
 import { Badge } from "@/components/ui/badge";
 import { Clock, Loader2, CheckCircle2, XCircle, Zap, Calendar, Plus } from "lucide-react";
-import { inputHandleStyle, outputHandleStyle, type TriggerNodeData } from "./index";
+import { type TriggerNodeData } from "./index";
 
 // Custom handle that shows "+" when not connected  
 const DirectionalHandle = ({

@@ -39,10 +39,10 @@ import {
     getRFAContract,
     RFA_CATEGORIES,
     RFA_BOUNTY_LIMITS,
+    encodeSkillAsBytes32,
 } from "@/lib/contracts";
 import { getIpfsUrl } from "@/lib/pinata";
 import {
-    DollarSign,
     Loader2,
     FileSearch,
     CheckCircle,
@@ -50,7 +50,6 @@ import {
     Clock,
     User,
     Bot,
-    ExternalLink,
     Send,
     Award,
     AlertCircle,
@@ -73,13 +72,11 @@ interface RFADetailsProps {
 
 function SubmissionItem({
     submission,
-    rfaId,
     isPublisher,
     onAccept,
     isAccepting,
 }: {
     submission: RFASubmission;
-    rfaId: number;
     isPublisher: boolean;
     onAccept: (agentId: number) => void;
     isAccepting: boolean;
@@ -166,12 +163,10 @@ function SubmissionItem({
 // =============================================================================
 
 function SubmitAgentSection({
-    rfaId,
     rfa,
     onSubmit,
     isSubmitting,
 }: {
-    rfaId: number;
     rfa: OnchainRFA;
     onSubmit: (agentId: number) => void;
     isSubmitting: boolean;
@@ -275,7 +270,7 @@ function SubmitAgentSection({
 export function RFADetails({ rfaId, open, onOpenChange, mode = "dialog" }: RFADetailsProps) {
     const { toast } = useToast();
     const account = useActiveAccount();
-    const { mutateAsync: sendTransaction, isPending } = useSendTransaction();
+    const { mutateAsync: sendTransaction } = useSendTransaction();
 
     const { data: rfa, isLoading: isLoadingRFA } = useRFAData(rfaId);
     const { data: submissions, isLoading: isLoadingSubmissions, refetch: refetchSubmissions } = useRFASubmissions(rfaId);
@@ -291,11 +286,11 @@ export function RFADetails({ rfaId, open, onOpenChange, mode = "dialog" }: RFADe
     // Get category info
     const categoryInfo = useMemo(() => {
         if (!rfa) return null;
-        // Extract category from requiredSkills (first skill is the category)
-        // For now, show as-is since we stored the hash
-        return RFA_CATEGORIES.find(c =>
-            rfa.requiredSkills.length > 0
-        ) || RFA_CATEGORIES[RFA_CATEGORIES.length - 1]; // Default to utility
+        const categoryHash = rfa.requiredSkills[0]?.toLowerCase();
+        return (
+            RFA_CATEGORIES.find(({ id }) => encodeSkillAsBytes32(id).toLowerCase() === categoryHash) ||
+            RFA_CATEGORIES[RFA_CATEGORIES.length - 1]
+        );
     }, [rfa]);
 
     // Format dates
@@ -505,7 +500,6 @@ export function RFADetails({ rfaId, open, onOpenChange, mode = "dialog" }: RFADe
                                         <SubmissionItem
                                             key={`${sub.agentId}-${sub.submittedAt}`}
                                             submission={sub}
-                                            rfaId={rfaId!}
                                             isPublisher={isPublisher}
                                             onAccept={handleAcceptAgent}
                                             isAccepting={actionState === "accepting"}
@@ -552,7 +546,6 @@ export function RFADetails({ rfaId, open, onOpenChange, mode = "dialog" }: RFADe
                                 </div>
                             ) : (
                                 <SubmitAgentSection
-                                    rfaId={rfaId!}
                                     rfa={rfa}
                                     onSubmit={handleSubmitAgent}
                                     isSubmitting={actionState === "submitting"}

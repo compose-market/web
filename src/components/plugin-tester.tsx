@@ -4,9 +4,8 @@
  * Unified testing interface for GOAT, MCP, and Eliza plugins.
  * Extracts all plugin testing functionality from the playground page.
  */
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { useActiveWallet, useActiveAccount } from "thirdweb/react";
-import { inferencePriceWei } from "@/lib/chains.js";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useActiveWallet } from "thirdweb/react";
 import { createPaymentFetch } from "@/lib/payment";
 import { useChain } from "@/contexts/ChainContext";
 import { useSession } from "@/hooks/use-session";
@@ -137,7 +136,6 @@ interface McpToolsResponse {
 
 type PluginSource = "goat" | "mcp" | "eliza";
 
-const API_BASE = (import.meta.env.VITE_API_URL || "https://api.compose.market").replace(/\/+$/, "");
 const CONNECTOR_URL = (import.meta.env.VITE_CONNECTOR_URL || "https://services.compose.market/connector").replace(/\/+$/, "");
 
 // =============================================================================
@@ -213,9 +211,9 @@ export function PluginTester({
     initialPlugin = "",
 }: PluginTesterProps) {
     const wallet = useActiveWallet();
-    const account = useActiveAccount();
     const { paymentChainId } = useChain();
     const { composeKeyToken, ensureComposeKeyToken } = useSession();
+    const sessionUserAddress = wallet?.getAccount()?.address;
     const resultsEndRef = useRef<HTMLDivElement>(null);
 
     // Common state
@@ -358,6 +356,8 @@ export function PluginTester({
             const fetchWithPayment = createPaymentFetch({
                 chainId: paymentChainId,
                 sessionToken: activeComposeKeyToken,
+                sessionUserAddress: sessionActive ? sessionUserAddress : undefined,
+                sessionBudgetRemaining: sessionActive ? budgetRemaining : undefined,
             });
 
             const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -470,6 +470,8 @@ export function PluginTester({
             const fetchWithPayment = createPaymentFetch({
                 chainId: paymentChainId,
                 sessionToken: activeComposeKeyToken,
+                sessionUserAddress: sessionActive ? sessionUserAddress : undefined,
+                sessionBudgetRemaining: sessionActive ? budgetRemaining : undefined,
             });
 
             const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -619,6 +621,8 @@ export function PluginTester({
             const fetchWithPayment = createPaymentFetch({
                 chainId: paymentChainId,
                 sessionToken: activeComposeKeyToken,
+                sessionUserAddress: sessionActive ? sessionUserAddress : undefined,
+                sessionBudgetRemaining: sessionActive ? budgetRemaining : undefined,
             });
 
             const headers: Record<string, string> = { "Content-Type": "application/json" };

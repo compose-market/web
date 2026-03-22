@@ -4,7 +4,6 @@
  * n8n-inspired node designs with protruding connectors for ReactFlow.
  */
 
-import { Handle, Position } from "@xyflow/react";
 import type { Agent } from "@/lib/agents";
 import type { WorkflowStep, ConnectorTool } from "@/lib/services";
 

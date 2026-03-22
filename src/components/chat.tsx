@@ -8,13 +8,7 @@
  * 
  * Used by: agent.tsx, workflow.tsx, playground.tsx
  */
-import React, { useState, useEffect, memo, useCallback } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+import React, { Suspense, lazy, useState, useEffect, memo, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -43,35 +37,12 @@ import {
     Copy,
     Check,
     RefreshCw,
-    ExternalLink,
     ChevronDown,
     ChevronUp,
     Image as ImageIcon,
-    Wrench,
-    Terminal,
 } from "lucide-react";
-import mermaid from "mermaid";
-import "katex/dist/katex.min.css";
 import { GenerationCanvas } from "@/components/blur";
-import { LyriaAudioPlayer } from "@/components/lyria-player";
 import { useLyriaWebSocket } from "@/hooks/use-lyria";
-
-// Initialize Mermaid with dark theme
-mermaid.initialize({
-    startOnLoad: false,
-    theme: "dark",
-    themeVariables: {
-        primaryColor: "#06b6d4",
-        primaryTextColor: "#fff",
-        primaryBorderColor: "#0891b2",
-        lineColor: "#64748b",
-        secondaryColor: "#6366f1",
-        tertiaryColor: "#1e1e1e",
-        background: "#1e1e1e",
-        mainBkg: "#1e1e1e",
-        nodeBorder: "#0891b2",
-    },
-});
 
 // =============================================================================
 // Types - Import from single source of truth
@@ -81,143 +52,12 @@ import { type ChatMessage, type AttachedFile } from "@/lib/api";
 
 // Re-export for convenience
 export type { ChatMessage, AttachedFile };
-
-// =============================================================================
-// Tag Parsing (Think & Invoke)
-// =============================================================================
-
-type BlockType = 'text' | 'think' | 'invoke';
-
-interface ContentBlock {
-    type: BlockType;
-    content: string;
-    toolName?: string;
-    params?: Record<string, any>;
-}
-
-function parseBlocks(raw: string): ContentBlock[] {
-    if (!raw) return [];
-
-    const blocks: ContentBlock[] = [];
-    // Regex matches <think>...</think> OR <invoke>...</invoke>
-    // Capture groups: 1=think content, 2=invoke content
-    const regex = /(?:<think>([\s\S]*?)<\/think>)|(?:<invoke>([\s\S]*?)<\/invoke>)/gi;
-
-    let lastIndex = 0;
-    let match;
-
-    while ((match = regex.exec(raw)) !== null) {
-        // Add preceding text if any
-        if (match.index > lastIndex) {
-            const text = raw.substring(lastIndex, match.index).trim();
-            if (text) blocks.push({ type: 'text', content: text });
-        }
-
-        if (match[1]) { // <think>
-            blocks.push({ type: 'think', content: match[1].trim() });
-        } else if (match[2]) { // <invoke>
-            const invokeContent = match[2].trim();
-            const lines = invokeContent.split('\n');
-            const toolName = lines[0]?.trim() || "Unknown Tool";
-
-            // Extract params
-            const params: Record<string, any> = {};
-            // Simple XML-like param extraction: <key>value</key>
-            const paramRegex = /<(\w+)>([\s\S]*?)<\/\1>/gi;
-            let paramMatch;
-            while ((paramMatch = paramRegex.exec(invokeContent)) !== null) {
-                try {
-                    // Try parsing as JSON first (for complex objects)
-                    params[paramMatch[1]] = JSON.parse(paramMatch[2]);
-                } catch {
-                    // Fallback to string
-                    params[paramMatch[1]] = paramMatch[2].trim();
-                }
-            }
-
-            blocks.push({
-                type: 'invoke',
-                content: invokeContent,
-                toolName,
-                params
-            });
-        }
-
-        lastIndex = regex.lastIndex;
-    }
-
-    // Add remaining text
-    if (lastIndex < raw.length) {
-        const text = raw.substring(lastIndex).trim();
-        if (text) blocks.push({ type: 'text', content: text });
-    }
-
-    return blocks;
-}
-
-// =============================================================================
-// Block Components
-// =============================================================================
-
-function ThinkBlock({ content }: { content: string }) {
-    const [isOpen, setIsOpen] = useState(false);
-
-    return (
-        <div className="mb-3 border border-zinc-700/50 rounded-lg overflow-hidden bg-zinc-900/50">
-            <button
-                onClick={() => setIsOpen(!isOpen)}
-                className="w-full flex items-center justify-between px-3 py-2 text-xs text-zinc-400 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors"
-                title="Toggle Chain of Thought"
-            >
-                <span className="flex items-center gap-2 font-medium">
-                    <span className="text-cyan-500">💭</span>
-                    Chain of Thought
-                </span>
-                {isOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-            </button>
-            {isOpen && (
-                <div className="px-3 py-2 border-t border-zinc-700/50 text-xs text-zinc-500 italic whitespace-pre-wrap leading-relaxed animate-in fade-in slide-in-from-top-1 duration-200">
-                    {content}
-                </div>
-            )}
-        </div>
-    );
-}
-
-function InvokeBlock({ toolName, params }: { toolName: string; params?: Record<string, any> }) {
-    const [isOpen, setIsOpen] = useState(false);
-
-    // Clean tool name (remove Mcp: prefix for display)
-    const displayName = toolName.replace(/^Mcp:/i, '');
-
-    return (
-        <div className="mb-3 border border-fuchsia-500/20 rounded-lg overflow-hidden bg-fuchsia-500/5">
-            <button
-                onClick={() => setIsOpen(!isOpen)}
-                className="w-full flex items-center justify-between px-3 py-2 text-xs text-fuchsia-300 hover:text-fuchsia-200 hover:bg-fuchsia-500/10 transition-colors"
-                title="Toggle Tool Usage"
-            >
-                <span className="flex items-center gap-2 font-medium">
-                    <Wrench className="w-3.5 h-3.5" />
-                    Used <span className="font-mono bg-fuchsia-500/20 px-1 py-0.5 rounded text-[10px]">{displayName}</span>
-                </span>
-                {isOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-            </button>
-            {isOpen && params && Object.keys(params).length > 0 && (
-                <div className="px-3 py-2 border-t border-fuchsia-500/20 bg-black/20 text-xs font-mono text-zinc-400 overflow-x-auto animate-in fade-in slide-in-from-top-1 duration-200">
-                    {Object.entries(params).map(([key, value]) => (
-                        <div key={key} className="mb-1 last:mb-0">
-                            <span className="text-fuchsia-500/70">{key}:</span>{' '}
-                            <span className="text-zinc-300 whitespace-pre-wrap">
-                                {typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)}
-                            </span>
-                        </div>
-                    ))}
-                </div>
-            )}
-        </div>
-    );
-}
+const LazyMarkdownRenderer = lazy(() =>
+    import("@/lib/performance/markdown").then((module) => ({ default: module.MarkdownRenderer }))
+);
+const LazyLyriaAudioPlayer = lazy(() =>
+    import("@/components/lyria-player").then((module) => ({ default: module.LyriaAudioPlayer }))
+);
 
 function EmbeddingBlock({ content }: { content: string }) {
     const [isOpen, setIsOpen] = useState(false);
@@ -288,262 +128,6 @@ function EmbeddingBlock({ content }: { content: string }) {
     );
 }
 
-// =============================================================================
-// Mermaid Diagram
-// =============================================================================
-
-function MermaidDiagram({ code }: { code: string }) {
-    const [svg, setSvg] = useState<string>("");
-    const [error, setError] = useState<string>("");
-
-    useEffect(() => {
-        const renderDiagram = async () => {
-            try {
-                const id = `mermaid-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-                const { svg } = await mermaid.render(id, code);
-                setSvg(svg);
-                setError("");
-            } catch (err) {
-                setError(err instanceof Error ? err.message : "Failed to render diagram");
-            }
-        };
-        renderDiagram();
-    }, [code]);
-
-    if (error) {
-        return (
-            <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 my-3">
-                <p className="text-red-400 text-sm">Diagram error: {error}</p>
-                <pre className="text-xs text-zinc-500 mt-2 overflow-auto">{code}</pre>
-            </div>
-        );
-    }
-
-    return (
-        <div
-            className="my-3 p-4 bg-zinc-900 rounded-lg overflow-auto flex justify-center"
-            dangerouslySetInnerHTML={{ __html: svg }}
-        />
-    );
-}
-
-// =============================================================================
-// Media Embedding
-// =============================================================================
-
-function MediaEmbed({ url }: { url: string }) {
-    // YouTube
-    const youtubeMatch = url.match(
-        /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/
-    );
-    if (youtubeMatch) {
-        return (
-            <div className="my-3 aspect-video rounded-lg overflow-hidden">
-                <iframe
-                    src={`https://www.youtube.com/embed/${youtubeMatch[1]}`}
-                    className="w-full h-full"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                />
-            </div>
-        );
-    }
-
-    // Vimeo
-    const vimeoMatch = url.match(/vimeo\.com\/(\d+)/);
-    if (vimeoMatch) {
-        return (
-            <div className="my-3 aspect-video rounded-lg overflow-hidden">
-                <iframe
-                    src={`https://player.vimeo.com/video/${vimeoMatch[1]}`}
-                    className="w-full h-full"
-                    allow="autoplay; fullscreen; picture-in-picture"
-                    allowFullScreen
-                />
-            </div>
-        );
-    }
-
-    // Direct video files
-    if (/\.(mp4|webm|ogg)$/i.test(url)) {
-        return (
-            <video controls className="my-3 w-full rounded-lg">
-                <source src={url} />
-            </video>
-        );
-    }
-
-    // Audio files
-    if (/\.(mp3|wav|ogg|m4a)$/i.test(url)) {
-        return (
-            <audio controls className="my-3 w-full">
-                <source src={url} />
-            </audio>
-        );
-    }
-
-    return null;
-}
-
-// =============================================================================
-// Link Preview
-// =============================================================================
-
-function LinkPreview({ url, children }: { url: string; children: React.ReactNode }) {
-    const media = MediaEmbed({ url });
-    if (media) return media;
-
-    return (
-        <span className="inline">
-            <a
-                href={url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 inline-flex items-center gap-1"
-            >
-                {children}
-                <ExternalLink className="w-3 h-3 inline" />
-            </a>
-        </span>
-    );
-}
-
-// =============================================================================
-// Code Block
-// =============================================================================
-
-function CodeBlock({
-    inline,
-    className,
-    children,
-    ...props
-}: {
-    inline?: boolean;
-    className?: string;
-    children?: React.ReactNode;
-}) {
-    const [copied, setCopied] = useState(false);
-    const match = /language-(\w+)/.exec(className || "");
-    const language = match ? match[1] : "";
-    const codeString = String(children).replace(/\n$/, "");
-
-    const handleCopy = async () => {
-        await navigator.clipboard.writeText(codeString);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-    };
-
-    if (inline) {
-        return (
-            <code className="bg-zinc-800 text-cyan-300 px-1.5 py-0.5 rounded text-sm font-mono" {...props}>
-                {children}
-            </code>
-        );
-    }
-
-    if (language === "mermaid") {
-        return <MermaidDiagram code={codeString} />;
-    }
-
-    return (
-        <div className="relative group my-3">
-            <div className="absolute right-2 top-2 flex items-center gap-2 z-10">
-                {language && <span className="text-xs text-zinc-500 font-mono uppercase">{language}</span>}
-                <button
-                    onClick={handleCopy}
-                    className="p-1.5 rounded bg-zinc-700/80 hover:bg-zinc-600 text-zinc-400 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
-                    title="Copy code"
-                >
-                    {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
-                </button>
-            </div>
-
-            <SyntaxHighlighter
-                style={oneDark}
-                language={language || "text"}
-                PreTag="div"
-                customStyle={{
-                    margin: 0,
-                    borderRadius: "0.5rem",
-                    padding: "1rem",
-                    fontSize: "0.875rem",
-                    background: "rgb(30 30 30)",
-                }}
-                {...props}
-            >
-                {codeString}
-            </SyntaxHighlighter>
-        </div>
-    );
-}
-
-// =============================================================================
-// Markdown Renderer
-// =============================================================================
-
-interface RendererProps {
-    content: string;
-    className?: string;
-}
-
-function MarkdownRendererInner({ content, className }: RendererProps) {
-    if (!content) {
-        return <span className="text-zinc-500">...</span>;
-    }
-
-    const blocks = parseBlocks(content);
-
-    return (
-        <div className={cn("renderer-content text-sm", className)}>
-            {blocks.map((block, index) => (
-                <React.Fragment key={index}>
-                    {block.type === 'think' && <ThinkBlock content={block.content} />}
-
-                    {block.type === 'invoke' && block.toolName && (
-                        <InvokeBlock toolName={block.toolName} params={block.params} />
-                    )}
-
-                    {block.type === 'text' && (
-                        <ReactMarkdown
-                            remarkPlugins={[remarkGfm, remarkMath]}
-                            rehypePlugins={[rehypeKatex]}
-                            components={{
-                                code: CodeBlock as any,
-                                h1: ({ children }) => <h1 className="text-xl font-bold mt-4 mb-2 text-white">{children}</h1>,
-                                h2: ({ children }) => <h2 className="text-lg font-semibold mt-3 mb-2 text-white">{children}</h2>,
-                                h3: ({ children }) => <h3 className="text-base font-semibold mt-2 mb-1 text-white">{children}</h3>,
-                                p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
-                                ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1 pl-2">{children}</ul>,
-                                ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1 pl-2">{children}</ol>,
-                                li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-                                a: ({ href, children }) => href ? <LinkPreview url={href}>{children}</LinkPreview> : <span>{children}</span>,
-                                img: ({ src, alt }) => <img src={src} alt={alt || "Image"} className="max-w-full rounded-lg my-2" loading="lazy" />,
-                                table: ({ children }) => (
-                                    <div className="overflow-x-auto my-3">
-                                        <table className="w-full border-collapse border border-zinc-700 text-sm">{children}</table>
-                                    </div>
-                                ),
-                                thead: ({ children }) => <thead className="bg-zinc-800">{children}</thead>,
-                                th: ({ children }) => <th className="border border-zinc-700 px-3 py-2 text-left font-semibold text-white">{children}</th>,
-                                td: ({ children }) => <td className="border border-zinc-700 px-3 py-2">{children}</td>,
-                                tr: ({ children }) => <tr className="even:bg-zinc-800/50">{children}</tr>,
-                                blockquote: ({ children }) => <blockquote className="border-l-4 border-cyan-500 pl-4 my-2 italic text-zinc-400">{children}</blockquote>,
-                                hr: () => <hr className="border-zinc-700 my-4" />,
-                                strong: ({ children }) => <strong className="font-semibold text-white">{children}</strong>,
-                                em: ({ children }) => <em className="italic">{children}</em>,
-                                del: ({ children }) => <del className="line-through text-zinc-500">{children}</del>,
-                            }}
-                        >
-                            {block.content}
-                        </ReactMarkdown>
-                    )}
-                </React.Fragment>
-            ))}
-        </div>
-    );
-}
-
-export const MarkdownRenderer = memo(MarkdownRendererInner);
 
 // =============================================================================
 // Chat Message Item
@@ -666,7 +250,9 @@ function ChatMessageItemInner({
                 ) : isUser ? (
                     <p className="whitespace-pre-wrap text-sm">{message.content || "..."}</p>
                 ) : (
-                    <MarkdownRenderer content={message.content || "..."} />
+                    <Suspense fallback={<p className="whitespace-pre-wrap text-sm">{message.content || "..."}</p>}>
+                        <LazyMarkdownRenderer content={message.content || "..."} />
+                    </Suspense>
                 )}
             </div>
 
@@ -857,7 +443,7 @@ export function MultimodalCanvas({
                 statusMessage = `🎵 Lyria RealTime Ready\n\nPrompt: "${inputValue}"\n\nClick Play to start generating music`;
                 break;
             case "playing":
-                statusMessage = `🎵 Generating music...\n\n${lyria.audioQueue.length} audio chunks received`;
+                statusMessage = "🎵 Generating music...";
                 break;
             case "paused":
                 statusMessage = "🎵 Music generation paused";
@@ -877,7 +463,7 @@ export function MultimodalCanvas({
                 )
             );
         }
-    }, [lyria.state, lyria.audioQueue.length, lyria.error, isLyriaModel, lyriaMessageId, setMessages, inputValue]);
+    }, [lyria.state, lyria.error, isLyriaModel, lyriaMessageId, setMessages, inputValue]);
 
     const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
         if (e.key === "Enter" && !e.shiftKey) {
@@ -931,26 +517,28 @@ export function MultimodalCanvas({
                                 />
                                 {/* Lyria Audio Player for Lyria messages */}
                                 {isLyriaModel && msg.id === lyriaMessageId && (
-                                    <LyriaAudioPlayer
-                                        audioQueue={lyria.audioQueue}
-                                        isPlaying={lyria.state === "playing"}
-                                        onPlay={lyria.play}
-                                        onPause={lyria.pause}
-                                        onStop={() => {
-                                            lyria.stop();
-                                            if (setMessages) {
-                                                setMessages((prev) =>
-                                                    prev.map((m) =>
-                                                        m.id === lyriaMessageId
-                                                            ? { ...m, content: "🎵 Music generation stopped" }
-                                                            : m
-                                                    )
-                                                );
-                                            }
-                                        }}
-                                        onClearQueue={lyria.clearAudioQueue}
-                                        config={lyria.currentConfig}
-                                    />
+                                    <Suspense fallback={<GenerationCanvas type="audio" status="Loading player" className="w-full max-w-sm" />}>
+                                        <LazyLyriaAudioPlayer
+                                            audioQueue={lyria.audioQueue}
+                                            isPlaying={lyria.state === "playing"}
+                                            onPlay={lyria.play}
+                                            onPause={lyria.pause}
+                                            onStop={() => {
+                                                lyria.stop();
+                                                if (setMessages) {
+                                                    setMessages((prev) =>
+                                                        prev.map((m) =>
+                                                            m.id === lyriaMessageId
+                                                                ? { ...m, content: "🎵 Music generation stopped" }
+                                                                : m
+                                                        )
+                                                    );
+                                                }
+                                            }}
+                                            onConsumeQueue={lyria.consumeAudioQueue}
+                                            config={lyria.currentConfig}
+                                        />
+                                    </Suspense>
                                 )}
                             </React.Fragment>
                         ))}

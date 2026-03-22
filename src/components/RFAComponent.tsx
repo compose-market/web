@@ -28,7 +28,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
     Select,
     SelectContent,
@@ -48,8 +47,6 @@ import {
     encodeSkillAsBytes32,
     usdcToWei,
 } from "@/lib/contracts";
-import { getContract } from "thirdweb";
-import { thirdwebClient, paymentChain } from "../lib/chains";
 import {
     DollarSign,
     Loader2,
@@ -203,7 +200,7 @@ export function RFAComponent({
                 ],
             });
 
-            const result = await sendTransaction(createTx);
+            await sendTransaction(createTx);
 
             toast({
                 title: "RFA Created!",

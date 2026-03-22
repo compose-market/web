@@ -1,9 +1,9 @@
-import { Copy, Cpu, DollarSign, ExternalLink, Globe, Package, Wrench, Zap } from "lucide-react";
+import { Copy, Cpu, DollarSign, ExternalLink, Globe, Package, Zap } from "lucide-react";
 import { ComposeAgentCard, ComposeAgentCardSkeleton, type ComposeAgentBadge, type ComposeAgentMetric, type ComposeAgentTag } from "@compose-market/theme/agents";
 import { ShellButton } from "@compose-market/theme/shell";
 import { getIpfsUrl } from "@/lib/pinata";
 import type { OnchainAgent } from "@/hooks/use-onchain";
-import { CHAIN_CONFIG } from "@/lib/chains";
+import { CHAIN_CONFIG } from "@/lib/performance/chains-data";
 import { getContractAddress } from "@/lib/contracts";
 import { API_BASE_URL } from "@/lib/api";
 

@@ -45,7 +45,6 @@ export function ConnectorDetailDialog({
     const [testing, setTesting] = useState(false);
     const [testResult, setTestResult] = useState<{ success: boolean; content?: unknown; error?: string } | null>(null);
     const [dynamicTools, setDynamicTools] = useState<Array<{ name: string; description?: string }>>([]);
-    const [loadingTools, setLoadingTools] = useState(false);
 
     // Fetch tools dynamically for MCP servers that don't have pre-cached tools
     useEffect(() => {
@@ -58,7 +57,6 @@ export function ConnectorDetailDialog({
 
         // Only fetch dynamically for MCP servers without pre-cached tools
         if (server.origin === "mcp" && (!server.tools || server.tools.length === 0)) {
-            setLoadingTools(true);
             import("@/lib/services").then(({ fetchMcpServerTools }) => {
                 fetchMcpServerTools(server.slug)
                     .then((tools) => {
@@ -73,8 +71,7 @@ export function ConnectorDetailDialog({
                             description: err.message,
                             variant: "destructive",
                         });
-                    })
-                    .finally(() => setLoadingTools(false));
+                    });
             });
         }
     }, [server, open, toast]);

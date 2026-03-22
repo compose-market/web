@@ -5,7 +5,7 @@
  * 
  * Styling: uses @compose-market/theme BEM classes (cm-mirror-pane*).
  */
-import React, { useState } from "react";
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";

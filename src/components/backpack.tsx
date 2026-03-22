@@ -252,6 +252,11 @@ export function BackpackDialog({
     const [whatsappPhoneInput, setWhatsappPhoneInput] = useState("");
     const whatsappWsRef = useRef<WebSocket | null>(null);
     const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const searchAbortRef = useRef<AbortController | null>(null);
+    const connectionsAbortRef = useRef<AbortController | null>(null);
+    const statusPollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const statusPollAbortRef = useRef<AbortController | null>(null);
+    const statusPollBusyRef = useRef(false);
 
     // Permission states (from sessionStorage)
     const [permissions, setPermissions] = useState<Record<string, boolean>>(() => {
@@ -268,6 +273,56 @@ export function BackpackDialog({
     const handleOpen = open !== undefined ? open : isOpen;
     const handleOpenChange = onOpenChange || setIsOpen;
 
+    const clearStatusPolling = useCallback(() => {
+        if (statusPollIntervalRef.current) {
+            clearInterval(statusPollIntervalRef.current);
+            statusPollIntervalRef.current = null;
+        }
+        if (statusPollAbortRef.current) {
+            statusPollAbortRef.current.abort();
+            statusPollAbortRef.current = null;
+        }
+        statusPollBusyRef.current = false;
+    }, []);
+
+    const cleanupAsyncWork = useCallback(() => {
+        if (searchDebounceRef.current) {
+            clearTimeout(searchDebounceRef.current);
+            searchDebounceRef.current = null;
+        }
+        if (searchAbortRef.current) {
+            searchAbortRef.current.abort();
+            searchAbortRef.current = null;
+        }
+        if (connectionsAbortRef.current) {
+            connectionsAbortRef.current.abort();
+            connectionsAbortRef.current = null;
+        }
+        clearStatusPolling();
+        if (whatsappWsRef.current) {
+            whatsappWsRef.current.close();
+            whatsappWsRef.current = null;
+        }
+    }, [clearStatusPolling]);
+
+    const resetTransientState = useCallback(() => {
+        setLoadingAccount(null);
+        setWhatsappScreen(null);
+        setWhatsappQr(null);
+        setWhatsappQrLoading(false);
+        setWhatsappPairingCode(null);
+        setWhatsappPhoneInput("");
+        setSearching(false);
+    }, []);
+
+    const handleDialogOpenChange = useCallback((nextOpen: boolean) => {
+        if (!nextOpen) {
+            cleanupAsyncWork();
+            resetTransientState();
+        }
+        handleOpenChange(nextOpen);
+    }, [cleanupAsyncWork, handleOpenChange, resetTransientState]);
+
     // Effective userId — fallback to anonymous session id
     const effectiveUserId = userId || sessionStorage.getItem("composio_anon_id") || (() => {
         const id = `anon_${crypto.randomUUID()}`;
@@ -280,10 +335,18 @@ export function BackpackDialog({
     // ==========================================================================
 
     const fetchConnections = useCallback(async () => {
+        if (connectionsAbortRef.current) {
+            connectionsAbortRef.current.abort();
+        }
+
+        const controller = new AbortController();
+        connectionsAbortRef.current = controller;
+
         try {
             setRefreshing(true);
             const res = await fetch(
-                `${API_BASE}/api/backpack/connections?userId=${encodeURIComponent(effectiveUserId)}`
+                `${API_BASE}/api/backpack/connections?userId=${encodeURIComponent(effectiveUserId)}`,
+                { signal: controller.signal },
             );
 
             if (!res.ok) {
@@ -303,9 +366,15 @@ export function BackpackDialog({
 
             setConnections(connMap);
         } catch (err) {
+            if (controller.signal.aborted) {
+                return;
+            }
             console.warn("[Backpack] Could not fetch connections:", err);
         } finally {
-            setRefreshing(false);
+            if (connectionsAbortRef.current === controller) {
+                connectionsAbortRef.current = null;
+                setRefreshing(false);
+            }
         }
     }, [effectiveUserId]);
 
@@ -322,23 +391,41 @@ export function BackpackDialog({
 
     const searchToolkits = useCallback(async (query: string) => {
         if (!query.trim()) {
+            if (searchAbortRef.current) {
+                searchAbortRef.current.abort();
+                searchAbortRef.current = null;
+            }
             setSearchResults([]);
             return;
         }
 
+        if (searchAbortRef.current) {
+            searchAbortRef.current.abort();
+        }
+
+        const controller = new AbortController();
+        searchAbortRef.current = controller;
+
         setSearching(true);
         try {
             const res = await fetch(
-                `${API_BASE}/api/backpack/toolkits?search=${encodeURIComponent(query)}&limit=15`
+                `${API_BASE}/api/backpack/toolkits?search=${encodeURIComponent(query)}&limit=15`,
+                { signal: controller.signal },
             );
             if (res.ok) {
                 const data = await res.json();
                 setSearchResults(data.toolkits || []);
             }
         } catch (err) {
+            if (controller.signal.aborted) {
+                return;
+            }
             console.warn("[Backpack] Search error:", err);
         } finally {
-            setSearching(false);
+            if (searchAbortRef.current === controller) {
+                searchAbortRef.current = null;
+                setSearching(false);
+            }
         }
     }, []);
 
@@ -348,7 +435,12 @@ export function BackpackDialog({
             clearTimeout(searchDebounceRef.current);
         }
         if (!searchQuery.trim()) {
+            if (searchAbortRef.current) {
+                searchAbortRef.current.abort();
+                searchAbortRef.current = null;
+            }
             setSearchResults([]);
+            setSearching(false);
             return;
         }
         searchDebounceRef.current = setTimeout(() => {
@@ -358,6 +450,46 @@ export function BackpackDialog({
             if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
         };
     }, [searchQuery, searchToolkits]);
+
+    const startStatusPolling = useCallback((poll: (signal: AbortSignal) => Promise<boolean>) => {
+        clearStatusPolling();
+
+        const controller = new AbortController();
+        statusPollAbortRef.current = controller;
+
+        let attempts = 0;
+        const runPoll = async () => {
+            if (controller.signal.aborted || statusPollBusyRef.current) {
+                return;
+            }
+
+            statusPollBusyRef.current = true;
+            attempts += 1;
+            try {
+                const isComplete = await poll(controller.signal);
+                if (isComplete) {
+                    clearStatusPolling();
+                    setLoadingAccount(null);
+                    return;
+                }
+
+                if (attempts >= 40) {
+                    clearStatusPolling();
+                    setLoadingAccount(null);
+                }
+            } catch (err) {
+                if (!controller.signal.aborted) {
+                    console.warn("[Backpack] Polling error:", err);
+                }
+            } finally {
+                statusPollBusyRef.current = false;
+            }
+        };
+
+        statusPollIntervalRef.current = setInterval(() => {
+            void runPoll();
+        }, 3000);
+    }, [clearStatusPolling]);
 
     // Convert a search result to a ProviderDisplay for the connect flow
     const toolkitToProvider = useCallback((tk: ToolkitResult): ProviderDisplay => ({
@@ -444,6 +576,7 @@ export function BackpackDialog({
 
     const connectAccount = useCallback(async (provider: ProviderDisplay) => {
         setLoadingAccount(provider.slug);
+        clearStatusPolling();
 
         try {
             // Step 1: Call backend to get OAuth redirect URL from Composio
@@ -481,43 +614,35 @@ export function BackpackDialog({
                 description: `Complete authentication in the popup, then click Refresh.`,
             });
 
-            // Auto-poll status every 3 seconds for up to 2 minutes
-            let attempts = 0;
-            const maxAttempts = 40; // 40 × 3s = 2min
-            const pollInterval = setInterval(async () => {
-                attempts++;
-                try {
-                    const statusRes = await fetch(
-                        `${API_BASE}/api/backpack/status/${encodeURIComponent(provider.slug)}?userId=${encodeURIComponent(effectiveUserId)}`
-                    );
-                    if (statusRes.ok) {
-                        const statusData = await statusRes.json();
-                        if (statusData.connected) {
-                            clearInterval(pollInterval);
-                            setConnections(prev => ({
-                                ...prev,
-                                [provider.slug]: {
-                                    slug: provider.slug,
-                                    name: provider.name,
-                                    connected: true,
-                                    accountId: statusData.accountId,
-                                },
-                            }));
-                            toast({
-                                title: "Connected!",
-                                description: `${provider.name} account connected successfully.`,
-                            });
-                            setLoadingAccount(null);
-                        }
-                    }
-                } catch {
-                    // Ignore poll errors
+            startStatusPolling(async (signal) => {
+                const statusRes = await fetch(
+                    `${API_BASE}/api/backpack/status/${encodeURIComponent(provider.slug)}?userId=${encodeURIComponent(effectiveUserId)}`,
+                    { signal },
+                );
+                if (!statusRes.ok) {
+                    return false;
                 }
-                if (attempts >= maxAttempts) {
-                    clearInterval(pollInterval);
-                    setLoadingAccount(null);
+
+                const statusData = await statusRes.json();
+                if (!statusData.connected) {
+                    return false;
                 }
-            }, 3000);
+
+                setConnections(prev => ({
+                    ...prev,
+                    [provider.slug]: {
+                        slug: provider.slug,
+                        name: provider.name,
+                        connected: true,
+                        accountId: statusData.accountId,
+                    },
+                }));
+                toast({
+                    title: "Connected!",
+                    description: `${provider.name} account connected successfully.`,
+                });
+                return true;
+            });
 
         } catch (err) {
             console.error("[Backpack] Connection error:", err);
@@ -528,7 +653,7 @@ export function BackpackDialog({
             });
             setLoadingAccount(null);
         }
-    }, [effectiveUserId, toast]);
+    }, [clearStatusPolling, effectiveUserId, startStatusPolling, toast]);
 
     // ==========================================================================
     // Channel-Based Connection (Telegram)
@@ -536,6 +661,7 @@ export function BackpackDialog({
 
     const connectTelegram = useCallback(async () => {
         setLoadingAccount("telegram");
+        clearStatusPolling();
 
         try {
             // Generate a deep link
@@ -560,42 +686,34 @@ export function BackpackDialog({
                 description: 'Tap "Start" in Telegram to connect your account.',
             });
 
-            // Poll for binding confirmation
-            let attempts = 0;
-            const maxAttempts = 40; // 40 × 3s = 2min
-            const pollInterval = setInterval(async () => {
-                attempts++;
-                try {
-                    const statusRes = await fetch(
-                        `${API_BASE}/api/backpack/telegram/status?userId=${encodeURIComponent(effectiveUserId)}`
-                    );
-                    if (statusRes.ok) {
-                        const statusData = await statusRes.json();
-                        if (statusData.bound) {
-                            clearInterval(pollInterval);
-                            setConnections(prev => ({
-                                ...prev,
-                                telegram: {
-                                    slug: "telegram",
-                                    name: "Telegram",
-                                    connected: true,
-                                },
-                            }));
-                            toast({
-                                title: "Connected!",
-                                description: "Telegram bot connected successfully.",
-                            });
-                            setLoadingAccount(null);
-                        }
-                    }
-                } catch {
-                    // Ignore poll errors
+            startStatusPolling(async (signal) => {
+                const statusRes = await fetch(
+                    `${API_BASE}/api/backpack/telegram/status?userId=${encodeURIComponent(effectiveUserId)}`,
+                    { signal },
+                );
+                if (!statusRes.ok) {
+                    return false;
                 }
-                if (attempts >= maxAttempts) {
-                    clearInterval(pollInterval);
-                    setLoadingAccount(null);
+
+                const statusData = await statusRes.json();
+                if (!statusData.bound) {
+                    return false;
                 }
-            }, 3000);
+
+                setConnections(prev => ({
+                    ...prev,
+                    telegram: {
+                        slug: "telegram",
+                        name: "Telegram",
+                        connected: true,
+                    },
+                }));
+                toast({
+                    title: "Connected!",
+                    description: "Telegram bot connected successfully.",
+                });
+                return true;
+            });
         } catch (err) {
             console.error("[Backpack] Telegram connection error:", err);
             toast({
@@ -605,13 +723,15 @@ export function BackpackDialog({
             });
             setLoadingAccount(null);
         }
-    }, [effectiveUserId, toast]);
+    }, [clearStatusPolling, effectiveUserId, startStatusPolling, toast]);
 
     // ==========================================================================
     // Channel-Based Connection (WhatsApp via Baileys WebSocket)
     // ==========================================================================
 
     const connectWhatsApp = useCallback(() => {
+        clearStatusPolling();
+
         // Close any existing WS connection
         if (whatsappWsRef.current) {
             whatsappWsRef.current.close();
@@ -785,6 +905,12 @@ export function BackpackDialog({
         }
     }, [effectiveUserId, toast]);
 
+    useEffect(() => {
+        return () => {
+            cleanupAsyncWork();
+        };
+    }, [cleanupAsyncWork]);
+
     // ==========================================================================
     // Filtered search results (exclude featured providers from search)
     // ==========================================================================
@@ -913,7 +1039,7 @@ export function BackpackDialog({
     };
 
     return (
-        <Dialog open={handleOpen} onOpenChange={handleOpenChange}>
+        <Dialog open={handleOpen} onOpenChange={handleDialogOpenChange}>
             {showTrigger && (
                 <DialogTrigger asChild>
                     <Button variant="outline" size="sm" className="gap-2">

@@ -1,6 +1,25 @@
 import { useRef, useEffect, useState, type CSSProperties } from "react";
 import { cn } from "@/lib/utils";
 
+function scheduleDeferredRender(callback: () => void) {
+  if (typeof window === "undefined") {
+    return () => undefined;
+  }
+
+  const idleWindow = window as Window & {
+    requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+    cancelIdleCallback?: (handle: number) => void;
+  };
+
+  if (typeof idleWindow.requestIdleCallback === "function") {
+    const id = idleWindow.requestIdleCallback(callback, { timeout: 1_500 });
+    return () => idleWindow.cancelIdleCallback?.(id);
+  }
+
+  const timeoutId = globalThis.setTimeout(callback, 600);
+  return () => globalThis.clearTimeout(timeoutId);
+}
+
 /* ── Partnership Badge ─────────────────────────────────────────────── */
 
 interface PartnershipBadgeProps {
@@ -110,6 +129,9 @@ export function PartnershipBadge({
           <img
             src={src}
             alt={alt}
+            loading="lazy"
+            decoding="async"
+            fetchPriority="low"
             className="relative h-10 sm:h-12 md:h-14 w-auto max-w-[90%] object-contain brightness-100 group-hover:brightness-110 transition-all duration-300"
           />
         </div>
@@ -215,6 +237,9 @@ function LogoItem({ logo }: { logo: PartnerLogo }) {
         alt={logo.alt}
         title={logo.name}
         draggable={false}
+        loading="lazy"
+        decoding="async"
+        fetchPriority="low"
         className="h-[clamp(0.85rem,1.8vw,1.25rem)] w-auto max-w-[100px] object-contain opacity-75 grayscale transition-all duration-300 group-hover:opacity-100 group-hover:grayscale-0"
       />
     </div>
@@ -297,6 +322,14 @@ function PartnerLogoMarquee() {
 /* ── Partnership Section ───────────────────────────────────────────── */
 
 export function PartnershipSection({ className }: { className?: string }) {
+  const [showMarquee, setShowMarquee] = useState(false);
+
+  useEffect(() => {
+    return scheduleDeferredRender(() => {
+      setShowMarquee(true);
+    });
+  }, []);
+
   return (
     <section className={cn("w-full", className)}>
       {/* Badges row — "Backed by" text (1/4 left) + badges (3/4 right) */}
@@ -339,7 +372,14 @@ export function PartnershipSection({ className }: { className?: string }) {
 
       {/* Partner logos marquee — full width, edge to edge */}
       <div className="w-full border-t border-sidebar-border/50 py-3 sm:py-4 md:py-5 pb-4 sm:pb-5 md:pb-6 bg-card/5">
-        <PartnerLogoMarquee />
+        {showMarquee ? (
+          <PartnerLogoMarquee />
+        ) : (
+          <div
+            aria-hidden="true"
+            className="h-[5.25rem] sm:h-[5.75rem] md:h-[6.25rem] w-full bg-gradient-to-r from-transparent via-white/[0.03] to-transparent"
+          />
+        )}
       </div>
     </section>
   );

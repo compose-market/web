@@ -2,11 +2,11 @@
  * Warp Agent Form Component
  * Pre-fills data from external agent and calls Warp contract to mint
  */
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useForm, type SubmitHandler } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Link, useLocation } from "wouter";
+import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -54,26 +54,23 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useActiveAccount, useAdminWallet, useSendTransaction } from "thirdweb/react";
-import { submitCronosTransaction, encodeContractCall } from "@/lib/cronos/aa";
+import { useActiveAccount, useSendTransaction } from "thirdweb/react";
 import {
   getWarpContractForChain,
   prepareWarpAgentCall,
   usdcToWei,
   computeExternalAgentHash,
   deriveAgentWalletAddress,
-  getContractAddressForChain,
 } from "@/lib/contracts";
 import {
   uploadAgentAvatar,
   uploadAgentCard,
   getIpfsUri,
-  getIpfsUrl,
   fileToDataUrl,
   isPinataConfigured,
   type AgentCard,
 } from "@/lib/pinata";
-import { CHAIN_IDS, CHAIN_CONFIG, isCronosChain } from "@/lib/chains";
+import { CHAIN_CONFIG } from "@/lib/chains";
 import { useChain } from "@/contexts/ChainContext";
 import { AGENT_REGISTRIES, type AgentRegistryId } from "@/lib/agents";
 
@@ -121,7 +118,6 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
   const [, setLocation] = useLocation();
   const account = useActiveAccount();
   const { mutateAsync: sendTransaction } = useSendTransaction();
-  const adminWallet = useAdminWallet();
   const { paymentChainId } = useChain();
 
   // Avatar upload state
@@ -435,69 +431,14 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
     try {
       setMintStep("minting");
 
-      // Chain-aware transaction: Cronos uses our AA Paymaster, others use ThirdWeb
-      if (isCronosChain(paymentChainId) && account) {
-        // Cronos: Use our custom AA Paymaster flow
-        const warpData = encodeContractCall({
-          abi: [
-            {
-              type: "function",
-              name: "warpAgent",
-              inputs: [
-                { type: "bytes32", name: "originalAgentHash" },
-                { type: "address", name: "originalCreator" },
-                { type: "uint256", name: "licenses" },
-                { type: "uint256", name: "licensePrice" },
-                { type: "string", name: "agentCardUri" },
-              ],
-              outputs: [{ type: "uint256", name: "warpedAgentId" }],
-            },
-          ],
-          functionName: "warpAgent",
-          args: [
-            txData.originalAgentHash,
-            txData.originalCreator,
-            txData.licenses,
-            txData.licensePrice,
-            txData.agentCardUri,
-          ],
-        });
-
-        const warpContractAddress = getContractAddressForChain("Warp", paymentChainId);
-
-        // Get admin wallet for signing (Smart Accounts return wrapped EIP-1271 signatures)
-        const adminAddress = adminWallet?.getAccount()?.address as `0x${string}` | undefined;
-        const adminAccount = adminWallet?.getAccount();
-
-        const result = await submitCronosTransaction({
-          account,
-          to: warpContractAddress as `0x${string}`,
-          data: warpData as `0x${string}`,
-          value: BigInt(0),
-          chainId: paymentChainId,
-          adminAddress,
-          adminWallet: adminAccount,
-        });
-
-        if (!result.success) {
-          throw new Error(result.error || "Cronos transaction failed");
-        }
-
-        await handleWarpSuccess({ transactionHash: result.txHash! });
-      } else {
-        // Fuji/other chains: Use ThirdWeb sendTransaction with AA
-        if (!account) {
-          throw new Error("Wallet account unavailable");
-        }
-        const contract = getWarpContractForChain(paymentChainId);
-        const transaction = prepareWarpAgentCall(contract, txData);
-
-        // Send transaction (gasless sponsorship configured on ThirdWeb)
-        const result = await sendTransaction(transaction);
-
-        // Handle success
-        await handleWarpSuccess({ transactionHash: result.transactionHash });
+      if (!account) {
+        throw new Error("Wallet account unavailable");
       }
+
+      const contract = getWarpContractForChain(paymentChainId);
+      const transaction = prepareWarpAgentCall(contract, txData);
+      const result = await sendTransaction(transaction);
+      await handleWarpSuccess({ transactionHash: result.transactionHash });
     } catch (error) {
       handleWarpError(error instanceof Error ? error : new Error(String(error)));
     }

@@ -3,7 +3,7 @@
  *
  * Dispenser UI for newcomers to claim 1 USDC.
  * Features:
- * - Multi-chain support (Avalanche, Cronos, Arbitrum)
+ * - Multi-chain support (Avalanche, Arbitrum)
  * - Global claim tracking (one claim per address across all chains)
  * - Real-time status updates
  * - Transaction confirmation display
@@ -36,7 +36,6 @@ import { toast } from "sonner";
 import {
     Droplets,
     CheckCircle2,
-    XCircle,
     ExternalLink,
     AlertCircle,
     Loader2,
@@ -56,6 +55,7 @@ export function DispenserCard() {
     const claimMutation = useDispenserClaim();
 
     const [selectedChain, setSelectedChain] = useState<number | null>(null);
+    const [lastClaimedChainId, setLastClaimedChainId] = useState<number | null>(null);
 
     const handleClaim = async (chainId: number) => {
         if (!address) {
@@ -69,6 +69,7 @@ export function DispenserCard() {
             const result = await claimMutation.mutateAsync({ address, chainId });
 
             if (result.success) {
+                setLastClaimedChainId(chainId);
                 toast.success("Successfully claimed 1 USDC!", {
                     description: `Transaction: ${result.txHash?.slice(0, 10)}...${result.txHash?.slice(-8)}`,
                     action: result.txHash
@@ -258,7 +259,10 @@ export function DispenserCard() {
                             <span>Transaction confirmed!</span>
                         </div>
                         <a
-                            href={getExplorerTxUrl(claimMutation.data.txHash, selectedChain || 338)}
+                            href={getExplorerTxUrl(
+                                claimMutation.data.txHash,
+                                lastClaimedChainId ?? sortedDispensers[0]?.chainId ?? 43113,
+                            )}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-xs text-cyan-400 hover:underline flex items-center gap-1 mt-1"

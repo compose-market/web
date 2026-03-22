@@ -15,7 +15,6 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { ChevronDown } from "lucide-react";
 
 // =============================================================================
 // Types
@@ -47,7 +46,10 @@ export function NetworkSelector({
 }: NetworkSelectorProps) {
     const account = useActiveAccount();
     const { selectedChainId, setSelectedChainId } = useChain();
-    const { data: balances } = useMultiChainBalance(account?.address);
+    const { data: balances } = useMultiChainBalance(account?.address, {
+        enabled: showBalance,
+        deferUntilIdle: true,
+    });
 
     // Use controlled value if provided, otherwise use context
     const currentChainId = value ?? selectedChainId;

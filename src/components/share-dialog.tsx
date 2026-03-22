@@ -7,7 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { CHAIN_CONFIG } from "@/lib/chains";
+import { CHAIN_CONFIG } from "@/lib/performance/chains-data";
 import { buildShareIntentUrl, type MintShareData } from "@/lib/share";
 import { Link } from "wouter";
 

@@ -1,7 +1,7 @@
 import { Link, useLocation } from "wouter";
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
-import { Home, ShoppingCart, PlusCircle, Layers, Box, Activity, Shield, Server, Sparkles, ChevronLeft, ChevronRight, Vault } from "lucide-react";
+import { Home, PlusCircle, Layers, Box, Activity, Sparkles, ChevronLeft, ChevronRight, Vault } from "lucide-react";
 import { ComposeLogo } from "@/components/brand/Logo";
 import {
   Tooltip,
@@ -12,12 +12,13 @@ import {
 import { BackpackDialog } from "@/components/backpack";
 import { NetworkSelector } from "@/components/ui/network-selector";
 import { useChain } from "@/contexts/ChainContext";
-import { CHAIN_CONFIG } from "@/lib/chains";
+import { CHAIN_CONFIG } from "@/lib/performance/chains-data";
 
 const SIDEBAR_COLLAPSED_KEY = "sidebar_collapsed";
 
 export function Sidebar() {
   const [location] = useLocation();
+  const [vaultOpen, setVaultOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(() => {
     if (typeof window !== "undefined") {
       return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true";
@@ -27,6 +28,7 @@ export function Sidebar() {
 
   useEffect(() => {
     localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(isCollapsed));
+    window.dispatchEvent(new Event("sidebarCollapsedChange"));
   }, [isCollapsed]);
 
   const toggleCollapse = () => setIsCollapsed(!isCollapsed);
@@ -43,9 +45,6 @@ export function Sidebar() {
     { href: "/my-assets", icon: Activity, label: "MY ASSETS" },
   ];
 
-  // Vault dialog state
-  const [vaultOpen, setVaultOpen] = useState(false);
-
   return (
     <TooltipProvider delayDuration={0}>
       <div
@@ -54,7 +53,6 @@ export function Sidebar() {
           isCollapsed ? "w-16" : "w-64"
         )}
       >
-        {/* Logo Header */}
         <div className={cn(
           "border-b border-sidebar-border flex items-center relative",
           isCollapsed ? "p-3 justify-center" : "p-6 gap-3"
@@ -74,12 +72,11 @@ export function Sidebar() {
             <p className="font-mono text-[8px] text-fuchsia-500 tracking-widest mt-1 whitespace-nowrap">POWERED BY MANOWAR</p>
           </div>
 
-          {/* Collapse Toggle Button */}
           <button
             onClick={toggleCollapse}
             className={cn(
               "absolute flex items-center justify-center w-6 h-6 rounded-full bg-sidebar-border hover:bg-cyan-950 border border-sidebar-border hover:border-cyan-400 text-muted-foreground hover:text-cyan-400 transition-all duration-200 shadow-lg",
-              isCollapsed ? "-right-3" : "-right-3"
+              "-right-3"
             )}
             aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
@@ -91,13 +88,12 @@ export function Sidebar() {
           </button>
         </div>
 
-        {/* Navigation */}
         <nav className="flex-1 py-6 space-y-1 overflow-y-auto overflow-x-hidden">
           <div className={cn(
             "mb-2 text-xs font-mono text-muted-foreground uppercase tracking-widest transition-all duration-300",
             isCollapsed ? "px-2 text-center text-[10px]" : "px-4"
           )}>
-            {isCollapsed ? "•••" : "Modules"}
+            {isCollapsed ? "..." : "Modules"}
           </div>
           {moduleLinks.map((link) => (
             <Tooltip key={link.href}>
@@ -127,11 +123,11 @@ export function Sidebar() {
                   )}
                 </Link>
               </TooltipTrigger>
-              {isCollapsed && (
+              {isCollapsed ? (
                 <TooltipContent side="right" className="font-mono text-xs">
                   {link.label}
                 </TooltipContent>
-              )}
+              ) : null}
             </Tooltip>
           ))}
 
@@ -139,7 +135,7 @@ export function Sidebar() {
             "mt-6 mb-2 text-xs font-mono text-muted-foreground uppercase tracking-widest transition-all duration-300",
             isCollapsed ? "px-2 text-center text-[10px]" : "px-4"
           )}>
-            {isCollapsed ? "•••" : "Network"}
+            {isCollapsed ? "..." : "Network"}
           </div>
           {networkLinks.map((link) => (
             <Tooltip key={link.href}>
@@ -169,18 +165,18 @@ export function Sidebar() {
                   )}
                 </Link>
               </TooltipTrigger>
-              {isCollapsed && (
+              {isCollapsed ? (
                 <TooltipContent side="right" className="font-mono text-xs">
                   {link.label}
                 </TooltipContent>
-              )}
+              ) : null}
             </Tooltip>
           ))}
 
-          {/* Vault Button - Opens BackpackDialog */}
           <Tooltip>
             <TooltipTrigger asChild>
               <button
+                type="button"
                 onClick={() => setVaultOpen(true)}
                 className={cn(
                   "w-full flex items-center text-sm font-medium transition-all border-l-2 group",
@@ -195,16 +191,15 @@ export function Sidebar() {
                 )}>VAULT</span>
               </button>
             </TooltipTrigger>
-            {isCollapsed && (
+            {isCollapsed ? (
               <TooltipContent side="right" className="font-mono text-xs">
                 VAULT
               </TooltipContent>
-            )}
+            ) : null}
           </Tooltip>
           <BackpackDialog open={vaultOpen} onOpenChange={setVaultOpen} showTrigger={false} />
         </nav>
 
-        {/* Network Status Footer */}
         <div className={cn(
           "border-t border-sidebar-border transition-all duration-300",
           isCollapsed ? "p-2" : "p-4"
@@ -216,7 +211,6 @@ export function Sidebar() {
   );
 }
 
-// Network selector footer with collapsed/expanded states
 function NetworkSelectorFooter({ isCollapsed }: { isCollapsed: boolean }) {
   const { selectedChainId } = useChain();
   const chainConfig = CHAIN_CONFIG[selectedChainId];
@@ -246,23 +240,4 @@ function NetworkSelectorFooter({ isCollapsed }: { isCollapsed: boolean }) {
       <NetworkSelector compact showBalance />
     </div>
   );
-}
-
-export function useSidebarCollapsed() {
-  const [isCollapsed, setIsCollapsed] = useState(() => {
-    if (typeof window !== "undefined") {
-      return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true";
-    }
-    return false;
-  });
-
-  useEffect(() => {
-    const handleStorageChange = () => {
-      setIsCollapsed(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true");
-    };
-    window.addEventListener("storage", handleStorageChange);
-    return () => window.removeEventListener("storage", handleStorageChange);
-  }, []);
-
-  return isCollapsed;
 }

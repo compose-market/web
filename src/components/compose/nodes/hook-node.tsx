@@ -7,7 +7,7 @@
 
 import { Handle, Position, useNodeId, useReactFlow } from "@xyflow/react";
 import { Badge } from "@/components/ui/badge";
-import { Webhook, Loader2, CheckCircle2, XCircle, Zap, Play, Square, Plus, AlertTriangle, Flag, Trash2, RotateCcw } from "lucide-react";
+import { Webhook, Loader2, CheckCircle2, XCircle, Zap, Play, Plus, AlertTriangle, Flag, Trash2, RotateCcw } from "lucide-react";
 import { type HookNodeData } from "./index";
 
 // Custom handle that shows "+" when not connected  

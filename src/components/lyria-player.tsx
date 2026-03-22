@@ -5,7 +5,7 @@
  * Handles continuous audio chunks and plays them seamlessly using Web Audio API.
  */
 
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Play, Pause, Square, Music2, Volume2 } from "lucide-react";
 import type { LyriaAudioChunk } from "@/hooks/use-lyria";
@@ -16,7 +16,7 @@ interface LyriaAudioPlayerProps {
   onPlay: () => void;
   onPause: () => void;
   onStop: () => void;
-  onClearQueue: () => void;
+  onConsumeQueue: (count: number) => void;
   config?: {
     bpm?: number;
     temperature?: number;
@@ -30,21 +30,16 @@ export function LyriaAudioPlayer({
   onPlay,
   onPause,
   onStop,
-  onClearQueue,
+  onConsumeQueue,
   config,
 }: LyriaAudioPlayerProps) {
   const audioContextRef = useRef<AudioContext | null>(null);
   const nextPlayTimeRef = useRef<number>(0);
-  const processedCountRef = useRef<number>(0);
   const [volume, setVolume] = useState(0.8);
-  const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
-  const sourceRef = useRef<AudioBufferSourceNode | null>(null);
-  const [isBuffering, setIsBuffering] = useState(false);
-  const [queueLength, setQueueLength] = useState(0);
   const [playbackTime, setPlaybackTime] = useState(0);
   const playbackStartTimeRef = useRef<number>(0);
-  const animationFrameRef = useRef<number | null>(null);
+  const playbackIntervalRef = useRef<number | null>(null);
 
   // Initialize audio context on first user interaction
   const initAudioContext = useCallback(() => {
@@ -89,12 +84,8 @@ export function LyriaAudioPlayer({
   const scheduleAudioChunks = useCallback(() => {
     const audioContext = audioContextRef.current;
     if (!audioContext || audioQueue.length === 0) return;
-    
-    // Get new chunks that haven't been processed
-    const newChunks = audioQueue.slice(processedCountRef.current);
-    if (newChunks.length === 0) return;
-    
-    for (const chunk of newChunks) {
+
+    for (const chunk of audioQueue) {
       try {
         // Decode PCM data
         const floatData = decodePCMChunk(chunk);
@@ -136,9 +127,9 @@ export function LyriaAudioPlayer({
         console.error("[LyriaAudioPlayer] Error scheduling chunk:", err);
       }
     }
-    
-    processedCountRef.current = audioQueue.length;
-  }, [audioQueue, decodePCMChunk]);
+
+    onConsumeQueue(audioQueue.length);
+  }, [audioQueue, decodePCMChunk, onConsumeQueue]);
 
   // Update volume when changed
   useEffect(() => {
@@ -149,12 +140,10 @@ export function LyriaAudioPlayer({
 
   // Schedule new chunks when queue updates
   useEffect(() => {
-    setQueueLength(audioQueue.length);
-    
-    if (isPlaying && audioQueue.length > processedCountRef.current) {
+    if (isPlaying && audioQueue.length > 0) {
       const audioContext = initAudioContext();
       if (audioContext.state === "suspended") {
-        audioContext.resume();
+        void audioContext.resume();
       }
       scheduleAudioChunks();
     }
@@ -167,7 +156,7 @@ export function LyriaAudioPlayer({
     
     if (isPlaying) {
       if (audioContext.state === "suspended") {
-        audioContext.resume();
+        void audioContext.resume();
       }
       scheduleAudioChunks();
       playbackStartTimeRef.current = Date.now();
@@ -179,22 +168,14 @@ export function LyriaAudioPlayer({
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (sourceRef.current) {
-        try {
-          sourceRef.current.stop();
-        } catch (e) {
-          // Ignore errors if already stopped
-        }
-        sourceRef.current.disconnect();
-      }
       if (gainNodeRef.current) {
         gainNodeRef.current.disconnect();
       }
       if (audioContextRef.current) {
-        audioContextRef.current.close();
+        void audioContextRef.current.close();
       }
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
+      if (playbackIntervalRef.current !== null) {
+        window.clearInterval(playbackIntervalRef.current);
       }
     };
   }, []);
@@ -202,22 +183,23 @@ export function LyriaAudioPlayer({
   // Update playback time
   useEffect(() => {
     if (isPlaying) {
-      const updateTime = () => {
+      const intervalId = window.setInterval(() => {
         if (playbackStartTimeRef.current) {
           setPlaybackTime((Date.now() - playbackStartTimeRef.current) / 1000);
         }
-        animationFrameRef.current = requestAnimationFrame(updateTime);
-      };
-      animationFrameRef.current = requestAnimationFrame(updateTime);
+      }, 250);
+      playbackIntervalRef.current = intervalId;
     } else {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
+      if (playbackIntervalRef.current !== null) {
+        window.clearInterval(playbackIntervalRef.current);
+        playbackIntervalRef.current = null;
       }
     }
-    
+
     return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
+      if (playbackIntervalRef.current !== null) {
+        window.clearInterval(playbackIntervalRef.current);
+        playbackIntervalRef.current = null;
       }
     };
   }, [isPlaying]);
@@ -273,8 +255,8 @@ export function LyriaAudioPlayer({
           size="sm"
           onClick={() => {
             onStop();
-            processedCountRef.current = 0;
             nextPlayTimeRef.current = audioContextRef.current?.currentTime || 0;
+            setPlaybackTime(0);
           }}
           variant="outline"
           className="border-red-500/50 text-red-400 hover:bg-red-500/10"
@@ -302,8 +284,8 @@ export function LyriaAudioPlayer({
       
       {/* Status Bar */}
       <div className="flex items-center justify-between text-xs text-purple-400/60">
-        <span>{queueLength} chunks queued</span>
-        <span>{isPlaying ? `Playing ${formatTime(playbackTime)}` : isBuffering ? "Buffering..." : "Ready"}</span>
+        <span>{audioQueue.length} chunks queued</span>
+        <span>{isPlaying ? `Playing ${formatTime(playbackTime)}` : "Ready"}</span>
       </div>
       
       {/* Visualizer Placeholder */}

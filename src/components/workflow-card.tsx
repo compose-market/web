@@ -8,7 +8,7 @@
  * 
  * Styling: uses @compose-market/theme BEM classes (cm-workflow-card*).
  */
-import React, { useState } from "react";
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -39,7 +39,8 @@ import {
     ChevronRight,
     ArrowLeft,
 } from "lucide-react";
-import { CHAIN_CONFIG, getContractAddress } from "@/lib/chains";
+import { CHAIN_CONFIG } from "@/lib/performance/chains-data";
+import { getContractAddress } from "@/lib/chains";
 
 export interface WorkflowCardProps {
     workflow: OnchainWorkflow;
