@@ -27,6 +27,14 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useIsMobile } from "@/hooks/use-mobile";
 import {
+    BACKPACK_CLOUD_PERMISSION_TYPES,
+    fetchBackpackPermissions,
+    getCachedBackpackPermissions,
+    grantBackpackPermission,
+    revokeBackpackPermission as revokeBackpackCloudPermission,
+    type BackpackCloudPermission,
+} from "@/lib/backpack";
+import {
     Backpack,
     FolderOpen,
     Camera,
@@ -96,44 +104,43 @@ interface ToolkitResult {
 // Permission Definitions
 // =============================================================================
 
-const PERMISSION_TYPES: Omit<Permission, "granted">[] = [
-    {
-        type: "filesystem",
+const PERMISSION_META: Record<BackpackCloudPermission, Omit<Permission, "type" | "granted">> = {
+    filesystem: {
         label: "File System",
         description: "Access files and folders on your device",
         icon: <FolderOpen className="w-4 h-4" />,
     },
-    {
-        type: "camera",
+    camera: {
         label: "Camera",
         description: "Use your camera for photos and video",
         icon: <Camera className="w-4 h-4" />,
     },
-    {
-        type: "microphone",
+    microphone: {
         label: "Microphone",
         description: "Record audio with your microphone",
         icon: <Mic className="w-4 h-4" />,
     },
-    {
-        type: "geolocation",
+    geolocation: {
         label: "Location",
         description: "Access your current location",
         icon: <MapPin className="w-4 h-4" />,
     },
-    {
-        type: "clipboard",
+    clipboard: {
         label: "Clipboard",
         description: "Read and write to your clipboard",
         icon: <Clipboard className="w-4 h-4" />,
     },
-    {
-        type: "notifications",
+    notifications: {
         label: "Notifications",
         description: "Send you desktop notifications",
         icon: <Bell className="w-4 h-4" />,
     },
-];
+};
+
+const PERMISSION_TYPES: Omit<Permission, "granted">[] = BACKPACK_CLOUD_PERMISSION_TYPES.map((type) => ({
+    type,
+    ...PERMISSION_META[type],
+}));
 
 // =============================================================================
 // Featured Provider Definitions (Composio toolkit slugs)
@@ -258,13 +265,12 @@ export function BackpackDialog({
     const statusPollAbortRef = useRef<AbortController | null>(null);
     const statusPollBusyRef = useRef(false);
 
-    // Permission states (from sessionStorage)
+    // Permission states (cached locally, sourced from Backpack)
     const [permissions, setPermissions] = useState<Record<string, boolean>>(() => {
-        const stored: Record<string, boolean> = {};
-        PERMISSION_TYPES.forEach(p => {
-            stored[p.type] = sessionStorage.getItem(`consent_${p.type}`) === "granted";
-        });
-        return stored;
+        const cached = new Set(getCachedBackpackPermissions());
+        return Object.fromEntries(
+            PERMISSION_TYPES.map((permission) => [permission.type, cached.has(permission.type as BackpackCloudPermission)]),
+        );
     });
 
     // Connection states fetched from Composio via backend
@@ -377,6 +383,24 @@ export function BackpackDialog({
             }
         }
     }, [effectiveUserId]);
+
+    const fetchPermissions = useCallback(async () => {
+        try {
+            const granted = await fetchBackpackPermissions(effectiveUserId);
+            const grantedSet = new Set(granted);
+            setPermissions(() => Object.fromEntries(
+                PERMISSION_TYPES.map((permission) => [permission.type, grantedSet.has(permission.type as BackpackCloudPermission)]),
+            ));
+        } catch (err) {
+            console.warn("[Backpack] Could not fetch permissions:", err);
+        }
+    }, [effectiveUserId]);
+
+    useEffect(() => {
+        if (handleOpen && activeTab === "permissions") {
+            void fetchPermissions();
+        }
+    }, [activeTab, fetchPermissions, handleOpen]);
 
     // Fetch connections when the accounts tab is opened
     useEffect(() => {
@@ -549,7 +573,7 @@ export function BackpackDialog({
             }
 
             if (granted) {
-                sessionStorage.setItem(`consent_${type}`, "granted");
+                await grantBackpackPermission(effectiveUserId, type as BackpackCloudPermission);
                 setPermissions(prev => ({ ...prev, [type]: true }));
                 toast({ title: "Permission Granted", description: `${type} access enabled.` });
             }
@@ -562,13 +586,21 @@ export function BackpackDialog({
         } finally {
             setLoadingPermission(null);
         }
-    }, [toast]);
+    }, [effectiveUserId, toast]);
 
-    const revokePermission = useCallback((type: string) => {
-        sessionStorage.removeItem(`consent_${type}`);
-        setPermissions(prev => ({ ...prev, [type]: false }));
-        toast({ title: "Permission Revoked", description: `${type} access disabled.` });
-    }, [toast]);
+    const revokePermission = useCallback(async (type: string) => {
+        try {
+            await revokeBackpackCloudPermission(effectiveUserId, type as BackpackCloudPermission);
+            setPermissions(prev => ({ ...prev, [type]: false }));
+            toast({ title: "Permission Revoked", description: `${type} access disabled.` });
+        } catch (err) {
+            toast({
+                title: "Revoke Failed",
+                description: err instanceof Error ? err.message : `Could not revoke ${type} access.`,
+                variant: "destructive",
+            });
+        }
+    }, [effectiveUserId, toast]);
 
     // ==========================================================================
     // OAuth Handlers — Composio Credential Broker
