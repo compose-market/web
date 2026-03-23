@@ -24,7 +24,7 @@ import { SessionBudgetDialog } from "@/components/session";
 import { useOnchainWorkflowByIdentifier } from "@/hooks/use-onchain";
 import { MultimodalCanvas, type ChatMessage } from "@/components/chat";
 import { useChat } from "@/hooks/use-chat";
-import { API_BASE_URL, buildAttachmentPart } from "@/lib/api";
+import { API_BASE_URL, buildAttachmentPart, parseEventStream } from "@/lib/api";
 import { WorkflowCard, WorkflowCardSkeleton } from "@/components/workflow-card";
 import {
     Sheet,
@@ -68,6 +68,7 @@ export default function ManowarPage() {
     const { messages, setMessages, scrollContainerRef, messagesEndRef,
         streamedTextRef, currentAssistantIdRef, handleJsonResponse,
         updateAssistantMessage, scheduleStreamUpdate, flushStreamContent,
+        activityState, clearActivityState, setActivityPhase, startToolActivity, finishToolActivity,
         // Attachments
         attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, clearFiles,
         // Recording
@@ -143,6 +144,8 @@ export default function ManowarPage() {
         setSending(true);
         setChatError(null);
         setChatStatus("paying");
+        clearActivityState();
+        setActivityPhase("thinking", "Preparing workflow...");
         abortControllerRef.current = new AbortController();
 
         posthog?.capture("workflow_executed", {
@@ -239,106 +242,157 @@ export default function ManowarPage() {
                 if (!reader) throw new Error("No response body");
 
                 setChatStatus("streaming");
-                const decoder = new TextDecoder();
-                let sseBuffer = "";
                 let finalOutput = "";
+                let handledStructuredResult = false;
 
                 currentAssistantIdRef.current = assistantId;
                 streamedTextRef.current = "";
 
-                const processSSEEvent = (eventName: string, dataPayload: string) => {
-                    try {
-                        const data = JSON.parse(dataPayload);
-
-                        if (eventName === "start") {
-                            streamedTextRef.current = data.message || "Starting workflow...";
-                        } else if (eventName === "step" || eventName === "agent") {
-                            streamedTextRef.current = data.message || `Processing ${data.agentName || data.stepName}...`;
-                        } else if (eventName === "progress") {
-                            streamedTextRef.current = data.message || streamedTextRef.current || "Running...";
-                        } else if (eventName === "complete" || eventName === "done") {
-                            streamedTextRef.current = data.message || streamedTextRef.current || "Workflow complete!";
-                        } else if (eventName === "result") {
-                            // Final result - check if it's a multimodal JSON response
-                            finalOutput = data.output || "";
-
-                            // Try to parse output as JSON to check for multimodal data
-                            try {
-                                const parsed = typeof finalOutput === "string" ? JSON.parse(finalOutput) : finalOutput;
-                                // If it has type + url/data/base64, it's a multimodal response
-                                if (parsed && (parsed.url || parsed.data || parsed.base64) && parsed.type) {
-                                    // Use handleJsonResponse to display properly (handles URL or uploads base64)
-                                    handleJsonResponse(assistantId, parsed);
-                                    streamedTextRef.current = `Generated ${parsed.type}...`;
-                                } else if (parsed && parsed.success === false && parsed.error) {
-                                    streamedTextRef.current = `Error: ${parsed.error}`;
-                                } else {
-                                    // Regular text output
-                                    streamedTextRef.current = finalOutput;
-                                }
-                            } catch {
-                                // Not JSON, treat as regular text
-                                streamedTextRef.current = finalOutput;
-                            }
-                        } else if (eventName === "error") {
-                            streamedTextRef.current = `Error: ${data.error || "Unknown error"}`;
-                        }
-
-                        // Use hook's RAF-batched streaming update
-                        scheduleStreamUpdate(streamedTextRef.current);
-                        replayEventIndex += 1;
-                        if (resolvedThreadId) {
-                            sessionStorage.setItem(runStorageKey, JSON.stringify({
-                                runId: composeRunId,
-                                threadId: resolvedThreadId,
-                                lastEventIndex: replayEventIndex,
-                                startedAt: Date.now(),
-                            }));
-                        }
-                    } catch {
-                        // Invalid JSON, ignore
+                const persistReplayCursor = () => {
+                    replayEventIndex += 1;
+                    if (resolvedThreadId) {
+                        sessionStorage.setItem(runStorageKey, JSON.stringify({
+                            runId: composeRunId,
+                            threadId: resolvedThreadId,
+                            lastEventIndex: replayEventIndex,
+                            startedAt: Date.now(),
+                        }));
                     }
                 };
 
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
+                for await (const block of parseEventStream(reader)) {
+                    const dataPayload = block.data.trim();
+                    if (!dataPayload || dataPayload === "[DONE]") {
+                        continue;
+                    }
 
-                    const chunk = decoder.decode(value, { stream: true });
-                    sseBuffer += chunk;
+                    let data: Record<string, unknown>;
+                    try {
+                        data = JSON.parse(dataPayload) as Record<string, unknown>;
+                    } catch {
+                        continue;
+                    }
 
-                    while (true) {
-                        const separatorIndex = sseBuffer.indexOf("\n\n");
-                        if (separatorIndex === -1) break;
+                    if (block.event === "start") {
+                        const message = typeof data.message === "string" ? data.message : "Starting workflow...";
+                        streamedTextRef.current = message;
+                        scheduleStreamUpdate(message);
+                        setActivityPhase("thinking", message);
+                        persistReplayCursor();
+                        continue;
+                    }
 
-                        const rawEvent = sseBuffer.slice(0, separatorIndex);
-                        sseBuffer = sseBuffer.slice(separatorIndex + 2);
-                        if (!rawEvent.trim()) continue;
+                    if (block.event === "step" || block.event === "agent") {
+                        const message = typeof data.message === "string"
+                            ? data.message
+                            : `Processing ${String(data.agentName || data.stepName || "workflow step")}...`;
+                        streamedTextRef.current = message;
+                        scheduleStreamUpdate(message);
+                        setActivityPhase("thinking", message);
+                        persistReplayCursor();
+                        continue;
+                    }
 
-                        let eventName = "message";
-                        const dataLines: string[] = [];
+                    if (block.event === "progress") {
+                        const message = typeof data.message === "string"
+                            ? data.message
+                            : streamedTextRef.current || "Running workflow...";
+                        streamedTextRef.current = message;
+                        scheduleStreamUpdate(message);
+                        setActivityPhase("thinking", message);
+                        persistReplayCursor();
+                        continue;
+                    }
 
-                        for (const line of rawEvent.split("\n")) {
-                            if (line.startsWith("event:")) {
-                                eventName = line.substring(6).trim();
-                            } else if (line.startsWith("data:")) {
-                                dataLines.push(line.substring(5).trim());
+                    if (block.event === "tool_start") {
+                        const toolName = typeof data.toolName === "string" ? data.toolName : "tool";
+                        const summary = typeof data.content === "string"
+                            ? data.content
+                            : typeof data.message === "string"
+                                ? data.message
+                                : undefined;
+                        if (summary) {
+                            streamedTextRef.current = summary;
+                            scheduleStreamUpdate(summary);
+                        }
+                        startToolActivity(toolName, summary);
+                        setActivityPhase("tool", `Using ${toolName}...`);
+                        persistReplayCursor();
+                        continue;
+                    }
+
+                    if (block.event === "tool_end") {
+                        const toolName = typeof data.toolName === "string" ? data.toolName : "tool";
+                        const summary = typeof data.message === "string" ? data.message : undefined;
+                        const failed = typeof data.error === "string" && data.error.length > 0;
+                        finishToolActivity(toolName, summary, failed);
+                        setActivityPhase(failed ? "error" : "thinking", failed ? (data.error as string) : `Processed ${toolName}`);
+                        persistReplayCursor();
+                        continue;
+                    }
+
+                    if (block.event === "result") {
+                        finalOutput = typeof data.output === "string"
+                            ? data.output
+                            : typeof data.output === "object" && data.output !== null
+                                ? JSON.stringify(data.output)
+                                : "";
+
+                        try {
+                            const parsed = typeof finalOutput === "string" ? JSON.parse(finalOutput) : finalOutput;
+                            if (parsed && typeof parsed === "object" && "type" in parsed && ("url" in parsed || "data" in parsed || "base64" in parsed)) {
+                                handledStructuredResult = true;
+                                handleJsonResponse(assistantId, parsed);
+                                setActivityPhase("streaming", `Generated ${String((parsed as { type?: unknown }).type || "output")}...`);
+                            } else if (parsed && typeof parsed === "object" && (parsed as { success?: unknown; error?: unknown }).success === false && typeof (parsed as { error?: unknown }).error === "string") {
+                                const errorText = `Error: ${String((parsed as { error: string }).error)}`;
+                                streamedTextRef.current = errorText;
+                                scheduleStreamUpdate(errorText);
+                                setActivityPhase("error", errorText);
+                            } else {
+                                streamedTextRef.current = finalOutput;
+                                scheduleStreamUpdate(finalOutput);
+                                setActivityPhase("streaming", "Finalizing response...");
                             }
+                        } catch {
+                            streamedTextRef.current = finalOutput;
+                            scheduleStreamUpdate(finalOutput);
+                            setActivityPhase("streaming", "Finalizing response...");
                         }
 
-                        if (dataLines.length > 0) {
-                            processSSEEvent(eventName, dataLines.join("\n"));
-                        }
+                        persistReplayCursor();
+                        continue;
+                    }
+
+                    if (block.event === "error") {
+                        const errorText = typeof data.error === "string" ? data.error : "Unknown workflow error";
+                        streamedTextRef.current = `Error: ${errorText}`;
+                        scheduleStreamUpdate(streamedTextRef.current);
+                        setActivityPhase("error", errorText);
+                        persistReplayCursor();
+                        continue;
+                    }
+
+                    if (block.event === "complete") {
+                        const message = typeof data.message === "string" ? data.message : "Workflow complete!";
+                        streamedTextRef.current = message;
+                        scheduleStreamUpdate(message);
+                        setActivityPhase("thinking", message);
+                        persistReplayCursor();
+                        continue;
+                    }
+
+                    if (block.event === "done") {
+                        clearActivityState();
+                        persistReplayCursor();
+                        continue;
                     }
                 }
 
                 // Final flush and update
                 flushStreamContent();
 
-                // Only update content if handleJsonResponse hasn't already handled it
-                // (handleJsonResponse will set imageUrl/audioUrl/videoUrl)
-                const lastMessage = messages.find(m => m.id === assistantId);
-                if (!lastMessage?.imageUrl && !lastMessage?.audioUrl && !lastMessage?.videoUrl) {
+                if (!handledStructuredResult) {
                     updateAssistantMessage(assistantId, { content: finalOutput || streamedTextRef.current || "Workflow completed" });
                 }
 
@@ -346,6 +400,7 @@ export default function ManowarPage() {
                     updateAssistantMessage(assistantId, { content: "No response received" });
                 }
                 sessionStorage.removeItem(runStorageKey);
+                clearActivityState();
             } else {
                 // Non-streaming response (image/audio/video/json) - use unified handler
                 const { parseMultimodalResponse } = await import("@/lib/multimodal");
@@ -408,6 +463,7 @@ export default function ManowarPage() {
         } catch (err) {
             // Silent return for user-initiated abort via stop button
             if (err instanceof DOMException && err.name === "AbortError") {
+                clearActivityState();
                 return;
             }
 
@@ -418,6 +474,7 @@ export default function ManowarPage() {
             // Backend handles state via Temporal workflows (resumable via run state endpoint)
 
             setChatError(errorMsg);
+            setActivityPhase("error", errorMsg);
             mpError("workflow_execution", errorMsg, { workflow_wallet: workflowWallet });
             setMessages(prev =>
                 prev.map(m => m.id === assistantId ? { ...m, content: `Error: ${errorMsg}` } : m)
@@ -427,7 +484,7 @@ export default function ManowarPage() {
             setChatStatus("idle");
             abortControllerRef.current = null;
         }
-    }, [inputValue, sending, workflow, wallet, account, toast, attachedFiles, clearFiles, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, setShowSessionDialog, continuousEnabled, scheduleStreamUpdate, flushStreamContent, updateAssistantMessage, handleJsonResponse, posthog]);
+    }, [inputValue, sending, workflow, workflowWallet, wallet, account, toast, attachedFiles, clearFiles, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, setShowSessionDialog, continuousEnabled, scheduleStreamUpdate, flushStreamContent, updateAssistantMessage, handleJsonResponse, posthog, clearActivityState, setActivityPhase, startToolActivity, finishToolActivity]);
 
     const handleStopExecution = useCallback(async () => {
         if (!workflow?.walletAddress || !activeThreadId) return;
@@ -443,6 +500,7 @@ export default function ManowarPage() {
                 workflow_title: workflow.title,
                 thread_id: activeThreadId,
             });
+            clearActivityState();
             setChatStatus("idle");
             setSending(false);
             toast({ title: "Stopped", description: "Workflow execution stopped" });
@@ -568,6 +626,7 @@ export default function ManowarPage() {
                             onSend={handleSendMessage}
                             sending={sending}
                             status={chatStatus}
+                            activityState={activityState}
                             error={chatError}
                             sessionActive={sessionActive}
                             onStartSession={() => setShowSessionDialog(true)}

@@ -186,6 +186,7 @@ export default function PlaygroundPage() {
   const { messages, setMessages, scrollContainerRef, messagesEndRef,
     streamedTextRef, currentAssistantIdRef, updateAssistantMessage,
     scheduleStreamUpdate, flushStreamContent,
+    activityState, clearMessages, clearActivityState, setActivityPhase,
     // Attachments
     attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, uploadedCids, cleanupFiles, clearFiles,
     // Recording
@@ -345,6 +346,11 @@ export default function PlaygroundPage() {
     clearFiles();
     setStreaming(true);
     setInferenceError(null);
+    clearActivityState();
+    setActivityPhase(
+      "thinking",
+      outputType === "text" ? "Preparing request..." : `Preparing ${outputType} generation...`,
+    );
 
     // Create assistant placeholder - MUST reset refs to prevent stale content
     const assistantId = crypto.randomUUID();
@@ -472,6 +478,7 @@ export default function PlaygroundPage() {
         onStreamChunk: (chunk) => {
           streamedTextRef.current += chunk;
           scheduleStreamUpdate(streamedTextRef.current);
+          setActivityPhase("streaming", "Responding...");
         },
         uploadToPinata: true,
         conversationId,
@@ -479,6 +486,7 @@ export default function PlaygroundPage() {
         // Handle async video polling
         onVideoPolling: {
           onProgress: (status, progress) => {
+            setActivityPhase("thinking", `Video ${status}${progress ? ` (${progress}%)` : ""}`);
             updateAssistantMessage(assistantId, {
               content: `Video generating... (${status}${progress ? ` - ${progress}%` : ""})`,
               type: "video",
@@ -486,6 +494,7 @@ export default function PlaygroundPage() {
           },
           onComplete: (url) => {
             console.log(`[playground] Video complete:`, url);
+            clearActivityState();
             updateAssistantMessage(assistantId, {
               content: "Video generated:",
               type: "video",
@@ -494,6 +503,7 @@ export default function PlaygroundPage() {
           },
           onError: (error) => {
             console.error(`[playground] Video error:`, error);
+            setActivityPhase("error", error);
             updateAssistantMessage(assistantId, {
               content: `Error: ${error}`,
               type: "video",
@@ -526,27 +536,29 @@ export default function PlaygroundPage() {
           audioUrl: result.type === "audio" ? result.url : undefined,
           videoUrl: result.type === "video" ? result.url : undefined,
         });
+        clearActivityState();
       } else {
         throw new Error(result.error || "Request failed");
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Unknown error";
       setInferenceError(errorMsg);
+      setActivityPhase("error", errorMsg);
       setMessages((prev) =>
         prev.map((m) => m.id === assistantId ? { ...m, content: `Error: ${errorMsg}` } : m)
       );
     } finally {
       setStreaming(false);
     }
-  }, [inputValue, streaming, selectedModel, selectedModelInfo, messages, systemPrompt, wallet, account, budgetRemaining, outputType, attachedFiles, clearFiles, sessionActive, composeKeyToken, ensureComposeKeyToken, activeGoogleTools, paymentChainId, paramValues, toast, setShowSessionDialog]);
+  }, [inputValue, streaming, selectedModel, selectedModelInfo, messages, systemPrompt, wallet, account, budgetRemaining, outputType, attachedFiles, clearFiles, sessionActive, composeKeyToken, ensureComposeKeyToken, activeGoogleTools, paymentChainId, paramValues, toast, setShowSessionDialog, scheduleStreamUpdate, flushStreamContent, updateAssistantMessage, clearActivityState, setActivityPhase, conversationId, posthog]);
 
   const handleClearChat = useCallback(() => {
-    setMessages([]);
+    clearMessages();
     setInferenceError(null);
     clearFiles();
     setConversationStartIndex(0);
     if (uploadedCids.length > 0) cleanupFiles();
-  }, [uploadedCids, cleanupFiles, clearFiles, setMessages]);
+  }, [uploadedCids, cleanupFiles, clearFiles, clearMessages]);
 
   // ==========================================================================
   // Render
@@ -696,6 +708,7 @@ export default function PlaygroundPage() {
               onInputChange={setInputValue}
               onSend={handleSendMessage}
               sending={streaming}
+              activityState={activityState}
               error={inferenceError}
               sessionActive={sessionActive}
               attachedFiles={attachedFiles}

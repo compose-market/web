@@ -27,8 +27,13 @@ import { SessionBudgetDialog } from "@/components/session";
 import { useOnchainAgentByIdentifier } from "@/hooks/use-onchain";
 import { MultimodalCanvas, type ChatMessage } from "@/components/chat";
 import { useChat } from "@/hooks/use-chat";
-import { API_BASE_URL, buildAttachmentPart, parseSSEStream } from "@/lib/api";
-import { fetchBackpackConnections, resolveBackpackUserId, type BackpackConnectionInfo } from "@/lib/backpack";
+import { API_BASE_URL, buildAttachmentPart, parseEventStream } from "@/lib/api";
+import {
+  getCachedBackpackPermissions,
+  grantBackpackPermission,
+  resolveBackpackUserId,
+  type BackpackCloudPermission,
+} from "@/lib/backpack";
 import { AgentCard, AgentCardSkeleton } from "@/components/agent-card";
 import {
   Dialog,
@@ -81,9 +86,10 @@ export default function AgentDetailPage() {
     conversationId: `agent-${agentWallet || 'unknown'}`,
     onError: (err) => setChatError(err),
   });
-  const { messages, setMessages, scrollContainerRef, messagesEndRef,
-    streamedTextRef, currentAssistantIdRef, updateAssistantMessage, handleJsonResponse,
+  const { messages, setMessages, clearMessages, scrollContainerRef, messagesEndRef,
+    streamedTextRef, currentAssistantIdRef, updateAssistantMessage,
     scheduleStreamUpdate, flushStreamContent,
+    activityState, clearActivityState, setActivityPhase, startToolActivity, finishToolActivity,
     // Attachments
     attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, clearFiles,
     // Recording
@@ -108,6 +114,42 @@ export default function AgentDetailPage() {
 
   // Mobile card sheet
   const [mobileCardOpen, setMobileCardOpen] = useState(false);
+  const threadIdRef = useRef<string | null>(null);
+
+  const resetConversationThread = useCallback(() => {
+    const userAddress = wallet?.getAccount()?.address;
+    if (!agentWallet || !userAddress) {
+      threadIdRef.current = null;
+      return null;
+    }
+
+    const backpackUserId = resolveBackpackUserId(userAddress);
+    const nextThreadId = `thread-${backpackUserId}-${agentWallet}-${crypto.randomUUID()}`;
+    threadIdRef.current = nextThreadId;
+    return nextThreadId;
+  }, [agentWallet, wallet]);
+
+  const ensureConversationThread = useCallback(() => {
+    if (threadIdRef.current) {
+      return threadIdRef.current;
+    }
+
+    const createdThreadId = resetConversationThread();
+    if (!createdThreadId) {
+      throw new Error("Unable to initialize agent conversation thread");
+    }
+    return createdThreadId;
+  }, [resetConversationThread]);
+
+  const handleClearChat = useCallback(() => {
+    clearMessages();
+    clearFiles();
+    setChatError(null);
+    resetConversationThread();
+    if (agentWallet) {
+      sessionStorage.removeItem(`agent-active-run:${agentWallet}`);
+    }
+  }, [agentWallet, clearFiles, clearMessages, resetConversationThread]);
 
   // Send chat message with x402 payment
   const handleSendMessage = useCallback(async () => {
@@ -146,6 +188,8 @@ export default function AgentDetailPage() {
     }
 
     const attached = attachedFiles[0];
+    const userAddress = wallet.getAccount()?.address;
+    const backpackUserId = resolveBackpackUserId(userAddress);
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
       role: "user",
@@ -164,6 +208,8 @@ export default function AgentDetailPage() {
     setSending(true);
     setChatError(null);
     setChatStatus("paying");
+    clearActivityState();
+    setActivityPhase("thinking", "Preparing request...");
 
     posthog?.capture("agent_chat_sent", {
       agent_wallet: agentWallet,
@@ -202,46 +248,19 @@ export default function AgentDetailPage() {
 
       const attachmentPart = buildAttachmentPart(attached);
 
-      // ALL agents use MCP for chat - MCP handles both plugin and non-plugin agents
       const makeChatRequest = async (): Promise<Response> => {
-        // Persistent thread ID scoped to user and agent
-        const userAddress = wallet.getAccount()?.address;
-        const backpackUserId = resolveBackpackUserId(userAddress);
-        const threadKey = `thread-${backpackUserId}-${agentWallet}`;
-        let threadId = sessionStorage.getItem(threadKey);
-        if (!threadId) {
-          threadId = `thread-${backpackUserId}-${agentWallet}-${crypto.randomUUID()}`;
-          sessionStorage.setItem(threadKey, threadId);
-        }
+        const threadId = ensureConversationThread();
 
         const headers: Record<string, string> = {
           "Content-Type": "application/json",
         };
-
-        // Collect granted permissions from sessionStorage (from Backpack)
-        const grantedPermissions: string[] = [];
-        const permissionTypes = ["filesystem", "camera", "microphone", "geolocation", "clipboard", "notifications"];
-        permissionTypes.forEach(perm => {
-          if (sessionStorage.getItem(`consent_${perm}`) === "granted") {
-            grantedPermissions.push(perm);
-          }
-        });
-
-        // Build request body with attachment if present (like playground.tsx)
-        let backpackAccounts: BackpackConnectionInfo[] = [];
-        try {
-          backpackAccounts = await fetchBackpackConnections(backpackUserId);
-        } catch (error) {
-          console.warn("[agent] Backpack connections unavailable:", error);
-        }
 
         const requestBody: Record<string, unknown> = {
           message: userMessage.content,
           threadId: threadId,
           composeRunId,
           userId: backpackUserId,
-          grantedPermissions, // Pass to backend for proactive permission checks
-          backpackAccounts,
+          cloudPermissions: getCachedBackpackPermissions(),
         };
         sessionStorage.setItem(runStorageKey, JSON.stringify({
           runId: composeRunId,
@@ -253,7 +272,7 @@ export default function AgentDetailPage() {
           requestBody.attachment = attachmentPart;
         }
 
-        return fetchWithPayment(`${API_URL}/agent/${agentWallet}/chat`, {
+        return fetchWithPayment(`${API_URL}/agent/${agentWallet}/stream`, {
           method: "POST",
           headers,
           body: JSON.stringify(requestBody),
@@ -283,33 +302,116 @@ export default function AgentDetailPage() {
       const contentType = response.headers.get("content-type") || "";
 
       if (contentType.includes("text/event-stream") || contentType.includes("text/plain")) {
-        // Streaming text response
         const reader = response.body?.getReader();
         if (!reader) throw new Error("No response body");
 
         setChatStatus("streaming");
         let fullResponse = "";
+        const cancelStream = async () => {
+          try {
+            await reader.cancel();
+          } catch {
+            // Ignore reader cancellation failures; the request is already terminal.
+          }
+        };
 
         // Store assistant ID for RAF flush callback
         currentAssistantIdRef.current = assistantId;
         streamedTextRef.current = "";
 
-        // Use centralized SSE parser that handles `data: {...}` format
-        for await (const chunk of parseSSEStream(reader)) {
-          fullResponse += chunk;
-          // Use hook's RAF-batched streaming update
-          scheduleStreamUpdate(fullResponse);
+        setActivityPhase("thinking", "Thinking...");
+
+        for await (const block of parseEventStream(reader)) {
+          const data = block.data.trim();
+          if (!data || data === "[DONE]") {
+            continue;
+          }
+
+          let payload: Record<string, unknown> | null = null;
+          try {
+            payload = JSON.parse(data) as Record<string, unknown>;
+          } catch {
+            fullResponse += data;
+            scheduleStreamUpdate(fullResponse);
+            setActivityPhase("streaming", "Responding...");
+            continue;
+          }
+
+          const delta = payload.choices as Array<{ delta?: { content?: string } }> | undefined;
+          const streamedChunk = typeof delta?.[0]?.delta?.content === "string" ? delta[0].delta.content : null;
+          if (streamedChunk) {
+            fullResponse += streamedChunk;
+            scheduleStreamUpdate(fullResponse);
+            setActivityPhase("streaming", "Responding...");
+            continue;
+          }
+
+          if (payload.type === "thinking_start") {
+            setActivityPhase("thinking", typeof payload.message === "string" ? payload.message : "Thinking...");
+            continue;
+          }
+
+          if (payload.type === "thinking_end") {
+            setActivityPhase("streaming", "Responding...");
+            continue;
+          }
+
+          if (payload.type === "tool_start") {
+            const summary = typeof payload.content === "string" ? payload.content : undefined;
+            if (summary) {
+              fullResponse += summary;
+              scheduleStreamUpdate(fullResponse);
+            }
+            const toolName = typeof payload.toolName === "string" ? payload.toolName : "tool";
+            startToolActivity(toolName, summary);
+            setActivityPhase("tool", `Using ${toolName}...`);
+            continue;
+          }
+
+          if (payload.type === "tool_end") {
+            const toolName = typeof payload.toolName === "string" ? payload.toolName : "tool";
+            finishToolActivity(toolName);
+            setActivityPhase("thinking", `Processing ${toolName} result...`);
+            continue;
+          }
+
+          if (payload.type === "error") {
+            const errorText = typeof payload.content === "string"
+              ? payload.content
+              : typeof payload.error === "string"
+                ? payload.error
+                : "Agent stream failed";
+            setActivityPhase("error", errorText);
+            fullResponse += errorText;
+            scheduleStreamUpdate(fullResponse);
+            await cancelStream();
+            break;
+          }
+
+          if (payload.type === "done") {
+            clearActivityState();
+            await cancelStream();
+            break;
+          }
+
+          if (typeof payload.content === "string") {
+            fullResponse += payload.content;
+            scheduleStreamUpdate(fullResponse);
+            setActivityPhase("streaming", "Responding...");
+          } else if (typeof payload.text === "string") {
+            fullResponse += payload.text;
+            scheduleStreamUpdate(fullResponse);
+            setActivityPhase("streaming", "Responding...");
+          }
         }
 
-        // Final flush to ensure all content is displayed
         flushStreamContent();
         updateAssistantMessage(assistantId, { content: fullResponse });
 
         if (!fullResponse) {
           updateAssistantMessage(assistantId, { content: "No response received" });
         }
-        // Record successful usage
-        sessionStorage.removeItem(runStorageKey);
+        clearActivityState();
       } else {
         // Non-streaming response (image/audio/video/json) - use unified handler
         const { parseMultimodalResponse } = await import("@/lib/multimodal");
@@ -364,7 +466,6 @@ export default function AgentDetailPage() {
               videoUrl: result.type === "video" ? result.url : undefined,
             } : m)
           );
-          sessionStorage.removeItem(runStorageKey);
         } else {
           throw new Error(result.error || "Request failed");
         }
@@ -396,8 +497,7 @@ export default function AgentDetailPage() {
                 await (window as any).showDirectoryPicker();
                 // User granted filesystem access - retry the message
                 toast({ title: "Access Granted", description: "You can now interact with your files." });
-                // Store the handle for subsequent requests
-                sessionStorage.setItem(`consent_${consentType}`, "granted");
+                await grantBackpackPermission(backpackUserId, consentType as BackpackCloudPermission);
                 // Retry by calling handleSendMessage again (user can resend)
                 setInputValue(userMessage.content || "");
                 setMessages(prev => prev.filter(m => m.id !== assistantId));
@@ -412,7 +512,7 @@ export default function AgentDetailPage() {
                 : { audio: true };
               await navigator.mediaDevices.getUserMedia(constraints);
               toast({ title: "Access Granted", description: `${consentType} access enabled.` });
-              sessionStorage.setItem(`consent_${consentType}`, "granted");
+              await grantBackpackPermission(backpackUserId, consentType as BackpackCloudPermission);
               setInputValue(userMessage.content || "");
               setMessages(prev => prev.filter(m => m.id !== assistantId));
               errorMsg = `${consentType} access granted. Please resend your message.`;
@@ -422,7 +522,7 @@ export default function AgentDetailPage() {
                 navigator.geolocation.getCurrentPosition(resolve, reject);
               });
               toast({ title: "Access Granted", description: "Location access enabled." });
-              sessionStorage.setItem(`consent_${consentType}`, "granted");
+              await grantBackpackPermission(backpackUserId, consentType as BackpackCloudPermission);
               setInputValue(userMessage.content || "");
               setMessages(prev => prev.filter(m => m.id !== assistantId));
               errorMsg = "Location access granted. Please resend your message.";
@@ -439,16 +539,18 @@ export default function AgentDetailPage() {
       }
 
       setChatError(errorMsg);
+      setActivityPhase("error", errorMsg);
       mpError("agent_chat", errorMsg, { agent_wallet: agentWallet });
       setMessages(prev =>
         prev.map(m => m.id === assistantId ? { ...m, content: `Error: ${errorMsg}` } : m)
       );
 
     } finally {
+      sessionStorage.removeItem(runStorageKey);
       setSending(false);
       setChatStatus("idle");
     }
-  }, [inputValue, sending, agentWallet, wallet, account, toast, agent, attachedFiles, clearFiles, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, setShowSessionDialog, parseSSEStream, scheduleStreamUpdate, flushStreamContent, updateAssistantMessage, handleJsonResponse, posthog]);
+  }, [inputValue, sending, agentWallet, wallet, account, toast, agent, attachedFiles, clearFiles, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, setShowSessionDialog, ensureConversationThread, parseEventStream, scheduleStreamUpdate, flushStreamContent, updateAssistantMessage, posthog, clearActivityState, setActivityPhase, startToolActivity, finishToolActivity]);
 
   // Upload knowledge
   const handleUploadKnowledge = useCallback(async () => {
@@ -620,6 +722,7 @@ export default function AgentDetailPage() {
             onSend={handleSendMessage}
             sending={sending}
             status={chatStatus}
+            activityState={activityState}
             error={chatError}
             sessionActive={sessionActive}
             onStartSession={() => setShowSessionDialog(true)}
@@ -645,6 +748,7 @@ export default function AgentDetailPage() {
             }}
             onDeleteMessage={(id) => setMessages(prev => prev.filter(m => m.id !== id))}
             onKnowledgeUpload={() => setShowKnowledgeDialog(true)}
+            onClearChat={handleClearChat}
             height="h-full"
             emptyStateText="Start a conversation with this agent."
             emptyStateSubtext="Requires x402 payment session."
