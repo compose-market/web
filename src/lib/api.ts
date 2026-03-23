@@ -314,13 +314,14 @@ export interface MultimodalResult {
 // SSE Stream Parser
 // =============================================================================
 
-/**
- * Parse SSE stream from text/event-stream response
- * Yields text content chunks as they arrive
- */
-export async function* parseSSEStream(
+export interface ParsedSSEBlock {
+  event: string;
+  data: string;
+}
+
+export async function* parseEventStream(
   reader: ReadableStreamDefaultReader<Uint8Array>
-): AsyncGenerator<string, void, unknown> {
+): AsyncGenerator<ParsedSSEBlock, void, unknown> {
   const decoder = new TextDecoder();
   let buffer = "";
 
@@ -330,75 +331,103 @@ export async function* parseSSEStream(
 
     buffer += decoder.decode(value, { stream: true });
 
-    // Process complete lines
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || ""; // Keep incomplete line in buffer
+    while (true) {
+      const separatorIndex = buffer.indexOf("\n\n");
+      if (separatorIndex === -1) break;
 
-    for (const line of lines) {
-      if (line.startsWith("data: ")) {
-        const data = line.slice(6).trim();
-        if (data === "[DONE]") return;
+      const rawBlock = buffer.slice(0, separatorIndex);
+      buffer = buffer.slice(separatorIndex + 2);
+      if (!rawBlock.trim()) continue;
 
-        try {
-          const parsed = JSON.parse(data) as Record<string, unknown>;
-          const chatChunk = parsed as unknown as ChatCompletionChunk;
+      let event = "message";
+      const dataLines: string[] = [];
 
-          // Chat Completions chunk
-          if (
-            Array.isArray(chatChunk.choices) &&
-            typeof chatChunk.choices?.[0]?.delta?.content === "string"
-          ) {
-            yield chatChunk.choices[0].delta.content as string;
-            continue;
-          }
-
-          // Responses stream chunk
-          if (parsed.type === "response.output_text.delta") {
-            if (typeof parsed.delta === "string") {
-              yield parsed.delta;
-              continue;
-            }
-            if (
-              parsed.delta &&
-              typeof parsed.delta === "object" &&
-              typeof (parsed.delta as { text?: unknown }).text === "string"
-            ) {
-              yield (parsed.delta as { text: string }).text;
-              continue;
-            }
-            continue;
-          }
-
-          // Generic text-bearing event payloads
-          if (typeof parsed.content === "string") {
-            yield parsed.content;
-            continue;
-          }
-          if (typeof parsed.text === "string") {
-            yield parsed.text;
-            continue;
-          }
-        } catch {
-          // Attempt to handle custom events wrapped in data objects
-          try {
-            const parsed = JSON.parse(data);
-            if (typeof parsed?.content === "string") yield parsed.content;
-            else if (typeof parsed?.text === "string") yield parsed.text;
-          } catch {
-            // Only yield raw fallback for non-JSON payloads.
-            if (data && !data.startsWith("{") && !data.startsWith("[")) yield data;
-          }
+      for (const line of rawBlock.split("\n")) {
+        if (line.startsWith("event:")) {
+          event = line.slice(6).trim() || "message";
+          continue;
         }
-      } else if (line.trim() && !line.startsWith(":")) {
-        // Plain text streaming (no SSE format)
-        yield line;
+        if (line.startsWith("data:")) {
+          dataLines.push(line.slice(5).trimStart());
+          continue;
+        }
+        if (line.trim() && !line.startsWith(":")) {
+          dataLines.push(line);
+        }
       }
+
+      if (dataLines.length === 0) continue;
+
+      yield {
+        event,
+        data: dataLines.join("\n"),
+      };
     }
   }
 
-  // Process remaining buffer
   if (buffer.trim()) {
-    yield buffer;
+    yield {
+      event: "message",
+      data: buffer.trim(),
+    };
+  }
+}
+
+/**
+ * Parse SSE stream from text/event-stream response
+ * Yields text content chunks as they arrive
+ */
+export async function* parseSSEStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>
+): AsyncGenerator<string, void, unknown> {
+  for await (const block of parseEventStream(reader)) {
+    const data = block.data.trim();
+    if (!data || data === "[DONE]") {
+      if (data === "[DONE]") return;
+      continue;
+    }
+
+    try {
+      const parsed = JSON.parse(data) as Record<string, unknown>;
+      const chatChunk = parsed as unknown as ChatCompletionChunk;
+
+      if (
+        Array.isArray(chatChunk.choices) &&
+        typeof chatChunk.choices?.[0]?.delta?.content === "string"
+      ) {
+        yield chatChunk.choices[0].delta.content as string;
+        continue;
+      }
+
+      if (parsed.type === "response.output_text.delta") {
+        if (typeof parsed.delta === "string") {
+          yield parsed.delta;
+          continue;
+        }
+        if (
+          parsed.delta &&
+          typeof parsed.delta === "object" &&
+          typeof (parsed.delta as { text?: unknown }).text === "string"
+        ) {
+          yield (parsed.delta as { text: string }).text;
+          continue;
+        }
+        continue;
+      }
+
+      if (typeof parsed.content === "string") {
+        yield parsed.content;
+        continue;
+      }
+      if (typeof parsed.text === "string") {
+        yield parsed.text;
+        continue;
+      }
+    } catch {
+      if (!data.startsWith("{") && !data.startsWith("[")) {
+        yield data;
+      }
+    }
   }
 }
 

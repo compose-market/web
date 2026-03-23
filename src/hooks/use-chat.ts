@@ -37,6 +37,31 @@ export interface UseChatOptions {
     maxFiles?: number;
 }
 
+export type ChatActivityPhase = "idle" | "thinking" | "tool" | "streaming" | "error";
+
+export interface ChatToolActivity {
+    id: string;
+    toolName: string;
+    status: "running" | "completed" | "error";
+    summary?: string;
+    startedAt: number;
+    endedAt?: number;
+}
+
+export interface ChatActivityState {
+    phase: ChatActivityPhase;
+    label: string;
+    tools: ChatToolActivity[];
+    updatedAt: number;
+}
+
+function summarizeActivity(value: string | undefined): string | undefined {
+    if (!value) return undefined;
+    const normalized = value.replace(/\s+/g, " ").trim();
+    if (!normalized) return undefined;
+    return normalized.length > 120 ? `${normalized.slice(0, 117)}...` : normalized;
+}
+
 export interface UseChatReturn {
     // === Messages ===
     messages: ChatMessage[];
@@ -63,6 +88,11 @@ export interface UseChatReturn {
     scheduleStreamUpdate: (content: string) => void;
     /** Flush any pending stream content immediately */
     flushStreamContent: () => void;
+    activityState: ChatActivityState;
+    clearActivityState: () => void;
+    setActivityPhase: (phase: ChatActivityPhase, label?: string) => void;
+    startToolActivity: (toolName: string, summary?: string) => void;
+    finishToolActivity: (toolName: string, summary?: string, failed?: boolean) => void;
 
     // === Scroll ===
     scrollContainerRef: React.RefObject<HTMLDivElement | null>;
@@ -108,6 +138,12 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
 
     // === Message State ===
     const [messages, setMessages] = useState<ChatMessage[]>([]);
+    const [activityState, setActivityState] = useState<ChatActivityState>({
+        phase: "idle",
+        label: "",
+        tools: [],
+        updatedAt: Date.now(),
+    });
 
     // === File Attachment State ===
     const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
@@ -209,6 +245,83 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         setMessages([]);
         streamedTextRef.current = "";
         currentAssistantIdRef.current = null;
+        setActivityState({
+            phase: "idle",
+            label: "",
+            tools: [],
+            updatedAt: Date.now(),
+        });
+    }, []);
+
+    const clearActivityState = useCallback(() => {
+        setActivityState({
+            phase: "idle",
+            label: "",
+            tools: [],
+            updatedAt: Date.now(),
+        });
+    }, []);
+
+    const setActivityPhase = useCallback((phase: ChatActivityPhase, label?: string) => {
+        setActivityState((prev) => ({
+            ...prev,
+            phase,
+            label: label ?? prev.label,
+            updatedAt: Date.now(),
+        }));
+    }, []);
+
+    const startToolActivity = useCallback((toolName: string, summary?: string) => {
+        setActivityState((prev) => ({
+            phase: "tool",
+            label: `Using ${toolName}`,
+            tools: [
+                ...prev.tools,
+                {
+                    id: crypto.randomUUID(),
+                    toolName,
+                    status: "running",
+                    summary: summarizeActivity(summary),
+                    startedAt: Date.now(),
+                },
+            ],
+            updatedAt: Date.now(),
+        }));
+    }, []);
+
+    const finishToolActivity = useCallback((toolName: string, summary?: string, failed = false) => {
+        setActivityState((prev) => {
+            const nextTools = [...prev.tools];
+            const index = [...nextTools]
+                .reverse()
+                .findIndex((item) => item.toolName === toolName && item.status === "running");
+
+            if (index >= 0) {
+                const resolvedIndex = nextTools.length - 1 - index;
+                nextTools[resolvedIndex] = {
+                    ...nextTools[resolvedIndex],
+                    status: failed ? "error" : "completed",
+                    summary: summarizeActivity(summary) || nextTools[resolvedIndex].summary,
+                    endedAt: Date.now(),
+                };
+            } else {
+                nextTools.push({
+                    id: crypto.randomUUID(),
+                    toolName,
+                    status: failed ? "error" : "completed",
+                    summary: summarizeActivity(summary),
+                    startedAt: Date.now(),
+                    endedAt: Date.now(),
+                });
+            }
+
+            return {
+                phase: failed ? "error" : "thinking",
+                label: failed ? `${toolName} failed` : `Processed ${toolName}`,
+                tools: nextTools,
+                updatedAt: Date.now(),
+            };
+        });
     }, []);
 
     // ==========================================================================
@@ -542,6 +655,11 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         currentAssistantIdRef,
         scheduleStreamUpdate,
         flushStreamContent,
+        activityState,
+        clearActivityState,
+        setActivityPhase,
+        startToolActivity,
+        finishToolActivity,
         // Scroll
         scrollContainerRef,
         messagesEndRef,

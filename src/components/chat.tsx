@@ -43,6 +43,7 @@ import {
 } from "lucide-react";
 import { GenerationCanvas } from "@/components/blur";
 import { useLyriaWebSocket } from "@/hooks/use-lyria";
+import type { ChatActivityState } from "@/hooks/use-chat";
 
 // =============================================================================
 // Types - Import from single source of truth
@@ -286,6 +287,7 @@ export interface MultimodalCanvasProps {
     showHeader?: boolean;
     placeholder?: string;
     status?: "idle" | "paying" | "waiting" | "streaming";
+    activityState?: ChatActivityState;
     error?: string | null;
     sessionActive?: boolean;
     onStartSession?: () => void;
@@ -355,6 +357,7 @@ export function MultimodalCanvas({
     showHeader = true,
     placeholder,
     status = "idle",
+    activityState,
     error,
     attachedFiles = [],
     onFileSelect,
@@ -378,6 +381,8 @@ export function MultimodalCanvas({
     setMessages,
 }: MultimodalCanvasProps) {
     const config = canvasVariantConfig[variant];
+    const activeTools = activityState?.tools.slice(-3) || [];
+    const shouldShowActivity = status !== "idle" || Boolean(activityState && activityState.phase !== "idle");
 
     // ==========================================================================
     // Lyria RealTime Integration
@@ -547,14 +552,37 @@ export function MultimodalCanvas({
                 )}
             </div>
 
-            {status !== "idle" && (
+            {shouldShowActivity && (
                 <div className="shrink-0 px-3 py-2 border-t border-dashed border-sidebar-border bg-sidebar-accent/30 flex items-center gap-2 text-xs font-mono">
-                    <Loader2 className={cn("w-3 h-3 animate-spin", config.headerText)} />
+                    <Loader2 className={cn("w-3 h-3", (status === "paying" || status === "waiting" || status === "streaming" || activityState?.phase === "thinking" || activityState?.phase === "tool" || activityState?.phase === "streaming") && "animate-spin", config.headerText)} />
                     <span className="text-muted-foreground">
                         {status === "paying" && <><span className="text-yellow-400">Paying...</span> Processing x402 payment</>}
                         {status === "waiting" && <><span className="text-orange-400">Waiting...</span> Awaiting response</>}
-                        {status === "streaming" && <><span className={config.headerText}>Streaming...</span> Receiving response</>}
+                        {status === "streaming" && activityState?.label ? <><span className={config.headerText}>Live...</span> {activityState.label}</> : null}
+                        {status === "streaming" && !activityState?.label && <><span className={config.headerText}>Streaming...</span> Receiving response</>}
+                        {status === "idle" && activityState?.phase === "streaming" && <><span className={config.headerText}>Live...</span> {activityState.label || "Receiving response"}</>}
+                        {status === "idle" && activityState?.phase === "thinking" && <><span className={config.headerText}>Thinking...</span> {activityState.label || "Planning next step"}</>}
+                        {status === "idle" && activityState?.phase === "tool" && <><span className={config.headerText}>Tool...</span> {activityState.label || "Using tools"}</>}
+                        {status === "idle" && activityState?.phase === "error" && <><span className="text-red-400">Error...</span> {activityState.label || "Execution failed"}</>}
                     </span>
+                    {activeTools.length > 0 && (
+                        <div className="ml-auto flex flex-wrap items-center gap-1">
+                            {activeTools.map((tool) => (
+                                <span
+                                    key={tool.id}
+                                    className={cn(
+                                        "rounded-full border px-2 py-0.5 text-[10px] normal-case",
+                                        tool.status === "running" && "border-cyan-500/40 bg-cyan-500/10 text-cyan-200",
+                                        tool.status === "completed" && "border-emerald-500/40 bg-emerald-500/10 text-emerald-200",
+                                        tool.status === "error" && "border-red-500/40 bg-red-500/10 text-red-200",
+                                    )}
+                                    title={tool.summary || tool.toolName}
+                                >
+                                    {tool.toolName}
+                                </span>
+                            ))}
+                        </div>
+                    )}
                 </div>
             )}
 
