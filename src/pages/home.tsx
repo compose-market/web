@@ -173,7 +173,7 @@ export default function Home() {
         </div>
         <div className="text-center sm:text-right">
           <span className="text-muted hidden sm:inline">SYS.VER.2.0.4 // </span>
-          <span className="text-muted-foreground">COMPOSE.MARKET © 2025</span>
+          <span className="text-muted-foreground">COMPOSE.MARKET © 2026</span>
         </div>
       </footer>
     </div>
