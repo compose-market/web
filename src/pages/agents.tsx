@@ -106,7 +106,7 @@ export default function AgentsPage() {
           recentInteractions: 0,
           rating: 5.0, // Default rating for new agents
           status: "active" as const,
-          type: a.metadata?.endpoint ? "hosted" as const : "local" as const,
+          type: "hosted" as const,
           featured: false,
           verified: true, // On-chain = verified
           category: "ai-agent",

@@ -1,10 +1,10 @@
 /**
- * Manowar Workflow Page
+ * Compose Workflow Page
  * 
- * Provides interactive chat/execution interface for Manowar workflows.
- * Fetches Manowar data -> Coordinator Agent -> Executes chat via Coordinator.
+ * Provides interactive chat/execution interface for Compose workflows.
+ * Fetches Compose data -> Coordinator Agent -> Executes chat via Coordinator.
  * 
- * Layout: Chat on left, ManowarCard on right (matching agent.tsx pattern)
+ * Layout: Chat on left, WorkflowCard on right (matching agent.tsx pattern)
  * Uses shared MultimodalCanvas component and hooks for the chat interface.
  */
 import { useState, useCallback, useRef } from "react";
@@ -591,15 +591,17 @@ export default function ManowarPage() {
                 </div>
 
                 {/* Mobile Card Button - only visible on mobile */}
-                <Button
-                    variant="ghost"
-                    size="sm"
-                    className="lg:hidden text-muted-foreground hover:text-fuchsia-400 h-7 w-7 p-0 ml-2"
-                    onClick={() => setMobileCardOpen(true)}
-                    aria-label="View workflow details"
-                >
-                    <IdCard className="w-4 h-4" />
-                </Button>
+                <div className="flex items-center gap-1">
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        className="lg:hidden text-muted-foreground hover:text-fuchsia-400 h-7 w-7 p-0"
+                        onClick={() => setMobileCardOpen(true)}
+                        aria-label="View workflow details"
+                    >
+                        <IdCard className="w-4 h-4" />
+                    </Button>
+                </div>
             </div>
 
             {/* Main Layout: Chat on Left, Card on Right */}
@@ -687,6 +689,7 @@ export default function ManowarPage() {
                     </div>
                 </SheetContent>
             </Sheet>
+
         </div>
     );
 }

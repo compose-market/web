@@ -54,9 +54,9 @@ export function resolveBackpackUserId(preferred?: string | null): string {
   return created;
 }
 
-export async function fetchBackpackConnections(userId: string): Promise<BackpackConnectionInfo[]> {
+export async function fetchBackpackConnections(userAddress: string): Promise<BackpackConnectionInfo[]> {
   const response = await fetch(
-    apiUrl(`/api/backpack/connections?userId=${encodeURIComponent(userId)}`),
+    apiUrl(`/api/backpack/connections?userAddress=${encodeURIComponent(userAddress)}`),
     { method: "GET" },
   );
 
@@ -68,9 +68,9 @@ export async function fetchBackpackConnections(userId: string): Promise<Backpack
   return Array.isArray(payload.connections) ? payload.connections : [];
 }
 
-export async function fetchBackpackPermissions(userId: string): Promise<BackpackCloudPermission[]> {
+export async function fetchBackpackPermissions(userAddress: string): Promise<BackpackCloudPermission[]> {
   const response = await fetch(
-    apiUrl(`/api/backpack/permissions?userId=${encodeURIComponent(userId)}`),
+    apiUrl(`/api/backpack/permissions?userAddress=${encodeURIComponent(userAddress)}`),
     { method: "GET" },
   );
 
@@ -95,14 +95,14 @@ export async function fetchBackpackPermissions(userId: string): Promise<Backpack
   return granted;
 }
 
-export async function grantBackpackPermission(userId: string, consentType: BackpackCloudPermission): Promise<void> {
+export async function grantBackpackPermission(userAddress: string, consentType: BackpackCloudPermission): Promise<void> {
   const response = await fetch(apiUrl("/api/backpack/permissions/grant"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      userId,
+      userAddress,
       consentType,
     }),
   });
@@ -114,14 +114,14 @@ export async function grantBackpackPermission(userId: string, consentType: Backp
   cacheBackpackPermission(consentType, true);
 }
 
-export async function revokeBackpackPermission(userId: string, consentType: BackpackCloudPermission): Promise<void> {
+export async function revokeBackpackPermission(userAddress: string, consentType: BackpackCloudPermission): Promise<void> {
   const response = await fetch(apiUrl("/api/backpack/permissions/revoke"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      userId,
+      userAddress,
       consentType,
     }),
   });

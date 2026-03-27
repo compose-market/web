@@ -226,14 +226,14 @@ const FEATURED_PROVIDERS: ProviderDisplay[] = [
 // =============================================================================
 
 interface BackpackDialogProps {
-    userId?: string;
+    userAddress?: string;
     open?: boolean;
     onOpenChange?: (open: boolean) => void;
     showTrigger?: boolean;
 }
 
 export function BackpackDialog({
-    userId,
+    userAddress,
     open,
     onOpenChange,
     showTrigger = true
@@ -329,8 +329,8 @@ export function BackpackDialog({
         handleOpenChange(nextOpen);
     }, [cleanupAsyncWork, handleOpenChange, resetTransientState]);
 
-    // Effective userId — fallback to anonymous session id
-    const effectiveUserId = userId || sessionStorage.getItem("composio_anon_id") || (() => {
+    // Effective userAddress — fallback to anonymous session id
+    const effectiveUserId = userAddress || sessionStorage.getItem("composio_anon_id") || (() => {
         const id = `anon_${crypto.randomUUID()}`;
         sessionStorage.setItem("composio_anon_id", id);
         return id;
@@ -351,7 +351,7 @@ export function BackpackDialog({
         try {
             setRefreshing(true);
             const res = await fetch(
-                `${API_BASE}/api/backpack/connections?userId=${encodeURIComponent(effectiveUserId)}`,
+                `${API_BASE}/api/backpack/connections?userAddress=${encodeURIComponent(effectiveUserId)}`,
                 { signal: controller.signal },
             );
 
@@ -616,7 +616,7 @@ export function BackpackDialog({
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    userId: effectiveUserId,
+                    userAddress: effectiveUserId,
                     toolkit: provider.slug,
                 }),
             });
@@ -648,7 +648,7 @@ export function BackpackDialog({
 
             startStatusPolling(async (signal) => {
                 const statusRes = await fetch(
-                    `${API_BASE}/api/backpack/status/${encodeURIComponent(provider.slug)}?userId=${encodeURIComponent(effectiveUserId)}`,
+                    `${API_BASE}/api/backpack/status/${encodeURIComponent(provider.slug)}?userAddress=${encodeURIComponent(effectiveUserId)}`,
                     { signal },
                 );
                 if (!statusRes.ok) {
@@ -700,7 +700,7 @@ export function BackpackDialog({
             const res = await fetch(`${API_BASE}/api/backpack/telegram/link`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ userId: effectiveUserId }),
+                body: JSON.stringify({ userAddress: effectiveUserId }),
             });
 
             if (!res.ok) {
@@ -720,7 +720,7 @@ export function BackpackDialog({
 
             startStatusPolling(async (signal) => {
                 const statusRes = await fetch(
-                    `${API_BASE}/api/backpack/telegram/status?userId=${encodeURIComponent(effectiveUserId)}`,
+                    `${API_BASE}/api/backpack/telegram/status?userAddress=${encodeURIComponent(effectiveUserId)}`,
                     { signal },
                 );
                 if (!statusRes.ok) {
@@ -775,7 +775,7 @@ export function BackpackDialog({
         setWhatsappQrLoading(true);
         setLoadingAccount("whatsapp");
 
-        const wsUrl = `${SOCKET_BASE}/whatsapp?userId=${encodeURIComponent(effectiveUserId)}`;
+        const wsUrl = `${SOCKET_BASE}/whatsapp?userAddress=${encodeURIComponent(effectiveUserId)}`;
         console.log(`[Backpack] Connecting WhatsApp WebSocket: ${wsUrl}`);
 
         const ws = new WebSocket(wsUrl);
@@ -905,7 +905,7 @@ export function BackpackDialog({
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    userId: effectiveUserId,
+                    userAddress: effectiveUserId,
                     toolkit: provider.slug,
                 }),
             });

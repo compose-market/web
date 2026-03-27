@@ -32,7 +32,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
-import { Cpu, DollarSign, ShieldCheck, Upload, Sparkles, Plug, Search, X, ChevronRight, Loader2, Play, AlertCircle, CheckCircle2, Boxes, Brain, ArrowRightLeft, Plus, Globe, RefreshCw, Check } from "lucide-react";
+import { Cpu, DollarSign, ShieldCheck, Upload, Sparkles, Plug, Search, X, ChevronRight, Loader2, Play, AlertCircle, CheckCircle2, Boxes, ArrowRightLeft, Plus, Globe, RefreshCw, Check, BookOpen } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -55,6 +55,7 @@ import {
   isPinataConfigured,
   type AgentCard
 } from "@/lib/pinata";
+import { uploadIdentityFiles } from "@/lib/identity";
 import {
   computeDnaHash,
   deriveAgentWalletAddress,
@@ -74,47 +75,11 @@ interface SelectedPlugin {
   origin: ServerOrigin;
 }
 
-type FrameworkType = "eliza" | "langchain" | "openclaw";
-
-interface Framework {
-  id: FrameworkType;
-  name: string;
-  description: string;
-  color: string;
-  features: string[];
-}
-
-const FRAMEWORKS: Framework[] = [
-  {
-    id: "langchain",
-    name: "LangChain",
-    description: "LLM framework with LangGraph for stateful agents",
-    color: "orange",
-    features: ["Memory", "RAG", "Tool Calling", "State Graphs"],
-  },
-  {
-    id: "openclaw",
-    name: "OpenClaw",
-    description: "Skills-based autonomous agents with infinite memory and Backpack integrations",
-    color: "emerald",
-    features: ["Infinite Memory", "Skills", "Tool Calling", "Backpack Connectors"],
-  },
-  {
-    id: "eliza",
-    name: "ElizaOS",
-    description: "Agent framework with 200+ plugins for blockchain, social, AI",
-    color: "fuchsia",
-    features: ["Memory", "RAG", "Natural Language Actions", "200+ Plugins"],
-  },
-];
-
 const formSchema = z.object({
   name: z.string().min(2).max(50),
   description: z.string().min(10),
-  framework: z.enum(["eliza", "langchain", "openclaw"]),
   model: z.string(),
   licensePrice: z.string(),
-  endpoint: z.string().url().optional().or(z.literal("")),
   isCloneable: z.boolean(),
   licenses: z.string().optional(),
 });
@@ -152,6 +117,7 @@ export default function CreateAgent() {
   // Avatar upload state
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [identityFiles, setIdentityFiles] = useState<File[]>([]);
   const [mintStep, setMintStep] = useState<"idle" | "uploading" | "minting" | "done">("idle");
 
   // Avatar generation state
@@ -160,6 +126,7 @@ export default function CreateAgent() {
   const [generatedAvatarUrl, setGeneratedAvatarUrl] = useState<string | null>(null);
   const MAX_GENERATIONS = 3;
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const identityInputRef = useRef<HTMLInputElement>(null);
 
   // Check for warp mode from URL and sessionStorage
   useEffect(() => {
@@ -201,11 +168,14 @@ export default function CreateAgent() {
   );
 
   const { data: defaultPlugins, isLoading: isLoadingDefault } = useRegistryServers({
-    origin: "goat,eliza,mcp",
+    origin: "goat,mcp",
     limit: 30,
   });
 
   const isLoadingPlugins = pluginSearch.trim() ? isSearching : isLoadingDefault;
+  const availablePlugins: RegistryServer[] = pluginSearch.trim()
+    ? (searchData?.servers ?? [])
+    : (defaultPlugins?.servers ?? []);
 
   // Precompute selected plugin IDs for O(1) lookups (Fix 7)
   const selectedIds = useMemo(() => new Set(selectedPlugins.map(p => p.id)), [selectedPlugins]);
@@ -230,7 +200,6 @@ export default function CreateAgent() {
   const getOriginColor = (origin: ServerOrigin) => {
     switch (origin) {
       case "goat": return "border-green-500/50 text-green-400 bg-green-500/10";
-      case "eliza": return "border-fuchsia-500/50 text-fuchsia-400 bg-fuchsia-500/10";
       case "mcp": return "border-cyan-500/50 text-cyan-400 bg-cyan-500/10";
       default: return "border-slate-500/50 text-slate-400 bg-slate-500/10";
     }
@@ -239,7 +208,6 @@ export default function CreateAgent() {
   const getOriginLabel = (origin: ServerOrigin) => {
     switch (origin) {
       case "goat": return "GOAT";
-      case "eliza": return "Eliza";
       case "mcp": return "MCP";
       default: return origin;
     }
@@ -250,29 +218,12 @@ export default function CreateAgent() {
     defaultValues: {
       name: "",
       description: "",
-      framework: "langchain",
-      model: "asi1-mini",
+      model: "gemini-3.1-pro-preview",
       licensePrice: "0.01",
-      endpoint: "",
       isCloneable: false,
       licenses: "",
     },
   });
-
-  const selectedFramework = form.watch("framework");
-
-  // Filter plugins based on selected framework
-  const availablePlugins = useMemo(() => {
-    const servers = pluginSearch.trim() ? searchData?.servers : defaultPlugins?.servers;
-    if (!servers) return [];
-
-    // ElizaOS framework: show Eliza + GOAT plugins
-    // LangChain framework: show GOAT + MCP plugins (MCP compatible)
-    if (selectedFramework === "eliza") {
-      return servers.filter(s => s.origin === "goat" || s.origin === "eliza");
-    }
-    return servers.filter(s => s.origin === "goat" || s.origin === "mcp");
-  }, [pluginSearch, searchData?.servers, defaultPlugins?.servers, selectedFramework]);
 
   // Confirmation dialog state
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
@@ -414,6 +365,37 @@ export default function CreateAgent() {
     handleGenerateAvatar();
   }, [handleGenerateAvatar]);
 
+  const handleIdentitySelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(e.target.files || []);
+    if (selected.length === 0) {
+      return;
+    }
+
+    setIdentityFiles((prev) => {
+      const seen = new Set(prev.map((file) => `${file.name}:${file.size}:${file.lastModified}`));
+      const next = [...prev];
+      for (const file of selected) {
+        const key = `${file.name}:${file.size}:${file.lastModified}`;
+        if (seen.has(key)) {
+          continue;
+        }
+        seen.add(key);
+        next.push(file);
+      }
+      return next;
+    });
+
+    e.target.value = "";
+  }, []);
+
+  const removeIdentityFile = useCallback((target: File) => {
+    setIdentityFiles((prev) => prev.filter((file) => (
+      file.name !== target.name
+      || file.size !== target.size
+      || file.lastModified !== target.lastModified
+    )));
+  }, []);
+
   // Handle form validation and IPFS upload before minting
   // Returns prepared transaction data or null if failed
   const prepareForMint = async (values: FormValues): Promise<{
@@ -455,10 +437,13 @@ export default function CreateAgent() {
 
       // Derive wallet from dnaHash + timestamp (timestamp makes each wallet unique)
       const walletAddress = deriveAgentWalletAddress(dnaHash, timestamp);
+      const identityUploads = await uploadIdentityFiles(identityFiles, {
+        agentName: values.name,
+        agentWallet: walletAddress,
+      });
 
       // 3. Build and upload Agent Card to IPFS
       // walletAddress is stored here as the single source of truth
-      // Both frontend and backend rely on this, not derive their own
       const agentCard: AgentCard = {
         schemaVersion: "1.0.0",
         name: values.name,
@@ -466,23 +451,23 @@ export default function CreateAgent() {
         skills,
         image: avatarUri || "none",
         avatar: avatarUri || "none",
-        dnaHash, // Store computed dnaHash (skills, chainId, model)
+        dnaHash,
         walletAddress,
-        walletTimestamp: timestamp, // Backend needs this to derive the same private key
+        walletTimestamp: timestamp,
         chain: chainId,
         model: modelId,
-        framework: values.framework,
+        framework: "manowar",
         licensePrice: usdcToWei(parseFloat(values.licensePrice)).toString(),
         licenses: values.licenses ? parseInt(values.licenses) : 0,
         cloneable: values.isCloneable,
-        endpoint: values.endpoint || undefined, // Optional - x402 handles routing
+        ...(identityUploads.length > 0 ? { knowledge: identityUploads.map((item) => item.uri) } : {}),
         protocols: [{ name: "Manowar", version: "1.0" }],
         plugins: selectedPlugins.map(p => ({
           registryId: p.id,
           name: p.name,
           origin: p.origin,
         })),
-        createdAt: new Date(timestamp).toISOString(), // Use same timestamp
+        createdAt: new Date(timestamp).toISOString(),
         creator: account?.address || "",
       };
 
@@ -768,46 +753,69 @@ export default function CreateAgent() {
   // Render Create from Scratch Form
   // =============================================================================
   return (
-    <div className="max-w-3xl mx-auto pb-20 px-1">
-      {/* Page Header */}
-      <div className="mb-6 sm:mb-8 space-y-2 border-b border-sidebar-border pb-4 sm:pb-6">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setMode("choice")}
-          className="text-muted-foreground hover:text-cyan-400 -ml-2 mb-2 text-xs sm:text-sm"
-        >
-          <ChevronRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2 rotate-180" />
-          Back to Choice
-        </Button>
-        <div className="flex items-center gap-4">
-          <h1 className="text-xl sm:text-2xl font-display font-bold text-white">
-            <span className="text-fuchsia-500 mr-2">//</span>
-            MINT NEW AGENT
+    <div className="flex flex-col h-[calc(100vh-120px)]">
+      {/* Compact Header */}
+      <div className="shrink-0 mb-2 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setMode("choice")}
+            className="text-muted-foreground hover:text-cyan-400 -ml-2 h-7 px-2"
+          >
+            <ChevronRight className="w-3.5 h-3.5 mr-1 rotate-180" />
+            <span className="hidden sm:inline">Back</span>
+          </Button>
+          <h1 className="text-lg font-display font-bold text-white">
+            <span className="text-fuchsia-500 mr-1">//</span>
+            MINT AGENT
           </h1>
-          <div className="hidden md:flex h-px w-32 bg-gradient-to-r from-fuchsia-500 to-transparent"></div>
+          <Badge variant="outline" className="text-[9px] border-orange-500/30 text-orange-400 hidden sm:inline-flex">
+            Manowar · LangGraph · Memory · RAG
+          </Badge>
         </div>
-        <p className="text-muted-foreground font-mono text-xs sm:text-sm">Deploy a new autonomous entity with ERC8004 Identity.</p>
+        <div className="flex items-center gap-2">
+          {account ? (
+            <Badge className="bg-green-500/20 text-green-400 border-green-500/30 text-[10px]">
+              <CheckCircle2 className="w-3 h-3 mr-1" />
+              {account.address.slice(0, 6)}…{account.address.slice(-4)}
+            </Badge>
+          ) : (
+            <Badge variant="outline" className="text-[10px] border-yellow-500/30 text-yellow-400">
+              <AlertCircle className="w-3 h-3 mr-1" />
+              Sign in to mint
+            </Badge>
+          )}
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
-        <div className="lg:col-span-2 order-2 lg:order-1">
+      {/* Main Content */}
+      <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-4">
+        {/* Left: Form */}
+        <div className="min-h-0 overflow-y-auto pr-1">
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-              <Card className="glass-panel border-cyan-500/20">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg font-bold font-display text-cyan-400">
-                    <Cpu className="w-5 h-5" />
-                    AGENT IDENTITY
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-3">
+              {/* Identity: Name + Model row */}
+              <div className="glass-panel border border-cyan-500/20 rounded-sm p-4 space-y-3">
+                <div className="flex items-center gap-2 text-cyan-400 text-sm font-display font-bold uppercase">
+                  <Cpu className="w-4 h-4" />
+                  Identity
+                </div>
+                <input
+                  ref={identityInputRef}
+                  type="file"
+                  multiple
+                  accept=".pdf,.txt,.md,.json,.csv,.html,.xml,text/*,application/json,application/pdf"
+                  onChange={handleIdentitySelect}
+                  className="hidden"
+                />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <FormField
                     control={form.control}
                     name="name"
                     render={({ field }: { field: ControllerRenderProps<FormValues, "name"> }) => (
                       <FormItem>
-                        <FormLabel className="font-mono text-foreground">Agent Name</FormLabel>
+                        <FormLabel className="font-mono text-foreground text-sm">Agent Name</FormLabel>
                         <FormControl>
                           <Input placeholder="e.g. Alpha Sniper V1" {...field} className="bg-background/50 font-mono border-sidebar-border focus:border-cyan-500" />
                         </FormControl>
@@ -817,14 +825,56 @@ export default function CreateAgent() {
                   />
                   <FormField
                     control={form.control}
+                    name="model"
+                    render={({ field }: { field: ControllerRenderProps<FormValues, "model"> }) => (
+                      <FormItem>
+                        <FormLabel className="font-mono text-foreground text-sm">LLM Model</FormLabel>
+                        {selectedCatalogModel ? (
+                          <div className="p-2.5 rounded-sm bg-cyan-500/10 border border-cyan-500/30">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="font-mono font-bold text-cyan-400 text-sm">{selectedCatalogModel.name || selectedCatalogModel.modelId}</p>
+                                <p className="text-[10px] text-muted-foreground font-mono">
+                                  via {selectedCatalogModel.provider} · x402
+                                </p>
+                              </div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setSelectedCatalogModel(null)}
+                                className="text-[10px] text-muted-foreground hover:text-foreground h-5 px-1"
+                              >
+                                Change
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <ModelSelector
+                            value={field.value}
+                            onChange={field.onChange}
+                            placeholder="Search 1300+ models..."
+                            showTypeFilter
+                          />
+                        )}
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                {/* Description + Knowledge side by side */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <FormField
+                    control={form.control}
                     name="description"
                     render={({ field }: { field: ControllerRenderProps<FormValues, "description"> }) => (
-                      <FormItem>
-                        <FormLabel className="font-mono text-foreground">Purpose & Capabilities</FormLabel>
+                      <FormItem className="flex flex-col">
+                        <FormLabel className="font-mono text-foreground text-sm">Purpose & Capabilities</FormLabel>
                         <FormControl>
                           <Textarea
                             placeholder="Describe what this agent does..."
-                            className="resize-none bg-background/50 min-h-[100px] border-sidebar-border focus:border-cyan-500"
+                            className="resize-none bg-background/50 flex-1 min-h-[90px] border-sidebar-border focus:border-cyan-500"
                             {...field}
                           />
                         </FormControl>
@@ -832,173 +882,72 @@ export default function CreateAgent() {
                       </FormItem>
                     )}
                   />
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <FormField
-                      control={form.control}
-                      name="model"
-                      render={({ field }: { field: ControllerRenderProps<FormValues, "model"> }) => (
-                        <FormItem>
-                          <FormLabel className="font-mono text-foreground text-sm">LLM Model</FormLabel>
-                          {selectedCatalogModel ? (
-                            <div className="space-y-2">
-                              <div className="p-3 rounded-sm bg-cyan-500/10 border border-cyan-500/30">
-                                <div className="flex items-center justify-between">
-                                  <div>
-                                    <p className="font-mono font-bold text-cyan-400 text-sm">{selectedCatalogModel.name || selectedCatalogModel.modelId}</p>
-                                    <p className="text-xs text-muted-foreground font-mono">
-                                      via {selectedCatalogModel.provider} · usage-based x402 settlement
-                                    </p>
-                                  </div>
-                                  <Sparkles className="w-4 h-4 text-cyan-400" />
-                                </div>
-                              </div>
-                              <div className="flex gap-2">
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => setSelectedCatalogModel(null)}
-                                  className="text-xs text-muted-foreground hover:text-foreground"
-                                >
-                                  Use built-in model
-                                </Button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="space-y-2">
-                              <ModelSelector
-                                value={field.value}
-                                onChange={field.onChange}
-                                placeholder="Search 1300+ models..."
-                                showTypeFilter
-                              />
+                  <div className="rounded-sm border border-sidebar-border bg-background/30 p-3 space-y-2 flex flex-col">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-mono text-xs text-cyan-400 uppercase flex items-center gap-1.5">
+                        <BookOpen className="w-3.5 h-3.5" />
+                        Identity Knowledge
+                      </p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => identityInputRef.current?.click()}
+                        className="border-cyan-500/40 text-cyan-300 hover:text-cyan-200 shrink-0 h-7 text-xs"
+                      >
+                        <Upload className="w-3 h-3 mr-1.5" />
+                        Add files
+                      </Button>
+                    </div>
+                    {identityFiles.length > 0 ? (
+                      <div className="space-y-1 flex-1 overflow-y-auto max-h-[100px]">
+                        {identityFiles.map((file) => (
+                          <div
+                            key={`${file.name}:${file.size}:${file.lastModified}`}
+                            className="flex items-center justify-between gap-2 rounded-sm border border-sidebar-border px-2.5 py-1.5"
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate font-mono text-xs text-foreground">{file.name}</p>
                               <p className="text-[10px] text-muted-foreground">
-                                x402 pricing is resolved from live model usage
+                                {Math.max(1, Math.round(file.size / 1024))} KB
                               </p>
                             </div>
-                          )}
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="endpoint"
-                      render={({ field }: { field: ControllerRenderProps<FormValues, "endpoint"> }) => (
-                        <FormItem>
-                          <FormLabel className="font-mono text-foreground">
-                            API Endpoint <span className="text-muted-foreground text-xs">(optional)</span>
-                          </FormLabel>
-                          <FormControl>
-                            <Input placeholder="https://api.myagent.com/v1" {...field} className="bg-background/50 font-mono border-sidebar-border focus:border-cyan-500" />
-                          </FormControl>
-                          <FormDescription className="text-xs">
-                            Custom endpoint for self-hosted agents. Leave empty to use Compose.Market's hosted infrastructure.
-                          </FormDescription>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Framework Selection */}
-              <Card className="glass-panel border-orange-500/20">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg font-bold font-display text-orange-400">
-                    <Boxes className="w-5 h-5" />
-                    AGENT FRAMEWORK
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <FormField
-                    control={form.control}
-                    name="framework"
-                    render={({ field }: { field: ControllerRenderProps<FormValues, "framework"> }) => (
-                      <FormItem>
-                        <FormDescription className="text-xs mb-3">
-                          Choose the runtime framework for your agent. Each includes built-in memory & RAG.
-                          <Link href="/playground?tab=plugins">
-                            <span className="text-orange-400 hover:text-orange-300 ml-1">Test plugins first →</span>
-                          </Link>
-                        </FormDescription>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
-                          {FRAMEWORKS.map((fw) => {
-                            const isSelected = field.value === fw.id;
-                            const colorClass = fw.color === "fuchsia"
-                              ? "border-fuchsia-500 bg-fuchsia-500/10 text-fuchsia-400"
-                              : "border-orange-500 bg-orange-500/10 text-orange-400";
-                            return (
-                              <button
-                                key={fw.id}
-                                type="button"
-                                onClick={() => {
-                                  field.onChange(fw.id);
-                                  // Clear incompatible plugins when switching frameworks
-                                  // GOAT works with both, Eliza plugins only with Eliza, MCP only with LangChain
-                                  if (fw.id !== selectedFramework) {
-                                    setSelectedPlugins(prev =>
-                                      prev.filter(p => p.origin === "goat" ||
-                                        (fw.id === "eliza" && p.origin === "eliza") ||
-                                        (fw.id === "langchain" && p.origin === "mcp")
-                                      )
-                                    );
-                                  }
-                                }}
-                                className={`p-2.5 sm:p-3 rounded-sm border text-left transition-all touch-manipulation ${isSelected
-                                  ? colorClass
-                                  : "border-sidebar-border bg-background/30 hover:border-sidebar-border/80"
-                                  }`}
-                              >
-                                <div className="flex items-center gap-2 mb-1">
-                                  {fw.id === "eliza" ? (
-                                    <Brain className="w-4 h-4" />
-                                  ) : (
-                                    <Boxes className="w-4 h-4" />
-                                  )}
-                                  <span className="font-mono font-bold text-xs sm:text-sm">{fw.name}</span>
-                                  {isSelected && <CheckCircle2 className="w-3 h-3 ml-auto" />}
-                                </div>
-                                <p className="text-[9px] sm:text-[10px] text-muted-foreground line-clamp-2">{fw.description}</p>
-                                <div className="flex flex-wrap gap-1 mt-1.5 sm:mt-2">
-                                  {fw.features.slice(0, 2).map((f) => (
-                                    <span key={f} className="text-[7px] sm:text-[8px] px-1 py-0.5 rounded bg-white/5 text-muted-foreground">
-                                      {f}
-                                    </span>
-                                  ))}
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                        <FormMessage />
-                      </FormItem>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => removeIdentityFile(file)}
+                              className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-foreground shrink-0"
+                            >
+                              Remove
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-muted-foreground flex-1">
+                        Optional Filecoin-backed <code className="text-cyan-500/70">ipfs://</code> URIs added to the minted agent card. The agent reads this material via the knowledge tool.
+                      </p>
                     )}
-                  />
-                </CardContent>
-              </Card>
+                  </div>
+                </div>
+              </div>
 
-              {/* Plugin/Capability Picker */}
-              <Card className="glass-panel border-green-500/20 relative z-10">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg font-bold font-display text-green-400">
-                    <Plug className="w-5 h-5" />
-                    PLUGINS & CAPABILITIES
-                    <Badge variant="outline" className="ml-2 text-[10px] border-sidebar-border">
-                      {selectedFramework === "eliza" ? "ElizaOS + GOAT" : "MCP + GOAT"}
-                    </Badge>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {/* Selected Plugins */}
+              {/* Plugins + Financial side by side */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Plugins */}
+                <div className="glass-panel border border-green-500/20 rounded-sm p-3 space-y-2 relative z-10">
+                  <div className="flex items-center gap-2 text-green-400 text-sm font-display font-bold uppercase">
+                    <Plug className="w-4 h-4" />
+                    Plugins
+                  </div>
                   {selectedPlugins.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap gap-1.5">
                       {selectedPlugins.map(plugin => (
                         <Badge
                           key={plugin.id}
                           variant="outline"
-                          className={`${getOriginColor(plugin.origin)} pl-2 pr-1 py-1 text-xs font-mono`}
+                          className={`${getOriginColor(plugin.origin)} pl-2 pr-1 py-0.5 text-[10px] font-mono`}
                         >
                           {plugin.name}
                           <button
@@ -1006,19 +955,17 @@ export default function CreateAgent() {
                             onClick={() => removePlugin(plugin.id)}
                             className="ml-1 p-0.5 rounded hover:bg-white/10"
                           >
-                            <X className="w-3 h-3" />
+                            <X className="w-2.5 h-2.5" />
                           </button>
                         </Badge>
                       ))}
                     </div>
                   )}
-
-                  {/* Plugin Search */}
                   <div className="relative">
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                       <Input
-                        placeholder={`Search ${selectedFramework === "eliza" ? "ElizaOS, GOAT" : "MCP, GOAT"} plugins...`}
+                        placeholder="Search plugins..."
                         value={pluginSearch}
                         onChange={(e) => {
                           setPluginSearch(e.target.value);
@@ -1028,117 +975,80 @@ export default function CreateAgent() {
                         className="pl-10 bg-background/50 font-mono border-sidebar-border focus:border-green-500"
                       />
                     </div>
-
-                    {/* Dropdown Results */}
                     {showPluginPicker && (
                       <div className="absolute z-50 w-full mt-1 bg-sidebar border border-sidebar-border rounded-sm shadow-lg">
-                        <div className="flex items-center justify-between px-3 py-2 border-b border-sidebar-border">
+                        <div className="flex items-center justify-between px-3 py-1.5 border-b border-sidebar-border">
                           <span className="text-[10px] font-mono text-muted-foreground uppercase">
                             {pluginSearch ? "Search Results" : "Popular Plugins"}
                           </span>
                           <Link href="/registry">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="text-[10px] text-green-400 hover:text-green-300 h-auto py-0.5 px-1"
-                            >
+                            <Button type="button" variant="ghost" size="sm" className="text-[10px] text-green-400 hover:text-green-300 h-auto py-0.5 px-1">
                               See all <ChevronRight className="w-3 h-3 ml-0.5" />
                             </Button>
                           </Link>
                         </div>
-                        <ScrollArea className="h-48">
+                        <ScrollArea className="h-40">
                           {isLoadingPlugins ? (
-                            <div className="flex items-center justify-center py-8">
+                            <div className="flex items-center justify-center py-6">
                               <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
                             </div>
                           ) : availablePlugins.length === 0 ? (
-                            <div className="py-8 text-center text-xs text-muted-foreground">
-                              No plugins found
-                            </div>
+                            <div className="py-6 text-center text-xs text-muted-foreground">No plugins found</div>
                           ) : (
                             <div className="p-1">
                               {availablePlugins.map(server => {
                                 const isSelected = selectedPlugins.some(p => p.id === server.registryId);
-                                const isTestable = server.origin === "goat" || server.origin === "eliza";
+                                const isTestable = server.origin === "goat";
                                 return (
                                   <button
                                     key={server.registryId}
                                     type="button"
                                     onClick={() => addPlugin(server)}
                                     disabled={isSelected}
-                                    className={`w-full text-left p-2 rounded-sm text-xs transition-all ${isSelected
-                                      ? "opacity-50 cursor-not-allowed"
-                                      : "hover:bg-green-500/10"
-                                      }`}
+                                    className={`w-full text-left p-1.5 rounded-sm text-xs transition-all ${isSelected ? "opacity-50 cursor-not-allowed" : "hover:bg-green-500/10"}`}
                                   >
                                     <div className="flex items-center gap-2">
-                                      <Badge
-                                        variant="outline"
-                                        className={`${getOriginColor(server.origin)} text-[9px] px-1 py-0`}
-                                      >
+                                      <Badge variant="outline" className={`${getOriginColor(server.origin)} text-[9px] px-1 py-0`}>
                                         {getOriginLabel(server.origin)}
                                       </Badge>
-                                      <span className="font-mono text-foreground truncate flex-1">
-                                        {server.name}
-                                      </span>
+                                      <span className="font-mono text-foreground truncate flex-1">{server.name}</span>
                                       {isTestable && (
                                         <Badge variant="outline" className="text-[8px] px-1 py-0 border-cyan-500/30 text-cyan-400">
-                                          <Play className="w-2 h-2 mr-0.5" />
-                                          Testable
+                                          <Play className="w-2 h-2 mr-0.5" />Testable
                                         </Badge>
                                       )}
                                       {isSelected && <span className="text-green-400 text-[10px]">Added</span>}
                                     </div>
-                                    <p className="text-[10px] text-muted-foreground line-clamp-1 mt-0.5 ml-12">
-                                      {server.description}
-                                    </p>
                                   </button>
                                 );
                               })}
                             </div>
                           )}
                         </ScrollArea>
-                        <div className="px-3 py-2 border-t border-sidebar-border">
-                          <button
-                            type="button"
-                            onClick={() => setShowPluginPicker(false)}
-                            className="text-[10px] text-muted-foreground hover:text-foreground"
-                          >
-                            Close
-                          </button>
+                        <div className="px-3 py-1.5 border-t border-sidebar-border">
+                          <button type="button" onClick={() => setShowPluginPicker(false)} className="text-[10px] text-muted-foreground hover:text-foreground">Close</button>
                         </div>
                       </div>
                     )}
                   </div>
+                </div>
 
-                  <p className="text-[10px] text-muted-foreground">
-                    Add DeFi tools (GOAT) or AI capabilities (ElizaOS) to your agent.
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card className="glass-panel border-fuchsia-500/20">
-                <CardHeader className="p-4 sm:p-6">
-                  <CardTitle className="flex items-center gap-2 text-base sm:text-lg font-bold font-display text-fuchsia-400">
-                    <DollarSign className="w-4 h-4 sm:w-5 sm:h-5" />
-                    FINANCIAL SPECS (x402)
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4 p-4 sm:p-6 pt-0 sm:pt-0">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Financial */}
+                <div className="glass-panel border border-fuchsia-500/20 rounded-sm p-3 space-y-2">
+                  <div className="flex items-center gap-2 text-fuchsia-400 text-sm font-display font-bold uppercase">
+                    <DollarSign className="w-4 h-4" />
+                    Financial (x402)
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
                     <FormField
                       control={form.control}
                       name="licensePrice"
                       render={({ field }: { field: ControllerRenderProps<FormValues, "licensePrice"> }) => (
                         <FormItem>
-                          <FormLabel className="font-mono text-foreground text-sm">License Price (USDC)</FormLabel>
+                          <FormLabel className="font-mono text-foreground text-sm">Price (USDC)</FormLabel>
                           <FormControl>
                             <Input type="number" step="0.001" {...field} className="bg-background/50 font-mono border-sidebar-border focus:border-fuchsia-500" />
                           </FormControl>
-                          <FormDescription className="text-muted-foreground text-[10px] sm:text-xs">
-                            Cost to license into a Manowar
-                          </FormDescription>
                           <FormMessage />
                         </FormItem>
                       )}
@@ -1148,30 +1058,21 @@ export default function CreateAgent() {
                       name="licenses"
                       render={({ field }: { field: ControllerRenderProps<FormValues, "licenses"> }) => (
                         <FormItem>
-                          <FormLabel className="font-mono text-foreground text-sm">License Supply</FormLabel>
+                          <FormLabel className="font-mono text-foreground text-sm">Supply</FormLabel>
                           <FormControl>
-                            <Input type="number" placeholder="∞ (leave empty)" {...field} className="bg-background/50 font-mono border-sidebar-border focus:border-fuchsia-500" />
+                            <Input type="number" placeholder="∞" {...field} className="bg-background/50 font-mono border-sidebar-border focus:border-fuchsia-500" />
                           </FormControl>
-                          <FormDescription className="text-muted-foreground text-[10px] sm:text-xs">
-                            Max licenses (empty = infinite)
-                          </FormDescription>
                           <FormMessage />
                         </FormItem>
                       )}
                     />
                   </div>
-
                   <FormField
                     control={form.control}
                     name="isCloneable"
                     render={({ field }: { field: ControllerRenderProps<FormValues, "isCloneable"> }) => (
-                      <FormItem className="flex flex-row items-center justify-between rounded-sm border border-sidebar-border p-4 bg-background/30">
-                        <div className="space-y-0.5">
-                          <FormLabel className="text-base font-mono text-foreground">Allow Cloning?</FormLabel>
-                          <FormDescription className="text-muted-foreground">
-                            Let others fork this agent with modified parameters.
-                          </FormDescription>
-                        </div>
+                      <FormItem className="flex items-center justify-between rounded-sm border border-sidebar-border px-3 py-2 bg-background/30">
+                        <FormLabel className="text-sm font-mono text-foreground cursor-pointer">Allow Cloning</FormLabel>
                         <FormControl>
                           <Switch
                             checked={field.value}
@@ -1181,41 +1082,28 @@ export default function CreateAgent() {
                       </FormItem>
                     )}
                   />
-                </CardContent>
-              </Card>
+                </div>
+              </div>
 
               {/* Mint Progress */}
               {mintStep === "uploading" && (
-                <Card className="glass-panel border-cyan-500/50">
-                  <CardContent className="py-4">
-                    <div className="flex items-center gap-3">
-                      <Loader2 className="w-5 h-5 text-cyan-400 animate-spin" />
-                      <div>
-                        <p className="font-mono text-sm text-foreground">Uploading to IPFS...</p>
-                        <p className="text-xs text-muted-foreground">Storing avatar and agent card metadata</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+                <div className="flex items-center gap-2 p-2 rounded-sm bg-cyan-500/10 border border-cyan-500/30">
+                  <Loader2 className="w-4 h-4 text-cyan-400 animate-spin" />
+                  <p className="font-mono text-xs text-foreground">Uploading to IPFS...</p>
+                </div>
               )}
 
-              {/* Single mint button - confirmation triggers IPFS upload + on-chain mint */}
+              {/* Mobile Mint Button */}
               <Button
                 type="submit"
                 size="lg"
                 disabled={!account || isProcessing}
-                className="w-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white font-bold font-mono hover:from-cyan-400 hover:to-fuchsia-400 h-14 text-lg shadow-[0_0_20px_-5px_hsl(var(--primary))] tracking-wider disabled:opacity-50"
+                className="w-full lg:hidden bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white font-bold font-mono hover:from-cyan-400 hover:to-fuchsia-400 h-11 text-sm shadow-[0_0_20px_-5px_hsl(var(--primary))] tracking-wider disabled:opacity-50"
               >
                 {mintStep === "uploading" ? (
-                  <>
-                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                    UPLOADING TO IPFS...
-                  </>
+                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" />UPLOADING...</>
                 ) : mintStep === "minting" ? (
-                  <>
-                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                    MINTING ON-CHAIN...
-                  </>
+                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" />MINTING...</>
                 ) : !account ? (
                   "SIGN IN TO MINT"
                 ) : (
@@ -1226,178 +1114,125 @@ export default function CreateAgent() {
           </Form>
         </div>
 
-        {/* Sidebar Info */}
-        <div className="space-y-4 sm:space-y-6 order-1 lg:order-2">
-          {/* Avatar Upload */}
-          <div className="glass-panel p-4 sm:p-6 rounded-sm space-y-4 border border-fuchsia-500/20 corner-decoration">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleAvatarSelect}
-              className="hidden"
-            />
-            {/* Avatar canvas with generate button overlay */}
-            <div className="relative w-full aspect-square max-w-[200px] lg:max-w-none mx-auto">
+        {/* Right Sidebar: Avatar + Mint */}
+        <div className="hidden lg:flex flex-col gap-4">
+          {/* Avatar */}
+          <div className="glass-panel border border-fuchsia-500/20 rounded-sm p-4 space-y-3">
+            <input ref={fileInputRef} type="file" accept="image/*" onChange={handleAvatarSelect} className="hidden" />
+            <div className="relative w-full aspect-square max-w-[180px] mx-auto">
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="w-full h-full rounded-sm bg-background/50 border border-sidebar-border border-dashed flex flex-col items-center justify-center text-muted-foreground cursor-pointer hover:border-cyan-500 hover:text-cyan-400 transition-colors overflow-hidden touch-manipulation"
+                className="w-full h-full rounded-sm bg-background/50 border border-sidebar-border border-dashed flex flex-col items-center justify-center text-muted-foreground cursor-pointer hover:border-cyan-500 hover:text-cyan-400 transition-colors overflow-hidden"
               >
                 {isGeneratingAvatar ? (
-                  <div className="flex flex-col items-center gap-2">
-                    <Loader2 className="w-8 h-8 animate-spin text-cyan-400" />
-                    <span className="text-xs font-mono text-cyan-400">GENERATING...</span>
+                  <div className="flex flex-col items-center gap-1">
+                    <Loader2 className="w-6 h-6 animate-spin text-cyan-400" />
+                    <span className="text-[10px] font-mono text-cyan-400">GENERATING...</span>
                   </div>
                 ) : avatarPreview ? (
-                  <img src={avatarPreview} alt="Avatar preview" className="w-full h-full object-cover" />
+                  <img src={avatarPreview} alt="Avatar" className="w-full h-full object-cover" />
                 ) : (
                   <>
-                    <Upload className="w-6 h-6 sm:w-8 sm:h-8 mb-2" />
-                    <span className="text-[10px] sm:text-xs font-mono">UPLOAD AVATAR</span>
+                    <Upload className="w-5 h-5 mb-1" />
+                    <span className="text-xs font-mono">UPLOAD AVATAR</span>
                   </>
                 )}
               </button>
-
-              {/* Generate button overlay (bottom-right corner) */}
               {!isGeneratingAvatar && (
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
                         type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleGenerateAvatar();
-                        }}
+                        onClick={(e) => { e.stopPropagation(); handleGenerateAvatar(); }}
                         disabled={generationCount >= MAX_GENERATIONS}
-                        className={`absolute bottom-2 right-2 w-10 h-10 rounded-full flex items-center justify-center transition-all ${generationCount >= MAX_GENERATIONS
+                        className={`absolute bottom-1.5 right-1.5 w-8 h-8 rounded-full flex items-center justify-center transition-all ${generationCount >= MAX_GENERATIONS
                           ? "bg-muted/50 text-muted-foreground cursor-not-allowed"
-                          : "bg-fuchsia-500/80 hover:bg-fuchsia-500 text-white shadow-lg hover:shadow-fuchsia-500/30"
+                          : "bg-fuchsia-500/80 hover:bg-fuchsia-500 text-white shadow-lg"
                           }`}
                       >
-                        <Sparkles className="w-5 h-5" />
+                        <Sparkles className="w-4 h-4" />
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>
                       {generationCount >= MAX_GENERATIONS
-                        ? `Limit reached (${MAX_GENERATIONS}/${MAX_GENERATIONS})`
-                        : `Generate Avatar (${generationCount}/${MAX_GENERATIONS})`}
+                        ? `Limit (${MAX_GENERATIONS}/${MAX_GENERATIONS})`
+                        : `Generate (${generationCount}/${MAX_GENERATIONS})`}
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               )}
             </div>
-
-            {/* Accept/Regenerate controls for generated avatars */}
             {generatedAvatarUrl && !isGeneratingAvatar && (
               <div className="flex gap-2 justify-center">
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={handleAcceptAvatar}
-                        className="border-green-500/50 text-green-400 hover:bg-green-500/10 hover:text-green-300"
-                      >
-                        <Check className="w-4 h-4" />
+                      <Button type="button" variant="outline" size="sm" onClick={handleAcceptAvatar} className="border-green-500/50 text-green-400 hover:bg-green-500/10 h-7 w-7 p-0">
+                        <Check className="w-3.5 h-3.5" />
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent>Accept Avatar</TooltipContent>
+                    <TooltipContent>Accept</TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={handleRegenerateAvatar}
-                        disabled={generationCount >= MAX_GENERATIONS}
-                        className={`${generationCount >= MAX_GENERATIONS
-                          ? "border-muted text-muted-foreground cursor-not-allowed"
-                          : "border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/10 hover:text-cyan-300"
-                          }`}
+                      <Button type="button" variant="outline" size="sm" onClick={handleRegenerateAvatar} disabled={generationCount >= MAX_GENERATIONS}
+                        className={`h-7 w-7 p-0 ${generationCount >= MAX_GENERATIONS ? "border-muted text-muted-foreground" : "border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/10"}`}
                       >
-                        <RefreshCw className="w-4 h-4" />
+                        <RefreshCw className="w-3.5 h-3.5" />
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent>
-                      {generationCount >= MAX_GENERATIONS
-                        ? `Limit reached (${MAX_GENERATIONS}/${MAX_GENERATIONS})`
-                        : `Regenerate (${generationCount}/${MAX_GENERATIONS})`}
-                    </TooltipContent>
+                    <TooltipContent>{generationCount >= MAX_GENERATIONS ? "Limit" : "Regenerate"}</TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               </div>
             )}
-
-            {/* Remove avatar button - only show when not in generated state */}
             {avatarPreview && !generatedAvatarUrl && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setAvatarFile(null);
-                  setAvatarPreview(null);
-                  setGeneratedAvatarUrl(null);
-                }}
-                className="w-full text-xs text-muted-foreground"
-              >
-                Remove avatar
+              <Button type="button" variant="ghost" size="sm" onClick={() => { setAvatarFile(null); setAvatarPreview(null); setGeneratedAvatarUrl(null); }} className="w-full text-[10px] text-muted-foreground h-6">
+                Remove
               </Button>
             )}
-            <div className="space-y-2">
-              <h3 className="font-bold font-display text-white">Minting Info</h3>
-              <div className="space-y-1">
-                <span className="text-muted-foreground font-mono text-sm">Network</span>
-                <NetworkSelector showBalance={false} compact />
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground font-mono">Contract</span>
-                <span className="font-mono text-cyan-400">ERC8004</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground font-mono">Storage</span>
-                <span className="font-mono text-cyan-400">Pinata IPFS</span>
-              </div>
+          </div>
+
+          {/* Mint Info */}
+          <div className="glass-panel border border-sidebar-border rounded-sm p-4 space-y-2 text-sm">
+            <div className="space-y-1">
+              <span className="text-muted-foreground font-mono text-xs">Network</span>
+              <NetworkSelector showBalance={false} compact />
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground font-mono">Contract</span>
+              <span className="font-mono text-cyan-400">ERC8004</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground font-mono">Gas</span>
+              <span className="font-mono text-green-400">Sponsored</span>
             </div>
           </div>
 
-          {/* Account Status */}
-          <div className={`p-4 rounded-sm border text-sm ${account
-            ? "bg-green-500/10 border-green-500/20 text-green-200"
-            : "bg-yellow-500/10 border-yellow-500/20 text-yellow-200"
-            }`}>
-            {account ? (
-              <>
-                <CheckCircle2 className="w-5 h-5 mb-2 text-green-400" />
-                <p>
-                  Signed in: <span className="font-mono">{account.address.slice(0, 6)}...{account.address.slice(-4)}</span>
-                </p>
-                <p className="text-xs text-green-300/70 mt-1">Gas sponsored • No fees</p>
-              </>
+          {/* Mint Button */}
+          <Button
+            type="button"
+            onClick={form.handleSubmit(onSubmit)}
+            disabled={!account || isProcessing}
+            className="w-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white font-bold font-mono hover:from-cyan-400 hover:to-fuchsia-400 h-12 text-base shadow-[0_0_20px_-5px_hsl(var(--primary))] tracking-wider disabled:opacity-50"
+          >
+            {mintStep === "uploading" ? (
+              <><Loader2 className="w-4 h-4 mr-2 animate-spin" />UPLOADING...</>
+            ) : mintStep === "minting" ? (
+              <><Loader2 className="w-4 h-4 mr-2 animate-spin" />MINTING...</>
+            ) : !account ? (
+              "SIGN IN TO MINT"
             ) : (
-              <>
-                <AlertCircle className="w-5 h-5 mb-2 text-yellow-400" />
-                <p>Sign in with email, social, or wallet to mint.</p>
-              </>
+              "MINT AGENT"
             )}
-          </div>
-
-          <div className="p-4 rounded-sm bg-cyan-500/10 border border-cyan-500/20 text-sm text-cyan-200">
-            <ShieldCheck className="w-5 h-5 mb-2 text-cyan-400" />
-            <p>
-              Your agent will be verified by the <strong>Manowar Curator Protocol</strong>.
-              Initial reputation score will be assigned based on metadata quality.
-            </p>
-          </div>
+          </Button>
         </div>
       </div>
+
 
       {/* Confirmation Dialog */}
       <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
@@ -1420,18 +1255,7 @@ export default function CreateAgent() {
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Framework</span>
-                <span className={`font-mono ${pendingValues.framework === "langchain"
-                  ? "text-orange-400"
-                  : pendingValues.framework === "openclaw"
-                    ? "text-emerald-400"
-                    : "text-fuchsia-400"
-                  }`}>
-                  {pendingValues.framework === "langchain"
-                    ? "LangChain"
-                    : pendingValues.framework === "openclaw"
-                      ? "OpenClaw"
-                      : "ElizaOS"}
-                </span>
+                <span className="font-mono text-orange-400">Manowar</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Model</span>

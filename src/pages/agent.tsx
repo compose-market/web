@@ -14,6 +14,7 @@ import { useParams } from "wouter";
 import { Link } from "wouter";
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
 import { createPaymentFetch } from "@/lib/payment";
+import { uploadWorkspaceFiles } from "@/lib/workspace";
 import { useChain } from "@/contexts/ChainContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -53,14 +54,8 @@ import {
   ArrowLeft,
   Sparkles,
   Shield,
-  Loader2,
-  Upload,
   Download,
-  Plus,
-  Link2,
-  FileText,
   X,
-  BookOpen,
   IdCard,
 } from "lucide-react";
 
@@ -99,15 +94,9 @@ export default function AgentDetailPage() {
   const [sending, setSending] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const [chatStatus, setChatStatus] = useState<"idle" | "paying" | "waiting" | "streaming">("idle");
-
-  // Knowledge upload state (agent-specific)
-  const [showKnowledgeDialog, setShowKnowledgeDialog] = useState(false);
-  const [knowledgeKey, setKnowledgeKey] = useState("");
-  const [knowledgeContent, setKnowledgeContent] = useState("");
-  const [uploadingKnowledge, setUploadingKnowledge] = useState(false);
-  const [knowledgeUrls, setKnowledgeUrls] = useState<string[]>([]);
-  const [newKnowledgeUrl, setNewKnowledgeUrl] = useState("");
-  const knowledgeFileInputRef = useRef<HTMLInputElement>(null);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [workspaceFiles, setWorkspaceFiles] = useState<File[]>([]);
+  const [workspaceUploading, setWorkspaceUploading] = useState(false);
 
   // Session dialog
   const [showSessionDialog, setShowSessionDialog] = useState(false);
@@ -150,6 +139,112 @@ export default function AgentDetailPage() {
       sessionStorage.removeItem(`agent-active-run:${agentWallet}`);
     }
   }, [agentWallet, clearFiles, clearMessages, resetConversationThread]);
+
+  const openWorkspaceDialog = useCallback(() => {
+    if (!sessionActive || budgetRemaining <= 0) {
+      toast({
+        title: "Session Required",
+        description: "Create a session before indexing private workspace knowledge.",
+        variant: "destructive",
+      });
+      setShowSessionDialog(true);
+      return;
+    }
+
+    setWorkspaceOpen(true);
+  }, [budgetRemaining, sessionActive, toast]);
+
+  const handleWorkspaceFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(e.target.files || []);
+    if (selected.length === 0) {
+      return;
+    }
+
+    setWorkspaceFiles((prev) => {
+      const seen = new Set(prev.map((file) => `${file.name}:${file.size}:${file.lastModified}`));
+      const next = [...prev];
+      for (const file of selected) {
+        const key = `${file.name}:${file.size}:${file.lastModified}`;
+        if (seen.has(key)) {
+          continue;
+        }
+        seen.add(key);
+        next.push(file);
+      }
+      return next;
+    });
+
+    e.target.value = "";
+  }, []);
+
+  const removeWorkspaceFile = useCallback((target: File) => {
+    setWorkspaceFiles((prev) => prev.filter((file) => (
+      file.name !== target.name
+      || file.size !== target.size
+      || file.lastModified !== target.lastModified
+    )));
+  }, []);
+
+  const handleWorkspaceUpload = useCallback(async () => {
+    if (!agentWallet || !account) {
+      toast({
+        title: "Connect wallet",
+        description: "Please connect your wallet to upload workspace knowledge.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (workspaceFiles.length === 0) {
+      toast({
+        title: "No files selected",
+        description: "Choose at least one knowledge file first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    let activeComposeKeyToken = await ensureComposeKeyToken();
+    if (!activeComposeKeyToken) {
+      activeComposeKeyToken = composeKeyToken;
+    }
+
+    if (!activeComposeKeyToken) {
+      toast({
+        title: "Session Sync Required",
+        description: "Compose session key unavailable. Re-open your session and try again.",
+        variant: "destructive",
+      });
+      setShowSessionDialog(true);
+      return;
+    }
+
+    setWorkspaceUploading(true);
+    try {
+      const result = await uploadWorkspaceFiles(workspaceFiles, {
+        agentWallet,
+        chainId: paymentChainId,
+        sessionToken: activeComposeKeyToken,
+        sessionUserAddress: account.address,
+        sessionBudgetRemaining: budgetRemaining,
+      });
+
+      toast({
+        title: "Workspace indexed",
+        description: `Indexed ${result.indexed} private knowledge chunks for this user-agent pair.`,
+      });
+      setWorkspaceFiles([]);
+      setWorkspaceOpen(false);
+    } catch (error) {
+      toast({
+        title: "Workspace upload failed",
+        description: error instanceof Error ? error.message : "Unable to index workspace knowledge",
+        variant: "destructive",
+      });
+    } finally {
+      setWorkspaceUploading(false);
+    }
+  }, [account, agentWallet, budgetRemaining, composeKeyToken, ensureComposeKeyToken, paymentChainId, toast, workspaceFiles]);
 
   // Send chat message with x402 payment
   const handleSendMessage = useCallback(async () => {
@@ -253,13 +348,14 @@ export default function AgentDetailPage() {
 
         const headers: Record<string, string> = {
           "Content-Type": "application/json",
+          "x-compose-run-id": composeRunId,
         };
 
         const requestBody: Record<string, unknown> = {
           message: userMessage.content,
           threadId: threadId,
           composeRunId,
-          userId: backpackUserId,
+          userAddress: backpackUserId,
           cloudPermissions: getCachedBackpackPermissions(),
         };
         sessionStorage.setItem(runStorageKey, JSON.stringify({
@@ -552,77 +648,6 @@ export default function AgentDetailPage() {
     }
   }, [inputValue, sending, agentWallet, wallet, account, toast, agent, attachedFiles, clearFiles, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, setShowSessionDialog, ensureConversationThread, parseEventStream, scheduleStreamUpdate, flushStreamContent, updateAssistantMessage, posthog, clearActivityState, setActivityPhase, startToolActivity, finishToolActivity]);
 
-  // Upload knowledge
-  const handleUploadKnowledge = useCallback(async () => {
-    if (!agentWallet || !knowledgeKey.trim() || !knowledgeContent.trim()) return;
-
-    setUploadingKnowledge(true);
-    try {
-      const response = await fetch(`${API_URL}/agent/${agentWallet}/knowledge`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          key: knowledgeKey.trim(),
-          content: knowledgeContent.trim(),
-          metadata: { source: "manual-upload", type: "document" }
-        }),
-      });
-
-      if (!response.ok) throw new Error("Upload failed");
-
-      const result = await response.json();
-      posthog?.capture("agent_knowledge_uploaded", {
-        agent_wallet: agentWallet,
-        knowledge_key: knowledgeKey.trim(),
-        content_length: result.contentLength,
-        url_count: knowledgeUrls.length,
-      });
-      toast({
-        title: "Knowledge Uploaded!",
-        description: `Added "${knowledgeKey}" (${result.contentLength} chars) to agent's knowledge base.`,
-      });
-      setShowKnowledgeDialog(false);
-      setKnowledgeKey("");
-      setKnowledgeContent("");
-    } catch (err) {
-      toast({
-        title: "Upload Failed",
-        description: err instanceof Error ? err.message : "Unknown error",
-        variant: "destructive",
-      });
-    } finally {
-      setUploadingKnowledge(false);
-    }
-  }, [agentWallet, knowledgeKey, knowledgeContent, knowledgeUrls, toast, posthog]);
-
-  // ==========================================================================
-  // Knowledge File/URL Handlers
-  // ==========================================================================
-
-  const handleKnowledgeFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      const file = e.target.files[0];
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const text = ev.target?.result as string;
-        setKnowledgeContent((prev) => prev + (prev ? "\n\n" : "") + text);
-        setKnowledgeKey(file.name.replace(/\.[^/.]+$/, ""));
-      };
-      reader.readAsText(file);
-    }
-  }, []);
-
-  const handleAddKnowledgeUrl = useCallback(() => {
-    if (newKnowledgeUrl.trim() && !knowledgeUrls.includes(newKnowledgeUrl.trim())) {
-      setKnowledgeUrls((prev) => [...prev, newKnowledgeUrl.trim()]);
-      setNewKnowledgeUrl("");
-    }
-  }, [newKnowledgeUrl, knowledgeUrls]);
-
-  const handleRemoveKnowledgeUrl = useCallback((url: string) => {
-    setKnowledgeUrls((prev) => prev.filter((u) => u !== url));
-  }, []);
-
   const copyEndpoint = () => {
     toast({
       title: "Copied!",
@@ -728,6 +753,7 @@ export default function AgentDetailPage() {
             onStartSession={() => setShowSessionDialog(true)}
             attachedFiles={attachedFiles}
             onFileSelect={() => fileInputRef.current?.click()}
+            onKnowledgeUpload={openWorkspaceDialog}
             onRemoveFile={handleRemoveFile}
             fileInputRef={fileInputRef}
             onFileInputChange={handleFileSelect}
@@ -747,7 +773,6 @@ export default function AgentDetailPage() {
               toast({ title: "Retry", description: "Message loaded for re-sending" });
             }}
             onDeleteMessage={(id) => setMessages(prev => prev.filter(m => m.id !== id))}
-            onKnowledgeUpload={() => setShowKnowledgeDialog(true)}
             onClearChat={handleClearChat}
             height="h-full"
             emptyStateText="Start a conversation with this agent."
@@ -764,119 +789,67 @@ export default function AgentDetailPage() {
         </div>
       </div>
 
-      {/* Knowledge Upload Dialog */}
-      <Dialog open={showKnowledgeDialog} onOpenChange={setShowKnowledgeDialog}>
-        <DialogContent className="sm:max-w-lg max-h-[80vh] overflow-y-auto">
+      {/* Session Budget Dialog */}
+      <SessionBudgetDialog open={showSessionDialog} onOpenChange={setShowSessionDialog} showTrigger={false} />
+
+      <Dialog open={workspaceOpen} onOpenChange={setWorkspaceOpen}>
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <BookOpen className="w-5 h-5 text-fuchsia-400" />
-              Upload Knowledge
-            </DialogTitle>
+            <DialogTitle>Private Workspace</DialogTitle>
             <DialogDescription>
-              Add documents or URLs to this agent's knowledge base.
+              Files uploaded here are indexed only for this exact user and this exact agent.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            {/* File Upload Section */}
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2">
-                <FileText className="w-4 h-4" />
-                Upload File (.txt, .md)
-              </Label>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  className="flex-1"
-                  onClick={() => knowledgeFileInputRef.current?.click()}
-                >
-                  <Upload className="w-4 h-4 mr-2" />
-                  Choose File
-                </Button>
-                <input
-                  type="file"
-                  ref={knowledgeFileInputRef}
-                  onChange={handleKnowledgeFileSelect}
-                  accept=".txt,.md,.text"
-                  className="hidden"
-                />
-              </div>
-            </div>
-
-            {/* URL Input Section */}
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2">
-                <Link2 className="w-4 h-4" />
-                Add URLs (optional)
-              </Label>
-              <div className="flex gap-2">
-                <Input
-                  placeholder="https://example.com/docs"
-                  value={newKnowledgeUrl}
-                  onChange={(e) => setNewKnowledgeUrl(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleAddKnowledgeUrl()}
-                />
-                <Button variant="outline" size="icon" onClick={handleAddKnowledgeUrl}>
-                  <Plus className="w-4 h-4" />
-                </Button>
-              </div>
-              {knowledgeUrls.length > 0 && (
-                <div className="space-y-1 max-h-24 overflow-y-auto">
-                  {knowledgeUrls.map((url) => (
-                    <div key={url} className="flex items-center gap-2 text-xs bg-zinc-900 px-2 py-1 rounded">
-                      <span className="truncate flex-1 text-zinc-400">{url}</span>
-                      <button onClick={() => handleRemoveKnowledgeUrl(url)} className="text-zinc-500 hover:text-red-400">
-                        <X className="w-3 h-3" />
-                      </button>
+          <div className="space-y-3">
+            <input
+              type="file"
+              multiple
+              accept=".pdf,.txt,.md,.json,.csv,.html,.xml,text/*,application/json,application/pdf"
+              onChange={handleWorkspaceFileSelect}
+              className="block w-full text-sm text-muted-foreground file:mr-3 file:rounded-sm file:border-0 file:bg-cyan-500/20 file:px-3 file:py-2 file:text-xs file:font-mono file:text-cyan-300"
+            />
+            {workspaceFiles.length > 0 ? (
+              <div className="space-y-2 max-h-56 overflow-y-auto">
+                {workspaceFiles.map((file) => (
+                  <div
+                    key={`${file.name}:${file.size}:${file.lastModified}`}
+                    className="flex items-center justify-between gap-3 rounded-sm border border-sidebar-border px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-mono text-xs text-foreground">{file.name}</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {Math.max(1, Math.round(file.size / 1024))} KB
+                      </p>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Document Key */}
-            <div className="space-y-2">
-              <Label htmlFor="key">Document Key</Label>
-              <Input
-                id="key"
-                placeholder="e.g., project-readme, api-docs"
-                value={knowledgeKey}
-                onChange={(e) => setKnowledgeKey(e.target.value)}
-              />
-            </div>
-
-            {/* Document Content */}
-            <div className="space-y-2">
-              <Label htmlFor="content">Content (paste or loaded from file)</Label>
-              <Textarea
-                id="content"
-                placeholder="Paste or upload document content..."
-                value={knowledgeContent}
-                onChange={(e) => setKnowledgeContent(e.target.value)}
-                rows={8}
-              />
-            </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => removeWorkspaceFile(file)}
+                      className="h-7 px-2 text-[10px] text-muted-foreground hover:text-foreground shrink-0"
+                    >
+                      <X className="w-3 h-3 mr-1" />
+                      Remove
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Add PDFs or text files to build a private workspace for this user:agent pair.
+              </p>
+            )}
           </div>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setShowKnowledgeDialog(false)}>
+            <Button type="button" variant="outline" onClick={() => setWorkspaceOpen(false)} disabled={workspaceUploading}>
               Cancel
             </Button>
-            <Button
-              onClick={handleUploadKnowledge}
-              disabled={!knowledgeKey.trim() || !knowledgeContent.trim() || uploadingKnowledge}
-              className="bg-fuchsia-500 hover:bg-fuchsia-600"
-            >
-              {uploadingKnowledge ? (
-                <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Uploading...</>
-              ) : (
-                <><Upload className="w-4 h-4 mr-2" /> Upload</>
-              )}
+            <Button type="button" onClick={handleWorkspaceUpload} disabled={workspaceUploading || workspaceFiles.length === 0}>
+              {workspaceUploading ? "Indexing..." : "Index workspace"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Session Budget Dialog */}
-      <SessionBudgetDialog open={showSessionDialog} onOpenChange={setShowSessionDialog} showTrigger={false} />
 
       {/* Mobile Card Sheet */}
       <Sheet open={mobileCardOpen} onOpenChange={setMobileCardOpen}>

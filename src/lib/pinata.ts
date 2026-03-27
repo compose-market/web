@@ -186,11 +186,11 @@ export interface AgentCard {
   walletTimestamp?: number; // Timestamp used in wallet derivation (backend needs this)
   chain: number;
   model: string;
-  framework?: "eliza" | "langchain" | "openclaw"; // Agent runtime framework
+  framework?: "manowar"; // Agent runtime framework
   licensePrice: string; // USDC in smallest unit (6 decimals) - cost to nest into Workflow
   licenses: number; // License supply cap (0 = infinite)
   cloneable: boolean;
-  endpoint?: string;
+  knowledge?: string[]; // Filecoin-backed ipfs:// URIs for creator knowledge docs
   protocols: Array<{ name: string; version: string }>;
   plugins?: Array<{
     registryId: string;
@@ -330,4 +330,3 @@ export function fileToDataUrl(file: File): Promise<string> {
     reader.readAsDataURL(file);
   });
 }
-

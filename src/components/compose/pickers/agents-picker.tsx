@@ -67,7 +67,7 @@ export function AgentsPicker({ onSelect }: AgentsPickerProps) {
                 recentInteractions: 0,
                 rating: 5.0,
                 status: "active" as const,
-                type: a.metadata?.endpoint ? "hosted" as const : "local" as const,
+                type: "hosted" as const,
                 featured: false,
                 verified: true,
                 category: "ai-agent",
