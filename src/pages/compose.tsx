@@ -4,7 +4,7 @@
  * Visual workflow builder for orchestrating AI agents and MCP tools.
  * Uses ReactFlow for the canvas and x402 for payment integration.
  * 
- * Refactored from 3369 lines using extracted components:
+ * Refactored from 3k+ lines, now uses extracted components:
  * - @/components/compose/nodes (StepNode, AgentNode, TriggerNode, HookNode)
  * - @/components/compose/pickers (ConnectorPicker, AgentsPicker, TriggerPicker)
  * - @/components/compose (FloatingToolbox, FullscreenOverlay)
@@ -772,8 +772,6 @@ function ComposeFlow() {
       const fetchWithPayment = createPaymentFetch({
         chainId: paymentChainId,
         sessionToken: activeComposeKeyToken,
-        sessionUserAddress: sessionActive ? account?.address : undefined,
-        sessionBudgetRemaining: sessionActive ? budgetRemaining : undefined,
       });
 
       const workflowPayload = {

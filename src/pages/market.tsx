@@ -55,7 +55,7 @@ export default function Market() {
   const deferredQuery = useDeferredValue(searchQuery);
 
   // Persisted tab state - survives browser back/forward navigation
-  const [activeTab, setActiveTab] = useTabs("market", "workflows");
+  const [activeTab, setActiveTab] = useTabs("market", "agents");
 
   return (
     <div className="space-y-4 sm:space-y-6 lg:space-y-8">

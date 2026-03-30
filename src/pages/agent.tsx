@@ -225,8 +225,7 @@ export default function AgentDetailPage() {
         agentWallet,
         chainId: paymentChainId,
         sessionToken: activeComposeKeyToken,
-        sessionUserAddress: account.address,
-        sessionBudgetRemaining: budgetRemaining,
+        userAddress: account.address,
       });
 
       toast({
@@ -337,8 +336,6 @@ export default function AgentDetailPage() {
       const fetchWithPayment = createPaymentFetch({
         chainId: paymentChainId,
         sessionToken: activeComposeKeyToken,
-        sessionUserAddress: sessionActive ? account.address : undefined,
-        sessionBudgetRemaining: sessionActive ? budgetRemaining : undefined,
       });
 
       const attachmentPart = buildAttachmentPart(attached);

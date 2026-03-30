@@ -177,8 +177,6 @@ export default function ManowarPage() {
             const fetchWithPayment = createPaymentFetch({
                 chainId: paymentChainId,
                 sessionToken: activeComposeKeyToken,
-                sessionUserAddress: sessionActive ? account.address : undefined,
-                sessionBudgetRemaining: sessionActive ? budgetRemaining : undefined,
             });
 
             const attachmentPart = buildAttachmentPart(attached);
@@ -660,7 +658,7 @@ export default function ManowarPage() {
                     )}
                 </div>
 
-                {/* Manowar Card (1/3 width on desktop, hidden on mobile) */}
+                {/* Workflow Card (1/3 width on desktop, hidden on mobile) */}
                 <div className="lg:col-span-1 hidden lg:flex flex-col min-h-0">
                     <WorkflowCard
                         workflow={workflow}

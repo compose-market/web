@@ -35,7 +35,6 @@ import {
   Loader2,
   Server,
   ExternalLink,
-  Github,
   Wrench,
   Plus,
   Database,
@@ -255,7 +254,7 @@ function ServerCard({
               onClick={(e) => e.stopPropagation()}
               className="text-muted-foreground hover:text-cyan-400 transition-colors"
             >
-              <Github className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+              <ExternalLink className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
             </a>
           )}
         </div>
@@ -470,7 +469,7 @@ function ServerDetailDialog({
             {server.repoUrl && (
               <Button variant="outline" asChild>
                 <a href={server.repoUrl} target="_blank" rel="noopener noreferrer">
-                  <Github className="w-4 h-4 mr-2" />
+                  <ExternalLink className="w-4 h-4 mr-2" />
                   Repository
                 </a>
               </Button>

@@ -89,11 +89,7 @@ function getDefaultParamValues(schema: ModelParamsSchema | null): Record<string,
     return {};
   }
 
-  return Object.fromEntries(
-    Object.entries(schema.params)
-      .filter(([, definition]) => definition.default !== undefined)
-      .map(([key, definition]) => [key, definition.default]),
-  );
+  return schema.defaults || {};
 }
 
 // =============================================================================
@@ -381,8 +377,6 @@ export default function PlaygroundPage() {
       const fetchWithPayment = createPaymentFetch({
         chainId: paymentChainId,
         sessionToken: activeComposeKeyToken!,
-        sessionUserAddress: sessionActive ? account.address : undefined,
-        sessionBudgetRemaining: sessionActive ? budgetRemaining : undefined,
       });
 
       const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -453,7 +447,7 @@ export default function PlaygroundPage() {
       }
 
       if (Object.keys(paramValues).length > 0) {
-        Object.assign(requestBody, paramValues);
+        requestBody.custom_params = paramValues;
       }
 
       const response = await fetchWithPayment(endpoint, {
