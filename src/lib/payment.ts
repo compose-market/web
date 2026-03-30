@@ -4,8 +4,6 @@ export const SESSION_INVALID_EVENT = "compose:session-invalid";
 export interface PaymentFetchParams {
   chainId: number;
   sessionToken: string;
-  sessionUserAddress?: string;
-  sessionBudgetRemaining?: number;
 }
 
 function syncBudgetState(response: Response): void {
@@ -55,20 +53,11 @@ export function createPaymentFetch(params: PaymentFetchParams): (input: RequestI
   }
 
   const sessionToken = params.sessionToken;
-  const hasSessionContext = typeof params.sessionUserAddress === "string"
-    && params.sessionUserAddress.length > 0
-    && Number.isFinite(params.sessionBudgetRemaining)
-    && (params.sessionBudgetRemaining as number) >= 0;
 
   return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const headers = new Headers(init?.headers);
     headers.set("Authorization", `Bearer ${sessionToken}`);
     headers.set("X-Chain-ID", String(chainId));
-    if (hasSessionContext) {
-      headers.set("X-Session-Active", "true");
-      headers.set("X-Session-User-Address", params.sessionUserAddress!);
-      headers.set("X-Session-Budget-Remaining", String(params.sessionBudgetRemaining!));
-    }
 
     const response = await fetch(input, {
       ...init,

@@ -27,8 +27,7 @@ export async function uploadWorkspaceFiles(files: File[], params: {
   agentWallet: string;
   chainId: number;
   sessionToken: string;
-  sessionUserAddress: string;
-  sessionBudgetRemaining: number;
+  userAddress: string;
 }): Promise<WorkspaceUploadResult> {
   if (files.length === 0) {
     return { indexed: 0, documents: [] };
@@ -76,8 +75,6 @@ export async function uploadWorkspaceFiles(files: File[], params: {
   const fetchWithPayment = createPaymentFetch({
     chainId: params.chainId,
     sessionToken: params.sessionToken,
-    sessionUserAddress: params.sessionUserAddress,
-    sessionBudgetRemaining: params.sessionBudgetRemaining,
   });
 
   const response = await fetchWithPayment(`${RUNTIME_URL}/api/workspace/index`, {
@@ -106,7 +103,7 @@ export async function uploadWorkspaceFiles(files: File[], params: {
           version: "1.0.0",
           scope: "workspace",
           agentWallet: params.agentWallet,
-          userAddress: params.sessionUserAddress,
+          userAddress: params.userAddress,
           source: {
             name: item.file.name,
             type: item.file.type,
@@ -128,7 +125,7 @@ export async function uploadWorkspaceFiles(files: File[], params: {
         await uploadFilecoinFile(artifactFile, {
           scope: "workspace-artifact",
           agentWallet: params.agentWallet,
-          userAddress: params.sessionUserAddress,
+          userAddress: params.userAddress,
           sourceName: item.file.name,
         });
       });
