@@ -66,6 +66,7 @@ export interface ModelParamsSchema {
     modelId: string;
     type: "video" | "image" | null;
     params: Record<string, ParamDefinition>;
+    defaults: Record<string, unknown>;
     provider: string | null;
 }
 
@@ -146,7 +147,7 @@ export function MirrorPane({
     paramValues = {},
     onParamValuesChange,
 }: MirrorPaneProps) {
-    const [activeTab, setActiveTab] = useState<"details" | "settings">("details");
+    const [activeTab, setActiveTab] = useState<"details" | "custom">("details");
     const typeValues = modelInfo ? getModelTypeValues(modelInfo) : [];
     const hasOptionalParams = Boolean(modelParams && Object.keys(modelParams.params).length > 0);
     const inputValues = modelInfo ? getModelValueList(modelInfo.input) : [];
@@ -186,14 +187,14 @@ export function MirrorPane({
                     <Tooltip>
                         <TooltipTrigger asChild>
                             <button
-                                onClick={() => setActiveTab("settings")}
-                                className={`cm-mirror-pane__toolbar-btn ${activeTab === "settings" ? "cm-mirror-pane__toolbar-btn--active-fuchsia" : ""}`}
-                                aria-label="Settings"
+                                onClick={() => setActiveTab("custom")}
+                                className={`cm-mirror-pane__toolbar-btn ${activeTab === "custom" ? "cm-mirror-pane__toolbar-btn--active-fuchsia" : ""}`}
+                                aria-label="Custom"
                             >
                                 <Settings className="w-4 h-4" />
                             </button>
                         </TooltipTrigger>
-                        <TooltipContent side="bottom">Settings</TooltipContent>
+                        <TooltipContent side="bottom">Custom</TooltipContent>
                     </Tooltip>
                 </div>
 
@@ -308,7 +309,7 @@ export function MirrorPane({
                         </>
                     )}
 
-                    {activeTab === "settings" && (
+                    {activeTab === "custom" && (
                         <div className="space-y-3">
                             {/* System Prompt */}
                             <div className="space-y-2">
@@ -407,11 +408,10 @@ export function MirrorPane({
                             {/* Dynamic model params */}
                             {hasOptionalParams && modelParams && (
                                 <>
-                                    {Object.entries(modelParams.params).map(([key, definition]) => (
+                                    {Object.entries(modelParams.params).filter(([, definition]) => definition.required !== true).map(([key, definition]) => (
                                         <div key={key} className="space-y-2">
                                             <Label className="text-xs font-mono text-muted-foreground">
                                                 {key}
-                                                {definition.required ? " *" : ""}
                                             </Label>
                                             {renderParamInput(
                                                 key,

@@ -19,7 +19,7 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import {
-    Plug, Loader2, Github, Zap, Server, FlaskConical, Wrench, Copy
+    Plug, Loader2, ExternalLink, Zap, Server, FlaskConical, Wrench, Copy
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { RegistryServer } from "@/hooks/use-registry";
@@ -295,7 +295,7 @@ export function ConnectorDetailDialog({
                     {server.repoUrl && (
                         <Button variant="outline" asChild>
                             <a href={server.repoUrl} target="_blank" rel="noopener noreferrer">
-                                <Github className="w-4 h-4 mr-2" />
+                                <ExternalLink className="w-4 h-4 mr-2" />
                                 Repository
                             </a>
                         </Button>

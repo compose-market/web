@@ -213,7 +213,6 @@ export function PluginTester({
     const wallet = useActiveWallet();
     const { paymentChainId } = useChain();
     const { composeKeyToken, ensureComposeKeyToken } = useSession();
-    const sessionUserAddress = wallet?.getAccount()?.address;
     const resultsEndRef = useRef<HTMLDivElement>(null);
 
     // Common state
@@ -356,8 +355,6 @@ export function PluginTester({
             const fetchWithPayment = createPaymentFetch({
                 chainId: paymentChainId,
                 sessionToken: activeComposeKeyToken,
-                sessionUserAddress: sessionActive ? sessionUserAddress : undefined,
-                sessionBudgetRemaining: sessionActive ? budgetRemaining : undefined,
             });
 
             const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -470,8 +467,6 @@ export function PluginTester({
             const fetchWithPayment = createPaymentFetch({
                 chainId: paymentChainId,
                 sessionToken: activeComposeKeyToken,
-                sessionUserAddress: sessionActive ? sessionUserAddress : undefined,
-                sessionBudgetRemaining: sessionActive ? budgetRemaining : undefined,
             });
 
             const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -621,8 +616,6 @@ export function PluginTester({
             const fetchWithPayment = createPaymentFetch({
                 chainId: paymentChainId,
                 sessionToken: activeComposeKeyToken,
-                sessionUserAddress: sessionActive ? sessionUserAddress : undefined,
-                sessionBudgetRemaining: sessionActive ? budgetRemaining : undefined,
             });
 
             const headers: Record<string, string> = { "Content-Type": "application/json" };
