@@ -179,7 +179,7 @@ export function MirrorPane({
                                 className={`cm-mirror-pane__toolbar-btn ${activeTab === "details" ? "cm-mirror-pane__toolbar-btn--active-cyan" : ""}`}
                                 aria-label="Details"
                             >
-                                <LayoutGrid className="w-4 h-4" />
+                                <LayoutGrid />
                             </button>
                         </TooltipTrigger>
                         <TooltipContent side="bottom">Details</TooltipContent>
@@ -191,7 +191,7 @@ export function MirrorPane({
                                 className={`cm-mirror-pane__toolbar-btn ${activeTab === "custom" ? "cm-mirror-pane__toolbar-btn--active-fuchsia" : ""}`}
                                 aria-label="Custom"
                             >
-                                <Settings className="w-4 h-4" />
+                                <Settings />
                             </button>
                         </TooltipTrigger>
                         <TooltipContent side="bottom">Custom</TooltipContent>
@@ -202,88 +202,103 @@ export function MirrorPane({
                 <div className="cm-mirror-pane__body">
                     {activeTab === "details" && (
                         <>
-                            {/* Model Identity */}
+                            {/* ── Model Identity: icon + name + types + id ── */}
                             <div className="cm-mirror-pane__model-header">
                                 <div className="cm-mirror-pane__model-icon-box">
-                                    <Cpu className="w-5 h-5 sm:w-6 sm:h-6 text-cyan-400" />
+                                    <Cpu className="text-cyan-400" />
                                 </div>
                                 <div className="cm-mirror-pane__model-copy">
-                                    <h3 className="cm-mirror-pane__model-name">
-                                        {modelInfo?.name || selectedModel}
-                                    </h3>
+                                    <div className="cm-mirror-pane__model-name-row">
+                                        <h3 className="cm-mirror-pane__model-name">
+                                            {modelInfo?.name || selectedModel}
+                                        </h3>
+                                        {typeValues.length > 0 && (
+                                            <span className="cm-mirror-pane__model-types">
+                                                {typeValues.map((v) => (
+                                                    <Badge key={v} className="bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30 text-[10px] px-1.5 py-0">
+                                                        {formatModelTypeLabel(v)}
+                                                    </Badge>
+                                                ))}
+                                            </span>
+                                        )}
+                                    </div>
                                     <p className="cm-mirror-pane__model-provider">
                                         {modelInfo?.provider || "unknown"}
+                                        {modelInfo?.modelId && (
+                                            <span className="cm-mirror-pane__model-id"> ({modelInfo.modelId})</span>
+                                        )}
                                     </p>
                                 </div>
                             </div>
 
-                            {/* Type badges */}
-                            <div className="flex flex-wrap gap-1.5">
-                                {typeValues.map((typeValue) => (
-                                    <Badge key={typeValue} className="bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30 text-xs">
-                                        {formatModelTypeLabel(typeValue)}
-                                    </Badge>
-                                ))}
-                            </div>
+                            {/* ── Description: 2-line clamp, full text on hover ── */}
+                            {modelInfo?.description && (
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <p className="cm-mirror-pane__description cm-mirror-pane__description--clamped">
+                                            {modelInfo.description}
+                                        </p>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="bottom" className="max-w-xs text-xs">
+                                        {modelInfo.description}
+                                    </TooltipContent>
+                                </Tooltip>
+                            )}
 
                             {modelInfo && (
-                                <div className="space-y-3 text-xs">
-                                    {/* Model Details Section */}
-                                    <div className="cm-mirror-pane__section">
-                                        <div>
-                                            <span className="cm-mirror-pane__section-label">Model ID</span>
-                                            <div className="font-mono text-cyan-400 break-all">{modelInfo.modelId}</div>
+                                <>
+                                    {/* ── I/O Modalities: compact inline ── */}
+                                    {(inputValues.length > 0 || outputValues.length > 0) && (
+                                        <div className="cm-mirror-pane__section cm-mirror-pane__section--compact">
+                                            {inputValues.length > 0 && (
+                                                <div className="cm-mirror-pane__io-row">
+                                                    <span className="cm-mirror-pane__io-label">IN</span>
+                                                    <div className="cm-mirror-pane__io-badges">
+                                                        {inputValues.map((value) => (
+                                                            <Badge key={`in-${value}`} variant="outline" className="text-[10px] border-sidebar-border py-0 px-1.5">
+                                                                {value}
+                                                            </Badge>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {outputValues.length > 0 && (
+                                                <div className="cm-mirror-pane__io-row">
+                                                    <span className="cm-mirror-pane__io-label">OUT</span>
+                                                    <div className="cm-mirror-pane__io-badges">
+                                                        {outputValues.map((value) => (
+                                                            <Badge key={`out-${value}`} variant="outline" className="text-[10px] border-sidebar-border py-0 px-1.5">
+                                                                {value}
+                                                            </Badge>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
-                                        <div>
-                                            <span className="cm-mirror-pane__section-label">Input</span>
-                                            <div className="flex flex-wrap gap-1.5 mt-1">
-                                                {inputValues.length > 0 ? inputValues.map((value) => (
-                                                    <Badge key={`input-${value}`} variant="outline" className="text-[10px] border-sidebar-border">
-                                                        {value}
-                                                    </Badge>
-                                                )) : (
-                                                    <span className="text-muted-foreground">None</span>
-                                                )}
-                                            </div>
-                                        </div>
-                                        <div>
-                                            <span className="cm-mirror-pane__section-label">Output</span>
-                                            <div className="flex flex-wrap gap-1.5 mt-1">
-                                                {outputValues.length > 0 ? outputValues.map((value) => (
-                                                    <Badge key={`output-${value}`} variant="outline" className="text-[10px] border-sidebar-border">
-                                                        {value}
-                                                    </Badge>
-                                                )) : (
-                                                    <span className="text-muted-foreground">None</span>
-                                                )}
-                                            </div>
-                                        </div>
-                                        <div>
+                                    )}
+
+                                    {/* ── Context Window: entries on same row ── */}
+                                    {contextEntries.length > 0 && (
+                                        <div className="cm-mirror-pane__section cm-mirror-pane__section--compact">
                                             <span className="cm-mirror-pane__section-label">Context Window</span>
-                                            <div className="mt-1 space-y-1">
-                                                {contextEntries.length > 0 ? contextEntries.map((entry) => (
-                                                    <div key={`context-${entry.label}`} className="cm-mirror-pane__kv-row">
+                                            <div className="cm-mirror-pane__kv-grid">
+                                                {contextEntries.map((entry) => (
+                                                    <div key={`ctx-${entry.label}`} className="cm-mirror-pane__kv-row">
                                                         <span className="cm-mirror-pane__kv-label">{entry.label}</span>
                                                         <span className="cm-mirror-pane__kv-value">{entry.value}</span>
                                                     </div>
-                                                )) : (
-                                                    <span className="text-muted-foreground">Not provided</span>
-                                                )}
+                                                ))}
                                             </div>
                                         </div>
-                                        <div>
+                                    )}
+
+                                    {/* ── Pricing: consolidated rows, unit below ── */}
+                                    {pricingSections.length > 0 && (
+                                        <div className="cm-mirror-pane__section cm-mirror-pane__section--compact">
                                             <span className="cm-mirror-pane__section-label">Pricing</span>
-                                            <div className="mt-2 space-y-2">
-                                                {pricingSections.length > 0 ? pricingSections.map((section, index) => (
-                                                    <div key={`${section.header}-${index}`} className="cm-mirror-pane__pricing-block">
-                                                        <div className="cm-mirror-pane__pricing-header">
-                                                            <span className="cm-mirror-pane__pricing-name">{section.header}</span>
-                                                            {section.unit && (
-                                                                <Badge variant="outline" className="text-[10px] border-sidebar-border">
-                                                                    {section.unit}
-                                                                </Badge>
-                                                            )}
-                                                        </div>
+                                            {pricingSections.map((section, index) => (
+                                                <div key={`price-${section.header}-${index}`} className="cm-mirror-pane__pricing-compact">
+                                                    <div className="cm-mirror-pane__pricing-entries">
                                                         {section.entries.map((entry) => (
                                                             <div key={`${section.header}-${entry.label}`} className="cm-mirror-pane__kv-row">
                                                                 <span className="cm-mirror-pane__kv-label">{entry.label}</span>
@@ -291,34 +306,28 @@ export function MirrorPane({
                                                             </div>
                                                         ))}
                                                     </div>
-                                                )) : (
-                                                    <span className="text-muted-foreground">No pricing metadata</span>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Description */}
-                                    {modelInfo.description && (
-                                        <div className="cm-mirror-pane__description">
-                                            {modelInfo.description}
+                                                    {section.unit && (
+                                                        <span className="cm-mirror-pane__pricing-unit">{section.unit}</span>
+                                                    )}
+                                                </div>
+                                            ))}
                                         </div>
                                     )}
-                                </div>
+                                </>
                             )}
                         </>
                     )}
 
                     {activeTab === "custom" && (
-                        <div className="space-y-3">
+                        <div className="cm-mirror-pane__custom-content">
                             {/* System Prompt */}
-                            <div className="space-y-2">
-                                <Label className="text-xs font-mono text-muted-foreground">SYSTEM PROMPT</Label>
+                            <div className="cm-mirror-pane__custom-section">
+                                <Label className="cm-mirror-pane__section-label">SYSTEM PROMPT</Label>
                                 <Textarea
                                     value={systemPrompt}
                                     onChange={(event) => onSystemPromptChange(event.target.value)}
                                     placeholder="Optional system prompt..."
-                                    className="min-h-[120px] bg-background/50 border-sidebar-border font-mono text-xs"
+                                    className="cm-mirror-pane__text-area"
                                 />
                             </div>
 
@@ -328,7 +337,7 @@ export function MirrorPane({
                                     <div className="cm-mirror-pane__tool-group-label text-cyan-400">GEMINI TOOLS</div>
                                     <div className="cm-mirror-pane__tool-toggle">
                                         <div className="cm-mirror-pane__tool-toggle-label">
-                                            <Search className="w-4 h-4 text-cyan-400" />
+                                            <Search className="text-cyan-400" />
                                             <span>Google Search</span>
                                         </div>
                                         <Switch
@@ -338,7 +347,7 @@ export function MirrorPane({
                                     </div>
                                     <div className="cm-mirror-pane__tool-toggle">
                                         <div className="cm-mirror-pane__tool-toggle-label">
-                                            <Code2 className="w-4 h-4 text-cyan-400" />
+                                            <Code2 className="text-cyan-400" />
                                             <span>Code Execution</span>
                                         </div>
                                         <Switch
@@ -348,7 +357,7 @@ export function MirrorPane({
                                     </div>
                                     <div className="cm-mirror-pane__tool-toggle">
                                         <div className="cm-mirror-pane__tool-toggle-label">
-                                            <MapPin className="w-4 h-4 text-cyan-400" />
+                                            <MapPin className="text-cyan-400" />
                                             <span>Maps Grounding</span>
                                         </div>
                                         <Switch
@@ -356,16 +365,16 @@ export function MirrorPane({
                                             onCheckedChange={googleTools.setEnableMapsGrounding}
                                         />
                                     </div>
-                                    <div className="space-y-2">
-                                        <Label className="text-xs font-mono text-muted-foreground flex items-center gap-2">
-                                            <Link className="w-3 h-3" />
+                                    <div className="cm-mirror-pane__custom-section">
+                                        <Label className="cm-mirror-pane__section-label flex items-center gap-2">
+                                            <Link className="cm-mirror-pane__tool-toggle-label-icon" />
                                             URL CONTEXT
                                         </Label>
                                         <Textarea
                                             value={googleTools.urlContextUrls}
                                             onChange={(event) => googleTools.setUrlContextUrls(event.target.value)}
                                             placeholder="One URL per line"
-                                            className="min-h-[90px] bg-background/50 border-sidebar-border font-mono text-xs"
+                                            className="cm-mirror-pane__text-area"
                                         />
                                     </div>
                                 </div>
@@ -375,7 +384,7 @@ export function MirrorPane({
                             {optionalPricingSections.length > 0 && (
                                 <div className="cm-mirror-pane__tool-group cm-mirror-pane__tool-group--fuchsia">
                                     <Label className="cm-mirror-pane__tool-group-label text-fuchsia-400">OPTIONAL PRICING</Label>
-                                    <div className="space-y-2">
+                                    <div className="cm-mirror-pane__custom-content">
                                         {optionalPricingSections.map((section, index) => (
                                             <div key={`${section.header}-${section.unit}-${index}`} className="cm-mirror-pane__pricing-block">
                                                 <div className="cm-mirror-pane__pricing-header">
@@ -409,8 +418,8 @@ export function MirrorPane({
                             {hasOptionalParams && modelParams && (
                                 <>
                                     {Object.entries(modelParams.params).filter(([, definition]) => definition.required !== true).map(([key, definition]) => (
-                                        <div key={key} className="space-y-2">
-                                            <Label className="text-xs font-mono text-muted-foreground">
+                                        <div key={key} className="cm-mirror-pane__custom-section">
+                                            <Label className="cm-mirror-pane__section-label">
                                                 {key}
                                             </Label>
                                             {renderParamInput(
@@ -420,7 +429,7 @@ export function MirrorPane({
                                                 (nextValue) => onParamValuesChange?.({ ...paramValues, [key]: nextValue }),
                                             )}
                                             {definition.description && (
-                                                <p className="text-[11px] text-muted-foreground">{definition.description}</p>
+                                                <p className="cm-mirror-pane__param-description">{definition.description}</p>
                                             )}
                                         </div>
                                     ))}

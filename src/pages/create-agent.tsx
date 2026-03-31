@@ -792,11 +792,11 @@ export default function CreateAgent() {
       {/* Main Content */}
       <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-4">
         {/* Left: Form */}
-        <div className="min-h-0 overflow-y-auto pr-1">
+        <div className="min-h-0 flex flex-col pr-1">
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-3">
+            <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col flex-1 min-h-0 gap-3">
               {/* Identity: Name + Model row */}
-              <div className="glass-panel border border-cyan-500/20 rounded-sm p-4 space-y-3">
+              <div className="glass-panel border border-cyan-500/20 rounded-sm p-4 space-y-3 flex-1 flex flex-col min-h-0 overflow-y-auto">
                 <div className="flex items-center gap-2 text-cyan-400 text-sm font-display font-bold uppercase">
                   <Cpu className="w-4 h-4" />
                   Identity

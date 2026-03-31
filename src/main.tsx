@@ -1,6 +1,6 @@
 import { createRoot } from "react-dom/client";
 import App from "./App";
-import "./index.css";
+import "./styles/index.css";
 import posthog from "posthog-js";
 import { PostHogProvider } from "@posthog/react";
 import { initMixpanel } from "./lib/mixpanel";
