@@ -530,13 +530,13 @@ export default function PlaygroundPage() {
         </div>
 
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "model" | "plugins")}>
-          <TabsList className="bg-zinc-900/80 h-7">
-            <TabsTrigger value="model" className="gap-1 text-[10px] px-2 h-6">
-              <Bot className="h-3 w-3" />
+          <TabsList className="bg-zinc-900/80" style={{ height: 'clamp(1.375rem, 1.1rem + 0.5vw, 2.125rem)' }}>
+            <TabsTrigger value="model" className="gap-1 px-2" style={{ fontSize: 'clamp(0.5rem, 0.4rem + 0.25vw, 0.75rem)', height: 'clamp(1.125rem, 0.9rem + 0.45vw, 1.875rem)' }}>
+              <Bot style={{ width: 'clamp(0.625rem, 0.5rem + 0.25vw, 1rem)', height: 'clamp(0.625rem, 0.5rem + 0.25vw, 1rem)' }} />
               Models
             </TabsTrigger>
-            <TabsTrigger value="plugins" className="gap-1 text-[10px] px-2 h-6">
-              <Plug className="h-3 w-3" />
+            <TabsTrigger value="plugins" className="gap-1 px-2" style={{ fontSize: 'clamp(0.5rem, 0.4rem + 0.25vw, 0.75rem)', height: 'clamp(1.125rem, 0.9rem + 0.45vw, 1.875rem)' }}>
+              <Plug style={{ width: 'clamp(0.625rem, 0.5rem + 0.25vw, 1rem)', height: 'clamp(0.625rem, 0.5rem + 0.25vw, 1rem)' }} />
               Plugins
             </TabsTrigger>
           </TabsList>
@@ -548,9 +548,10 @@ export default function PlaygroundPage() {
               variant="ghost"
               size="icon"
               onClick={() => setMobilePaneOpen(true)}
-              className="h-6 w-6 lg:hidden text-zinc-400 hover:text-white"
+              className="lg:hidden text-zinc-400 hover:text-white"
+              style={{ width: 'clamp(1.25rem, 1rem + 0.5vw, 1.875rem)', height: 'clamp(1.25rem, 1rem + 0.5vw, 1.875rem)' }}
             >
-              <Settings2 className="h-3 w-3" />
+              <Settings2 style={{ width: 'clamp(0.625rem, 0.5rem + 0.25vw, 1rem)', height: 'clamp(0.625rem, 0.5rem + 0.25vw, 1rem)' }} />
             </Button>
           )}
         </div>
@@ -603,9 +604,10 @@ export default function PlaygroundPage() {
                 size="icon"
                 onClick={() => forceRefreshModels()}
                 disabled={modelsLoading}
-                className="h-6 w-6 text-zinc-400 hover:text-white"
+                className="text-zinc-400 hover:text-white"
+                style={{ width: 'clamp(1.25rem, 1rem + 0.5vw, 1.875rem)', height: 'clamp(1.25rem, 1rem + 0.5vw, 1.875rem)' }}
               >
-                <RefreshCw className={`h-3 w-3 ${modelsLoading ? "animate-spin" : ""}`} />
+                <RefreshCw className={modelsLoading ? "animate-spin" : ""} style={{ width: 'clamp(0.625rem, 0.5rem + 0.25vw, 1rem)', height: 'clamp(0.625rem, 0.5rem + 0.25vw, 1rem)' }} />
               </Button>
             </div>
 
@@ -674,11 +676,11 @@ export default function PlaygroundPage() {
               }
               emptyStateIcon={
                 outputType === "image" ? (
-                  <ImageIcon className="h-12 w-12 mx-auto mb-4 opacity-50 text-zinc-500" />
+                  <ImageIcon className="mx-auto mb-4 opacity-50 text-zinc-500" style={{ width: 'clamp(2rem, 1.5rem + 2vw, 4rem)', height: 'clamp(2rem, 1.5rem + 2vw, 4rem)' }} />
                 ) : outputType === "audio" || selectedModel?.toLowerCase().includes("lyria") ? (
-                  <Music className="h-12 w-12 mx-auto mb-4 opacity-50 text-zinc-500" />
+                  <Music className="mx-auto mb-4 opacity-50 text-zinc-500" style={{ width: 'clamp(2rem, 1.5rem + 2vw, 4rem)', height: 'clamp(2rem, 1.5rem + 2vw, 4rem)' }} />
                 ) : (
-                  <Bot className="h-12 w-12 mx-auto mb-4 opacity-50 text-zinc-500" />
+                  <Bot className="mx-auto mb-4 opacity-50 text-zinc-500" style={{ width: 'clamp(2rem, 1.5rem + 2vw, 4rem)', height: 'clamp(2rem, 1.5rem + 2vw, 4rem)' }} />
                 )
               }
               emptyStateText={
@@ -782,14 +784,14 @@ export default function PlaygroundPage() {
 
       {/* ── Mobile MirrorPane Sheet ───────────────────────────────── */}
       <Sheet open={mobilePaneOpen} onOpenChange={setMobilePaneOpen}>
-        <SheetContent side="right" className="w-[340px] sm:w-[400px] p-0 overflow-y-auto">
-          <SheetHeader className="p-4 border-b border-sidebar-border">
-            <SheetTitle className="font-display text-cyan-400 flex items-center gap-2">
-              <Settings2 className="w-4 h-4" />
+        <SheetContent side="right" className="p-0 overflow-y-auto" style={{ width: 'clamp(16rem, 14rem + 10vw, 28rem)' }}>
+          <SheetHeader className="border-b border-sidebar-border" style={{ padding: 'clamp(0.5rem, 0.4rem + 0.5vw, 1.25rem)' }}>
+            <SheetTitle className="font-display text-cyan-400 flex items-center" style={{ gap: 'clamp(0.375rem, 0.3rem + 0.2vw, 0.625rem)', fontSize: 'clamp(0.75rem, 0.6rem + 0.35vw, 1.125rem)' }}>
+              <Settings2 style={{ width: 'clamp(0.75rem, 0.6rem + 0.3vw, 1.25rem)', height: 'clamp(0.75rem, 0.6rem + 0.3vw, 1.25rem)' }} />
               Model Settings
             </SheetTitle>
           </SheetHeader>
-          <div className="p-4">
+          <div style={{ padding: 'clamp(0.5rem, 0.4rem + 0.5vw, 1.25rem)' }}>
             <MirrorPane
               selectedModel={selectedModel}
               modelInfo={selectedModelInfo || null}
