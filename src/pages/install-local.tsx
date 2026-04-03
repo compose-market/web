@@ -63,7 +63,7 @@ function PlatformCard({ group, active, onClick }: { group: MeshDownloadGroup; ac
       </div>
 
       {/* Download options */}
-      <div className="cm-shell-stack" style={{ padding: "0 1em 1em", gap: "0.5em" }}>
+      <div className="cm-shell-stack">
         {group.options.map((option) => (
           <button
             key={option.id}
@@ -125,7 +125,7 @@ export function MeshDownloadPanel({
       )}
     >
       {/* ── Page header — uses shell page-header pattern ── */}
-      <div className="cm-shell-page-header" style={{ flexDirection: "column", alignItems: "stretch" }}>
+      <div className="cm-shell-page-header cm-install-panel__header">
         <div className="cm-shell-page-header__copy">
           <div className="cm-shell-page-header__eyebrow flex items-center gap-[0.45em]">
             <Monitor className="w-[1.1em] h-[1.1em]" />
@@ -185,7 +185,7 @@ export function MeshDownloadPanel({
         </div>
 
         {/* ── Footer ── */}
-        <div className="cm-shell-banner cm-shell-panel cm-shell-panel--muted" style={{ flexWrap: "wrap" }}>
+        <div className="cm-shell-banner cm-shell-panel cm-shell-panel--muted">
           <p className="cm-shell-banner__subtitle !max-w-none flex-1 min-w-0">
             Android ships as a direct APK. macOS users should download the DMG. Linux users should start
             with AppImage unless they specifically want a native package.
