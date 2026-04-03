@@ -179,6 +179,8 @@ export interface AgentCard {
   name: string;
   description: string;
   skills: string[];
+  x402: true;
+  x402Support: boolean;
   image?: string; // Standard NFT metadata field (gateway URL for display and explorer compatibility)
   avatar?: string; // Legacy field for backward compatibility with explorers
   dnaHash: string;
