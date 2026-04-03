@@ -1,13 +1,16 @@
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Link } from "wouter";
-import { ArrowRight, Cpu, Hexagon, Layers, ShieldCheck, Zap } from "lucide-react";
+import { ArrowRight, Cpu, Download, Hexagon, Layers, ShieldCheck, Zap } from "lucide-react";
 import { GlitchText, WorkflowCube } from "@/components/brand/Logo";
 import { PartnershipSection } from "@/components/partners";
 import { usePostHog } from "@posthog/react";
 import { mpTrack } from "@/lib/mixpanel";
+import { MeshDownloadDialog } from "@/pages/install-local";
 
 export default function Home() {
   const posthog = usePostHog();
+  const [downloadDialogOpen, setDownloadDialogOpen] = useState(false);
   return (
     <div>
       {/* ── Above-the-Fold: Full Viewport ──────────────────────────── */}
@@ -41,11 +44,19 @@ export default function Home() {
                 <ArrowRight className="ml-2 w-4 h-4" />
               </Button>
             </Link>
-            <Link href="/compose" className="w-full sm:w-auto">
-              <Button size="lg" variant="outline" onClick={() => { posthog?.capture("home_cta_clicked", { cta: "start_composing" }); mpTrack("Conversion Event", { "Conversion Type": "start_composing" }); }} className="w-full sm:w-auto h-11 sm:h-12 md:h-13 px-6 sm:px-8 text-sm sm:text-base font-bold font-mono tracking-wider border-sidebar-border text-foreground hover:border-fuchsia-500 hover:text-fuchsia-400 transition-colors">
-                START COMPOSING
-              </Button>
-            </Link>
+            <Button
+              size="lg"
+              variant="outline"
+              onClick={() => {
+                posthog?.capture("home_cta_clicked", { cta: "download_mesh" });
+                mpTrack("Conversion Event", { "Conversion Type": "download_mesh" });
+                setDownloadDialogOpen(true);
+              }}
+              className="w-full sm:w-auto h-11 sm:h-12 md:h-13 px-6 sm:px-8 text-sm sm:text-base font-bold font-mono tracking-wider border-cyan-500/40 text-cyan-300 hover:border-cyan-400 hover:text-cyan-200 transition-colors"
+            >
+              DOWNLOAD MESH
+              <Download className="ml-2 w-4 h-4" />
+            </Button>
           </div>
         </section>
 
@@ -176,6 +187,8 @@ export default function Home() {
           <span className="text-muted-foreground">COMPOSE.MARKET © 2026</span>
         </div>
       </footer>
+
+      <MeshDownloadDialog open={downloadDialogOpen} onOpenChange={setDownloadDialogOpen} />
     </div>
   );
 }
