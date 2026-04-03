@@ -1,5 +1,3 @@
-import meshPackageJson from "../../../mesh/package.json?raw";
-
 export const MESH_RELEASES_URL = "https://github.com/compose-market/mesh/releases";
 
 export type MeshDownloadPlatform = "android" | "macos" | "windows" | "linux";
@@ -22,30 +20,42 @@ export interface MeshDownloadGroup {
   options: MeshDownloadOption[];
 }
 
-interface MeshPackageManifest {
-  version?: string;
-}
+/* ── Dynamic version fetch from GitHub Releases API ── */
 
-function readMeshVersion(): string {
-  const manifest = JSON.parse(meshPackageJson) as MeshPackageManifest;
-  const version = typeof manifest.version === "string" ? manifest.version.trim() : "";
-  if (!version) {
-    throw new Error("Missing Mesh package version.");
+let versionCache: string | null = null;
+
+async function fetchMeshVersion(): Promise<string> {
+  if (versionCache) return versionCache;
+
+  const res = await fetch(
+    "https://api.github.com/repos/compose-market/mesh/releases/latest",
+    { headers: { Accept: "application/vnd.github.v3+json" } },
+  );
+  if (!res.ok) {
+    throw new Error(`Failed to fetch latest Mesh release: ${res.status} ${res.statusText}`);
   }
+  const data = (await res.json()) as { tag_name?: string };
+  const tag = data.tag_name ?? "";
+  const version = tag.startsWith("v") ? tag.slice(1) : tag;
+  if (!version) {
+    throw new Error("Latest Mesh release has no version tag.");
+  }
+  versionCache = version;
   return version;
 }
 
-function buildTaggedReleaseAssetUrl(assetName: string): string {
-  const version = readMeshVersion();
+function buildTaggedReleaseAssetUrl(version: string, assetName: string): string {
   return `https://github.com/compose-market/mesh/releases/download/v${version}/${assetName}`;
 }
 
-export function getMeshReleaseUrl(): string {
-  const version = readMeshVersion();
+export async function getMeshReleaseUrl(): Promise<string> {
+  const version = await fetchMeshVersion();
   return `https://github.com/compose-market/mesh/releases/tag/v${version}`;
 }
 
-export function getMeshDownloadGroups(): MeshDownloadGroup[] {
+export async function getMeshDownloadGroups(): Promise<MeshDownloadGroup[]> {
+  const version = await fetchMeshVersion();
+
   return [
     {
       id: "android",
@@ -59,7 +69,7 @@ export function getMeshDownloadGroups(): MeshDownloadGroup[] {
           hint: "Universal APK for direct install",
           format: ".apk",
           assetName: "android.apk",
-          url: buildTaggedReleaseAssetUrl("android.apk"),
+          url: buildTaggedReleaseAssetUrl(version, "android.apk"),
           recommended: true,
         },
       ],
@@ -76,7 +86,7 @@ export function getMeshDownloadGroups(): MeshDownloadGroup[] {
           hint: "M1, M2, M3, and M4 Macs",
           format: ".dmg",
           assetName: "apple-silicon.dmg",
-          url: buildTaggedReleaseAssetUrl("apple-silicon.dmg"),
+          url: buildTaggedReleaseAssetUrl(version, "apple-silicon.dmg"),
           recommended: true,
         },
         {
@@ -86,7 +96,7 @@ export function getMeshDownloadGroups(): MeshDownloadGroup[] {
           hint: "Older Intel-based Macs",
           format: ".dmg",
           assetName: "intel.dmg",
-          url: buildTaggedReleaseAssetUrl("intel.dmg"),
+          url: buildTaggedReleaseAssetUrl(version, "intel.dmg"),
         },
       ],
     },
@@ -102,7 +112,7 @@ export function getMeshDownloadGroups(): MeshDownloadGroup[] {
           hint: "Windows 10 and Windows 11",
           format: ".exe",
           assetName: "windows.exe",
-          url: buildTaggedReleaseAssetUrl("windows.exe"),
+          url: buildTaggedReleaseAssetUrl(version, "windows.exe"),
           recommended: true,
         },
       ],
@@ -119,7 +129,7 @@ export function getMeshDownloadGroups(): MeshDownloadGroup[] {
           hint: "Best default for most distributions",
           format: ".AppImage",
           assetName: "linux.AppImage",
-          url: buildTaggedReleaseAssetUrl("linux.AppImage"),
+          url: buildTaggedReleaseAssetUrl(version, "linux.AppImage"),
           recommended: true,
         },
         {
@@ -129,7 +139,7 @@ export function getMeshDownloadGroups(): MeshDownloadGroup[] {
           hint: "Native package for Ubuntu, Debian, Pop!_OS, Mint",
           format: ".deb",
           assetName: "linux.deb",
-          url: buildTaggedReleaseAssetUrl("linux.deb"),
+          url: buildTaggedReleaseAssetUrl(version, "linux.deb"),
         },
         {
           id: "linux-rpm",
@@ -138,7 +148,7 @@ export function getMeshDownloadGroups(): MeshDownloadGroup[] {
           hint: "Native package for Fedora, RHEL, Rocky, AlmaLinux",
           format: ".rpm",
           assetName: "linux.rpm",
-          url: buildTaggedReleaseAssetUrl("linux.rpm"),
+          url: buildTaggedReleaseAssetUrl(version, "linux.rpm"),
         },
       ],
     },

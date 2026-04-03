@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import {
   getMeshDownloadGroups,
   getMeshReleaseUrl,
+  MESH_RELEASES_URL,
   type MeshDownloadGroup,
   type MeshDownloadPlatform,
 } from "@/lib/mesh-release";
@@ -212,8 +213,15 @@ export interface MeshDownloadDialogProps {
 }
 
 export function MeshDownloadDialog({ onOpenChange, open }: MeshDownloadDialogProps) {
-  const [groups] = useState<MeshDownloadGroup[]>(() => getMeshDownloadGroups());
-  const [releaseUrl] = useState(() => getMeshReleaseUrl());
+  const [groups, setGroups] = useState<MeshDownloadGroup[]>([]);
+  const [releaseUrl, setReleaseUrl] = useState(MESH_RELEASES_URL);
+
+  useEffect(() => {
+    let stale = false;
+    getMeshDownloadGroups().then((g) => { if (!stale) setGroups(g); });
+    getMeshReleaseUrl().then((u) => { if (!stale) setReleaseUrl(u); });
+    return () => { stale = true; };
+  }, []);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -231,8 +239,15 @@ export function MeshDownloadDialog({ onOpenChange, open }: MeshDownloadDialogPro
 export default function InstallLocalPage() {
   const [token, setToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [groups] = useState<MeshDownloadGroup[]>(() => getMeshDownloadGroups());
-  const [releaseUrl] = useState(() => getMeshReleaseUrl());
+  const [groups, setGroups] = useState<MeshDownloadGroup[]>([]);
+  const [releaseUrl, setReleaseUrl] = useState(MESH_RELEASES_URL);
+
+  useEffect(() => {
+    let stale = false;
+    getMeshDownloadGroups().then((g) => { if (!stale) setGroups(g); });
+    getMeshReleaseUrl().then((u) => { if (!stale) setReleaseUrl(u); });
+    return () => { stale = true; };
+  }, []);
 
   useEffect(() => {
     const parsed = parseQuery();
