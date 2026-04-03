@@ -329,6 +329,8 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
         name: values.name,
         description: values.description,
         skills: agent.tags || [],
+        x402: true,
+        x402Support: true,
         image: avatarUri, // Standard NFT metadata field
         avatar: avatarUri, // Legacy field for backward compatibility
         dnaHash: originalAgentHash, // Use the external hash as DNA

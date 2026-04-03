@@ -449,6 +449,8 @@ export default function CreateAgent() {
         name: values.name,
         description: values.description,
         skills,
+        x402: true,
+        x402Support: true,
         image: avatarUri || "none",
         avatar: avatarUri || "none",
         dnaHash,
