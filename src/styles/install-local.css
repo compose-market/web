@@ -8,14 +8,6 @@
  *
  * The root .cm-install-page sets a single viewport-responsive font-size;
  * every child dimension is expressed in em so everything scales in lock-step.
- *
- * ─── Responsive Strategy ───────────────────────────────────────
- * 1. ONE clamp() font-size on the root .cm-install-page drives ALL sizing.
- * 2. Every child uses em (relative to parent). No px, no rem inside.
- * 3. Grid auto-fits from 4-col → 2-col → 1-col via minmax.
- * 4. Global 44px min touch-target is opted out via .cm-install-panel
- *    scoping so buttons/badges inside cards don't inflate.
- * ───────────────────────────────────────────────────────────────
  */
 
 /* ═══════════════════════════════════════════════════════════════
