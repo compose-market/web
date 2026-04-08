@@ -15,7 +15,7 @@
     "@ai-sdk/react": "^3.0.144",
     "@compose-market/theme": "^0.0.90",
     "@google/genai": "^1.47.0",
-    "@hono/node-server": "^1.19.12",
+    "@hono/node-server": "^1.19.13",
     "@hookform/resolvers": "^5.2.2",
     "@huggingface/hub": "^2.11.0",
     "@huggingface/inference": "^4.13.15",
