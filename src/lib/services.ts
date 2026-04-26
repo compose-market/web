@@ -1,17 +1,20 @@
 /**
  * Backend Service API Client
- * 
+ *
  * Provides typed functions for interacting with:
  * - Connector Hub (https://services.compose.market/connector)
  * - Sandbox Service (https://services.compose.market/sandbox)
  * - Exporter Service (https://services.compose.market/exporter)
+ * - API Gateway (https://api.compose.market) — via the shared SDK singleton
  */
+
+import { sdk } from "./sdk";
 
 // Service URLs from environment or defaults
 const CONNECTOR_URL = import.meta.env.VITE_CONNECTOR_URL || "https://services.compose.market/connector";
 const EXPORTER_URL = import.meta.env.VITE_EXPORTER_URL || "https://services.compose.market/exporter";
 // API Gateway URL for x402 payment-gated routes
-const API_BASE = (import.meta.env.VITE_API_URL || "https://api.compose.market").replace(/\/+$/, "");
+const API_BASE = sdk.baseUrl;
 
 // =============================================================================
 // Types

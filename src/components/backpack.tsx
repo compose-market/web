@@ -57,8 +57,9 @@ import {
     Smartphone,
     ArrowLeft,
 } from "lucide-react";
+import { sdk } from "@/lib/sdk";
 
-const API_BASE = (import.meta.env.VITE_API_URL || "https://api.compose.market").replace(/\/+$/, "");
+const API_BASE = sdk.baseUrl;
 const SOCKET_BASE = (import.meta.env.VITE_SOCKET_URL || "wss://services.compose.market/socket").replace(/\/+$/, "");
 
 // =============================================================================

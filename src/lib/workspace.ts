@@ -1,4 +1,4 @@
-import { createPaymentFetch } from "./payment";
+import { sdk } from "./sdk";
 import {
   chunkKnowledgeText,
   embedKnowledgeChunks,
@@ -25,8 +25,6 @@ function slugify(value: string): string {
 
 export async function uploadWorkspaceFiles(files: File[], params: {
   agentWallet: string;
-  chainId: number;
-  sessionToken: string;
   userAddress: string;
 }): Promise<WorkspaceUploadResult> {
   if (files.length === 0) {
@@ -72,12 +70,10 @@ export async function uploadWorkspaceFiles(files: File[], params: {
     throw new Error("No readable workspace content found in the selected files");
   }
 
-  const fetchWithPayment = createPaymentFetch({
-    chainId: params.chainId,
-    sessionToken: params.sessionToken,
-  });
-
-  const response = await fetchWithPayment(`${RUNTIME_URL}/api/workspace/index`, {
+  // Runtime/ service expects the same Compose Key JWT contract the gateway
+  // uses. `sdk.fetch` attaches Authorization / x-session-user-address /
+  // x-chain-id automatically from the SDK singleton's current wallet context.
+  const response = await sdk.fetch(`${RUNTIME_URL}/api/workspace/index`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

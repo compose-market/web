@@ -6,7 +6,7 @@
  */
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useActiveWallet } from "thirdweb/react";
-import { createPaymentFetch } from "@/lib/payment";
+import { sdk } from "@/lib/sdk";
 import { useChain } from "@/contexts/ChainContext";
 import { useSession } from "@/hooks/use-session";
 import { Button } from "@/components/ui/button";
@@ -352,14 +352,10 @@ export function PluginTester({
                 throw new Error("Compose key session is required");
             }
 
-            const fetchWithPayment = createPaymentFetch({
-                chainId: paymentChainId,
-                sessionToken: activeComposeKeyToken,
-            });
 
             const headers: Record<string, string> = { "Content-Type": "application/json" };
 
-            const response = await fetchWithPayment(`${CONNECTOR_URL}/plugins/${encodeURIComponent(selectedPlugin)}/execute`, {
+            const response = await sdk.fetch(`${CONNECTOR_URL}/plugins/${encodeURIComponent(selectedPlugin)}/execute`, {
                 method: "POST",
                 headers,
                 body: JSON.stringify({ tool: selectedTool, args }),
@@ -464,14 +460,10 @@ export function PluginTester({
                 throw new Error("Compose key session is required");
             }
 
-            const fetchWithPayment = createPaymentFetch({
-                chainId: paymentChainId,
-                sessionToken: activeComposeKeyToken,
-            });
 
             const headers: Record<string, string> = { "Content-Type": "application/json" };
 
-            const response = await fetchWithPayment(`${CONNECTOR_URL}/mcp/servers/${encodeURIComponent(selectedMcpServer)}/call`, {
+            const response = await sdk.fetch(`${CONNECTOR_URL}/mcp/servers/${encodeURIComponent(selectedMcpServer)}/call`, {
                 method: "POST",
                 headers,
                 body: JSON.stringify({ tool: selectedTool, args }),
@@ -613,14 +605,10 @@ export function PluginTester({
                 throw new Error("Compose key session is required");
             }
 
-            const fetchWithPayment = createPaymentFetch({
-                chainId: paymentChainId,
-                sessionToken: activeComposeKeyToken,
-            });
 
             const headers: Record<string, string> = { "Content-Type": "application/json" };
 
-            const response = await fetchWithPayment(`${CONNECTOR_URL}/eliza/plugins/${encodeURIComponent(selectedElizaPlugin)}/execute`, {
+            const response = await sdk.fetch(`${CONNECTOR_URL}/eliza/plugins/${encodeURIComponent(selectedElizaPlugin)}/execute`, {
                 method: "POST",
                 headers,
                 body: JSON.stringify({ action: selectedElizaAction, params }),

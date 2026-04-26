@@ -1,26 +1,36 @@
 /**
  * API Configuration and Types
- * 
- * - Base URL configuration for API
+ *
+ * - Base URL configuration for API (sourced from the SDK singleton)
  * - OpenAI-compatible response types (from backend)
  * - SSE stream parser
  * - Response handling utilities
  */
 
+import { sdk } from "./sdk";
+
 // =============================================================================
 // API Configuration
 // =============================================================================
 
-export const API_BASE_URL = import.meta.env.VITE_API_URL
-  ? import.meta.env.VITE_API_URL.replace(/\/$/, "")
-  : "https://api.compose.market";
+/**
+ * Canonical api.compose.market base URL. Sourced from `sdk.baseUrl` so every
+ * module in the app sees the same value.
+ */
+export const API_BASE_URL: string = sdk.baseUrl;
 
 export function apiUrl(path: string): string {
   return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
 }
 
+/**
+ * Thin shim around `sdk.fetch`. Use this for authenticated api.compose.market
+ * calls that aren't yet covered by a typed `sdk.*` resource; the SDK attaches
+ * the canonical header contract and emits `budget` / `sessionInvalid` /
+ * `receipt` events on every response.
+ */
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-  return fetch(apiUrl(path), init);
+  return sdk.fetch(path, init);
 }
 
 // =============================================================================
@@ -64,6 +74,25 @@ export interface ChatMessage {
   imageUrl?: string;
   audioUrl?: string;
   videoUrl?: string;
+  partialImage?: boolean;
+  /** Progressive reasoning / thinking text emitted while the model is working. */
+  reasoning?: string;
+  /** Inline, persisted tool activity attached to this assistant message. */
+  toolCalls?: Array<{
+    id: string;
+    name: string;
+    source?: "chat" | "responses" | "agent" | "workflow";
+    summary?: string;
+    arguments?: string;
+    status: "running" | "completed" | "error";
+    error?: string;
+  }>;
+  /** Workflow / agent lifecycle breadcrumbs retained in the message bubble. */
+  progressEvents?: Array<{
+    id: string;
+    phase: "thinking" | "start" | "step" | "agent" | "progress" | "complete";
+    message: string;
+  }>;
 }
 
 /** Attached file for uploads */

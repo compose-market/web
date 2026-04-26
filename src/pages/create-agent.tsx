@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { sdk } from "@/lib/sdk";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -269,7 +270,7 @@ export default function CreateAgent() {
   }, [toast]);
 
   // Handle AI avatar generation
-  const API_URL = (import.meta.env.VITE_API_URL || "https://api.compose.market").replace(/\/+$/, "");
+  const API_URL = sdk.baseUrl;
 
   const handleGenerateAvatar = useCallback(async () => {
     // Check generation limit

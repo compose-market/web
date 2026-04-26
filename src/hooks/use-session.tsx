@@ -9,6 +9,14 @@ import {
 } from "react";
 import { usePostHog } from "@posthog/react";
 import { useActiveAccount } from "thirdweb/react";
+import {
+    ComposeError,
+    type BudgetEvent,
+    type SessionActiveEvent,
+    type SessionExpiredEvent,
+    type SessionInvalidEvent,
+} from "@compose-market/sdk";
+
 import { useChain } from "@/contexts/ChainContext";
 import { mpError, mpTrack } from "@/lib/mixpanel";
 import {
@@ -19,11 +27,7 @@ import {
     inferencePriceWei,
     thirdwebClient,
 } from "@/lib/chains";
-import { SESSION_BUDGET_EVENT, SESSION_INVALID_EVENT } from "@/lib/payment";
-import { useWs } from "./use-sse";
-
-const API_BASE = (import.meta.env.VITE_API_URL || "https://api.compose.market").replace(/\/+$/, "");
-const SESSION_STORAGE_PREFIX = "compose_session";
+import { sdk } from "@/lib/sdk";
 
 type SessionThirdwebDeps = {
     getContract: typeof import("thirdweb").getContract;
@@ -32,8 +36,6 @@ type SessionThirdwebDeps = {
     approve: typeof import("thirdweb/extensions/erc20").approve;
     balanceOf: typeof import("thirdweb/extensions/erc20").balanceOf;
 };
-
-type NumericValue = number | string;
 
 let sessionThirdwebDepsPromise: Promise<SessionThirdwebDeps> | null = null;
 
@@ -46,36 +48,6 @@ export interface SessionState {
     expiresAt: number | null;
     chainId: number | null;
     composeKeyToken: string | null;
-}
-
-interface StoredSession {
-    budgetLimit: number;
-    budgetUsed: number;
-    budgetLocked: number;
-    budgetRemaining: number;
-    expiresAt: number;
-    chainId: number;
-    userAddress: string;
-}
-
-interface ApiSessionResponse {
-    hasSession: boolean;
-    token?: string;
-    budgetLimit?: NumericValue;
-    budgetUsed?: NumericValue;
-    budgetLocked?: NumericValue;
-    budgetRemaining?: NumericValue;
-    expiresAt?: number;
-    chainId?: NumericValue;
-}
-
-interface SessionUpdate {
-    chainId?: number;
-    expiresAt?: number;
-    budgetLimit?: NumericValue;
-    budgetUsed?: NumericValue;
-    budgetLocked?: NumericValue;
-    budgetRemaining?: NumericValue;
 }
 
 interface SessionContextValue {
@@ -107,162 +79,17 @@ const defaultSession: SessionState = {
 
 const SessionContext = createContext<SessionContextValue | undefined>(undefined);
 
-function normalizeSessionUserAddress(userAddress: string): string {
-    return userAddress.trim().toLowerCase();
-}
-
-function createScopedSessionStorageKey(userAddress: string, chainId: number): string {
-    return `${SESSION_STORAGE_PREFIX}:${normalizeSessionUserAddress(userAddress)}:${chainId}`;
-}
-
-function parseSessionNumber(value: unknown, fieldName: string): number {
-    if (typeof value === "number" && Number.isFinite(value)) {
-        return value;
-    }
-
+function toNumberSafe(value: string | number | null | undefined, fallback = 0): number {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
     if (typeof value === "string" && value.trim().length > 0) {
         const parsed = Number.parseInt(value, 10);
-        if (Number.isFinite(parsed)) {
-            return parsed;
-        }
+        if (Number.isFinite(parsed)) return parsed;
     }
-
-    throw new Error(`Invalid session field: ${fieldName}`);
+    return fallback;
 }
 
-function buildSessionState(input: {
-    budgetLimit: NumericValue;
-    budgetUsed: NumericValue;
-    budgetLocked?: NumericValue;
-    budgetRemaining: NumericValue;
-    expiresAt: number | null;
-    chainId: number;
-    composeKeyToken: string | null;
-}): SessionState {
-    const budgetLimit = parseSessionNumber(input.budgetLimit, "budgetLimit");
-    const budgetUsed = parseSessionNumber(input.budgetUsed, "budgetUsed");
-    const budgetLocked = parseSessionNumber(input.budgetLocked ?? 0, "budgetLocked");
-    const budgetRemaining = parseSessionNumber(input.budgetRemaining, "budgetRemaining");
-    const expiresAt = input.expiresAt;
-
-    return {
-        isActive: (budgetRemaining > 0 || budgetLocked > 0) && (expiresAt === null || expiresAt > Date.now()),
-        budgetLimit,
-        budgetUsed,
-        budgetLocked,
-        budgetRemaining,
-        expiresAt,
-        chainId: input.chainId,
-        composeKeyToken: input.composeKeyToken,
-    };
-}
-
-function buildSessionStateFromApi(
-    data: ApiSessionResponse,
-    fallbackChainId: number,
-    currentToken: string | null,
-): SessionState {
-    return buildSessionState({
-        budgetLimit: data.budgetLimit ?? 0,
-        budgetUsed: data.budgetUsed ?? 0,
-        budgetLocked: data.budgetLocked ?? 0,
-        budgetRemaining: data.budgetRemaining ?? 0,
-        expiresAt: typeof data.expiresAt === "number" ? data.expiresAt : null,
-        chainId: data.chainId ? parseSessionNumber(data.chainId, "chainId") : fallbackChainId,
-        composeKeyToken: typeof data.token === "string" ? data.token : currentToken,
-    });
-}
-
-function mergeSessionUpdate(previous: SessionState, update: SessionUpdate, fallbackChainId: number): SessionState {
-    return buildSessionState({
-        budgetLimit: update.budgetLimit ?? previous.budgetLimit,
-        budgetUsed: update.budgetUsed ?? previous.budgetUsed,
-        budgetLocked: update.budgetLocked ?? previous.budgetLocked,
-        budgetRemaining: update.budgetRemaining ?? previous.budgetRemaining,
-        expiresAt: typeof update.expiresAt === "number" ? update.expiresAt : previous.expiresAt,
-        chainId: typeof update.chainId === "number" ? update.chainId : previous.chainId ?? fallbackChainId,
-        composeKeyToken: previous.composeKeyToken,
-    });
-}
-
-function loadStoredSession(userAddress: string, chainId: number): SessionState | null {
-    const stored = localStorage.getItem(createScopedSessionStorageKey(userAddress, chainId));
-    if (!stored) {
-        return null;
-    }
-
-    try {
-        const data = JSON.parse(stored) as StoredSession;
-        if (
-            normalizeSessionUserAddress(data.userAddress) !== normalizeSessionUserAddress(userAddress) ||
-            data.chainId !== chainId ||
-            data.expiresAt <= Date.now()
-        ) {
-            localStorage.removeItem(createScopedSessionStorageKey(userAddress, chainId));
-            return null;
-        }
-
-        return buildSessionState({
-            budgetLimit: data.budgetLimit,
-            budgetUsed: data.budgetUsed,
-            budgetLocked: data.budgetLocked,
-            budgetRemaining: data.budgetRemaining,
-            expiresAt: data.expiresAt,
-            chainId: data.chainId,
-            composeKeyToken: null,
-        });
-    } catch {
-        localStorage.removeItem(createScopedSessionStorageKey(userAddress, chainId));
-        return null;
-    }
-}
-
-function saveStoredSession(session: SessionState, userAddress: string): void {
-    if (!session.isActive || !session.chainId) {
-        return;
-    }
-
-    const value: StoredSession = {
-        budgetLimit: session.budgetLimit,
-        budgetUsed: session.budgetUsed,
-        budgetLocked: session.budgetLocked,
-        budgetRemaining: session.budgetRemaining,
-        expiresAt: session.expiresAt ?? 0,
-        chainId: session.chainId,
-        userAddress: normalizeSessionUserAddress(userAddress),
-    };
-
-    localStorage.setItem(
-        createScopedSessionStorageKey(userAddress, session.chainId),
-        JSON.stringify(value),
-    );
-}
-
-function clearStoredSession(userAddress: string, chainId: number | null | undefined): void {
-    if (!chainId) {
-        return;
-    }
-
-    localStorage.removeItem(createScopedSessionStorageKey(userAddress, chainId));
-}
-
-function getSessionName(_chainId: number): string {
+function getSessionName(): string {
     return `Session ${new Date().toISOString().slice(0, 10)}`;
-}
-
-function scheduleDeferredSessionSync(callback: () => void): () => void {
-    if (typeof window === "undefined") {
-        callback();
-        return () => undefined;
-    }
-
-    if ("requestIdleCallback" in window) {
-        const id = window.requestIdleCallback(callback, { timeout: 1_500 });
-        return () => window.cancelIdleCallback?.(id);
-    }
-
-    const timeoutId = globalThis.setTimeout(callback, 250);
-    return () => globalThis.clearTimeout(timeoutId);
 }
 
 async function loadSessionThirdwebDeps(): Promise<SessionThirdwebDeps> {
@@ -278,7 +105,6 @@ async function loadSessionThirdwebDeps(): Promise<SessionThirdwebDeps> {
             balanceOf: erc20.balanceOf,
         }));
     }
-
     return sessionThirdwebDepsPromise;
 }
 
@@ -289,282 +115,163 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const [session, setSession] = useState<SessionState>(defaultSession);
     const [isCreating, setIsCreating] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const accountRef = useRef<string | null>(null);
     const sessionRef = useRef<SessionState>(defaultSession);
-    const syncRef = useRef<{
-        account: string;
-        chainId: number;
-        promise: Promise<SessionState | null>;
-    } | null>(null);
 
-    useWs(session.isActive ? account?.address : undefined, session.chainId ?? paymentChainId);
-
+    // Keep the SDK's wallet context aligned with the Thirdweb-connected account
+    // at all times. The SDK handles token persistence via its storage adapter,
+    // so whenever `wallets.attach` runs on a fresh (address, chainId) tuple it
+    // automatically re-hydrates any persisted Compose Key JWT.
     useEffect(() => {
-        accountRef.current = account?.address ?? null;
-    }, [account?.address]);
+        if (account?.address) {
+            sdk.wallets.attach({ address: account.address, chainId: paymentChainId });
+        } else {
+            sdk.wallets.clear();
+            setSession(defaultSession);
+        }
+    }, [account?.address, paymentChainId]);
 
     useEffect(() => {
         sessionRef.current = session;
     }, [session]);
 
     useEffect(() => {
-        if (!account?.address) {
-            return;
-        }
-
-        posthog?.identify(account.address, {
-            wallet_address: account.address,
-        });
+        if (!account?.address) return;
+        posthog?.identify(account.address, { wallet_address: account.address });
     }, [account?.address, posthog]);
 
-    const clearSessionState = useCallback((chainId?: number | null) => {
-        if (account?.address) {
-            clearStoredSession(account.address, chainId ?? session.chainId ?? paymentChainId);
-        }
-        setSession(defaultSession);
-    }, [account?.address, paymentChainId, session.chainId]);
-
-    const syncSessionFromBackend = useCallback(async (options?: {
-        chainId?: number;
-        clearOnMissing?: boolean;
-    }): Promise<SessionState | null> => {
-        if (!account?.address) {
-            return null;
-        }
-
-        const requestedAddress = account.address;
-        const currentSession = sessionRef.current;
-        const targetChainId = options?.chainId ?? currentSession.chainId ?? paymentChainId;
-        const activeSync = syncRef.current;
-        if (
-            activeSync &&
-            activeSync.account === requestedAddress &&
-            activeSync.chainId === targetChainId
-        ) {
-            return activeSync.promise;
-        }
-
-        const request = (async (): Promise<SessionState | null> => {
-            try {
-                const headers: Record<string, string> = {
-                    "x-session-user-address": requestedAddress,
-                    "x-chain-id": String(targetChainId),
-                };
-
-                if (currentSession.composeKeyToken) {
-                    headers.Authorization = `Bearer ${currentSession.composeKeyToken}`;
-                }
-
-                const response = await fetch(`${API_BASE}/api/session`, { headers });
-                if (!response.ok) {
-                    return null;
-                }
-
-                const data = await response.json() as ApiSessionResponse;
-                if (!data.hasSession) {
-                    if (options?.clearOnMissing !== false && accountRef.current === requestedAddress) {
-                        clearStoredSession(requestedAddress, targetChainId);
-                        setSession(defaultSession);
-                    }
-                    return null;
-                }
-
-                const nextSession = buildSessionStateFromApi(
-                    data,
-                    targetChainId,
-                    currentSession.composeKeyToken,
-                );
-
-                if (accountRef.current === requestedAddress) {
-                    saveStoredSession(nextSession, requestedAddress);
-                    setSession(nextSession);
-                }
-
-                return nextSession;
-            } catch (fetchError) {
-                console.warn("[session] backend sync failed", fetchError);
-                return null;
-            }
-        })();
-
-        syncRef.current = {
-            account: requestedAddress,
-            chainId: targetChainId,
-            promise: request,
-        };
+    const syncSessionFromBackend = useCallback(async (): Promise<SessionState | null> => {
+        if (!account?.address) return null;
 
         try {
-            return await request;
-        } finally {
-            if (syncRef.current?.promise === request) {
-                syncRef.current = null;
+            const status = await sdk.keys.getActive();
+            if (!status.hasSession) {
+                setSession(defaultSession);
+                return null;
             }
+
+            const next: SessionState = {
+                isActive: status.status?.isActive ?? true,
+                budgetLimit: toNumberSafe(status.budgetLimit),
+                budgetUsed: toNumberSafe(status.budgetUsed),
+                budgetLocked: toNumberSafe(status.budgetLocked),
+                budgetRemaining: toNumberSafe(status.budgetRemaining),
+                expiresAt: typeof status.expiresAt === "number" ? status.expiresAt : null,
+                chainId: status.chainId ?? paymentChainId,
+                composeKeyToken: sdk.keys.currentToken(),
+            };
+            setSession(next);
+            return next;
+        } catch (syncError) {
+            console.warn("[session] sdk.keys.getActive failed", syncError);
+            return null;
         }
     }, [account?.address, paymentChainId]);
 
+    // On wallet connect: hydrate session metadata from the server (the SDK
+    // already re-attached any persisted token via its storage adapter).
     useEffect(() => {
-        if (!account?.address) {
-            setSession(defaultSession);
-            return;
-        }
-
-        const storedSession = loadStoredSession(account.address, paymentChainId);
-        setSession(storedSession ?? defaultSession);
-
-        const cancelDeferredSync = scheduleDeferredSessionSync(() => {
-            void syncSessionFromBackend({
-                chainId: paymentChainId,
-                clearOnMissing: true,
-            });
-        });
-
-        return cancelDeferredSync;
+        if (!account?.address) return;
+        void syncSessionFromBackend();
     }, [account?.address, paymentChainId, syncSessionFromBackend]);
 
     const ensureComposeKeyToken = useCallback(async (): Promise<string | null> => {
-        if (!account?.address) {
-            return null;
+        if (!account?.address) return null;
+        const cached = sdk.keys.currentToken();
+        if (cached) return cached;
+        const stateToken = sessionRef.current.composeKeyToken;
+        if (stateToken) {
+            sdk.keys.use(stateToken);
+            return stateToken;
         }
+        await syncSessionFromBackend();
+        const refreshed = sdk.keys.currentToken() ?? sessionRef.current.composeKeyToken;
+        if (refreshed) sdk.keys.use(refreshed);
+        return refreshed;
+    }, [account?.address, syncSessionFromBackend]);
 
-        const currentSession = sessionRef.current;
-        if (currentSession.isActive && currentSession.composeKeyToken) {
-            return currentSession.composeKeyToken;
-        }
-
-        const refreshedSession = await syncSessionFromBackend({
-            chainId: currentSession.chainId ?? paymentChainId,
-            clearOnMissing: false,
-        });
-
-        return refreshedSession?.composeKeyToken ?? null;
-    }, [account?.address, paymentChainId, syncSessionFromBackend]);
-
+    // Subscribe to the SDK event bus for live budget / invalid / active /
+    // expired signals. No window events — the SDK is the only emitter.
     useEffect(() => {
-        if (!account?.address || !session.isActive) {
-            return;
-        }
+        if (!account?.address) return;
 
-        function handleVisibilityChange(): void {
-            if (!document.hidden) {
-                void syncSessionFromBackend({
-                    chainId: session.chainId ?? paymentChainId,
-                    clearOnMissing: true,
-                });
-            }
-        }
+        const disposers: Array<() => void> = [];
 
-        document.addEventListener("visibilitychange", handleVisibilityChange);
-        return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
-    }, [account?.address, paymentChainId, session.chainId, session.isActive, syncSessionFromBackend]);
-
-    useEffect(() => {
-        if (!account?.address) {
-            return;
-        }
-
-        const accountAddress = account.address;
-
-        function persistLiveSessionUpdate(update: SessionUpdate): void {
+        disposers.push(sdk.events.on("budget", (event: BudgetEvent) => {
             setSession((previous) => {
-                const nextSession = mergeSessionUpdate(
-                    previous,
-                    update,
-                    update.chainId ?? previous.chainId ?? paymentChainId,
-                );
-
-                if (nextSession.isActive && nextSession.chainId) {
-                    saveStoredSession(nextSession, accountAddress);
-                } else {
-                    clearStoredSession(accountAddress, nextSession.chainId ?? previous.chainId);
-                }
-
-                return nextSession;
+                if (!previous.chainId) return previous;
+                return {
+                    ...previous,
+                    budgetLimit: toNumberSafe(event.snapshot.limitWei, previous.budgetLimit),
+                    budgetUsed: toNumberSafe(event.snapshot.usedWei, previous.budgetUsed),
+                    budgetLocked: toNumberSafe(event.snapshot.lockedWei, previous.budgetLocked),
+                    budgetRemaining: toNumberSafe(event.snapshot.remainingWei, previous.budgetRemaining),
+                    isActive: toNumberSafe(event.snapshot.remainingWei, previous.budgetRemaining) > 0
+                        || toNumberSafe(event.snapshot.lockedWei, previous.budgetLocked) > 0,
+                };
             });
-        }
+        }));
 
-        function handleBudgetEvent(event: Event): void {
-            const detail = (event as CustomEvent<{
-                budgetLimit?: number;
-                budgetRemaining?: number;
-                budgetUsed?: number;
-                budgetLocked?: number;
-            }>).detail;
+        disposers.push(sdk.events.on("sessionInvalid", (_event: SessionInvalidEvent) => {
+            // Server marked the session dead. Re-sync to read the ground truth
+            // (and pick up the new "no session" state if the server already
+            // tore it down).
+            void syncSessionFromBackend();
+        }));
 
-            if (!detail || typeof detail.budgetRemaining !== "number") {
-                return;
-            }
+        disposers.push(sdk.events.on("sessionActive", (event: SessionActiveEvent) => {
+            setSession((previous) => ({
+                ...previous,
+                isActive: true,
+                budgetLimit: toNumberSafe(event.budgetLimit, previous.budgetLimit),
+                budgetUsed: toNumberSafe(event.budgetUsed, previous.budgetUsed),
+                budgetLocked: toNumberSafe(event.budgetLocked, previous.budgetLocked),
+                budgetRemaining: toNumberSafe(event.budgetRemaining, previous.budgetRemaining),
+                expiresAt: typeof event.expiresAt === "number" ? event.expiresAt : previous.expiresAt,
+                chainId: event.chainId ?? previous.chainId,
+            }));
+        }));
 
-            persistLiveSessionUpdate(detail);
-        }
-
-        function handleInvalidEvent(): void {
-            void syncSessionFromBackend({
-                chainId: session.chainId ?? paymentChainId,
-                clearOnMissing: true,
-            });
-        }
-
-        function handleSessionActive(event: Event): void {
-            const detail = (event as CustomEvent<SessionUpdate>).detail;
-            if (!detail) {
-                return;
-            }
-
-            persistLiveSessionUpdate(detail);
-        }
-
-        function handleSessionExpired(event: Event): void {
-            const detail = (event as CustomEvent<{ chainId?: number }>).detail;
-            clearSessionState(detail?.chainId ?? session.chainId ?? paymentChainId);
-        }
-
-        window.addEventListener(SESSION_BUDGET_EVENT, handleBudgetEvent as EventListener);
-        window.addEventListener(SESSION_INVALID_EVENT, handleInvalidEvent);
-        window.addEventListener("session-active", handleSessionActive as EventListener);
-        window.addEventListener("session-expired", handleSessionExpired as EventListener);
+        disposers.push(sdk.events.on("sessionExpired", (_event: SessionExpiredEvent) => {
+            sdk.keys.clearToken();
+            setSession(defaultSession);
+        }));
 
         return () => {
-            window.removeEventListener(SESSION_BUDGET_EVENT, handleBudgetEvent as EventListener);
-            window.removeEventListener(SESSION_INVALID_EVENT, handleInvalidEvent);
-            window.removeEventListener("session-active", handleSessionActive as EventListener);
-            window.removeEventListener("session-expired", handleSessionExpired as EventListener);
+            for (const dispose of disposers) dispose();
         };
-    }, [account?.address, clearSessionState, paymentChainId, session.chainId, syncSessionFromBackend]);
+    }, [account?.address, syncSessionFromBackend]);
+
+    // Subscribe to the live `/api/session/events` SSE stream. The SDK drives
+    // reconnection; we just own the lifetime.
+    useEffect(() => {
+        if (!account?.address || !session.isActive) return;
+
+        const controller = new AbortController();
+        (async () => {
+            try {
+                const iter = sdk.session.subscribe({ signal: controller.signal });
+                for await (const _event of iter) {
+                    // Events are already dispatched onto `sdk.events`; nothing
+                    // to do here beyond keeping the iterator alive.
+                    void _event;
+                }
+            } catch (subscribeError) {
+                if (controller.signal.aborted) return;
+                console.warn("[session] /api/session/events subscription ended", subscribeError);
+            }
+        })();
+
+        return () => controller.abort();
+    }, [account?.address, session.isActive]);
 
     useEffect(() => {
-        if (!account?.address) {
-            return;
-        }
-
-        const accountAddress = account.address;
-        const activeChainId = session.chainId ?? paymentChainId;
-        const storageKey = createScopedSessionStorageKey(accountAddress, activeChainId);
-
-        function handleStorageChange(event: StorageEvent): void {
-            if (event.key !== storageKey) {
-                return;
-            }
-
-            if (!event.newValue) {
-                setSession(defaultSession);
-                return;
-            }
-
-            const storedSession = loadStoredSession(accountAddress, activeChainId);
-            if (!storedSession) {
-                setSession(defaultSession);
-                return;
-            }
-
-            setSession((previous) => ({
-                ...storedSession,
-                composeKeyToken: previous.composeKeyToken,
-            }));
-        }
-
-        window.addEventListener("storage", handleStorageChange);
-        return () => window.removeEventListener("storage", handleStorageChange);
-    }, [account?.address, paymentChainId, session.chainId]);
+        if (!account?.address || !session.isActive) return;
+        const onVisible = () => {
+            if (!document.hidden) void syncSessionFromBackend();
+        };
+        document.addEventListener("visibilitychange", onVisible);
+        return () => document.removeEventListener("visibilitychange", onVisible);
+    }, [account?.address, session.isActive, syncSessionFromBackend]);
 
     const createSession = useCallback(async (budgetUSDC: number, durationHours: number = 24) => {
         if (!account) {
@@ -577,7 +284,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
         try {
             const budgetWei = Math.floor(budgetUSDC * 1_000_000);
-            const expiresAt = Date.now() + durationHours * 60 * 60 * 1000;
             const activeChain = CHAIN_OBJECTS[paymentChainId as keyof typeof CHAIN_OBJECTS];
             const usdcAddress = USDC_ADDRESSES[paymentChainId];
             if (!activeChain || !usdcAddress) {
@@ -592,15 +298,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             });
 
             const [currentBalance, currentAllowance] = await Promise.all([
-                balanceOf({
-                    contract: usdcContract,
-                    address: account.address,
-                }),
-                allowance({
-                    contract: usdcContract,
-                    owner: account.address,
-                    spender: TREASURY_WALLET,
-                }),
+                balanceOf({ contract: usdcContract, address: account.address }),
+                allowance({ contract: usdcContract, owner: account.address, spender: TREASURY_WALLET }),
             ]);
 
             if (currentBalance < BigInt(budgetWei)) {
@@ -621,34 +320,28 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 });
             }
 
-            const response = await fetch(`${API_BASE}/api/keys`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "x-session-user-address": account.address,
-                    "x-chain-id": String(paymentChainId),
-                },
-                body: JSON.stringify({
-                    budgetLimit: budgetWei,
-                    expiresAt,
-                    chainId: paymentChainId,
-                    purpose: "session",
-                    name: getSessionName(paymentChainId),
-                }),
+            // Guarantee the SDK has the right wallet context in case the user
+            // flipped chains mid-flight between the effect above and here.
+            sdk.wallets.attach({ address: account.address, chainId: paymentChainId });
+
+            const created = await sdk.keys.create({
+                purpose: "session",
+                budgetUsd: budgetUSDC,
+                durationHours,
+                name: getSessionName(),
             });
 
-            if (!response.ok) {
-                throw new Error(await response.text());
-            }
-
-            const nextSession = buildSessionStateFromApi(
-                await response.json() as ApiSessionResponse,
-                paymentChainId,
-                null,
-            );
-
-            saveStoredSession(nextSession, account.address);
-            setSession(nextSession);
+            const next: SessionState = {
+                isActive: true,
+                budgetLimit: toNumberSafe(created.budgetLimit, budgetWei),
+                budgetUsed: toNumberSafe(created.budgetUsed),
+                budgetLocked: 0,
+                budgetRemaining: toNumberSafe(created.budgetRemaining, budgetWei),
+                expiresAt: created.expiresAt,
+                chainId: created.chainId,
+                composeKeyToken: created.token,
+            };
+            setSession(next);
 
             posthog?.capture("session_created", {
                 chain_id: paymentChainId,
@@ -664,7 +357,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
             return true;
         } catch (createError) {
-            const errorMessage = createError instanceof Error ? createError.message : "Failed to create session";
+            const errorMessage = createError instanceof Error
+                ? createError.message
+                : createError instanceof ComposeError
+                    ? createError.message
+                    : "Failed to create session";
             posthog?.captureException(
                 createError instanceof Error ? createError : new Error(String(createError)),
                 {
@@ -687,8 +384,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             budget_remaining: session.budgetRemaining,
             budget_used: session.budgetUsed,
         });
-        clearSessionState();
-    }, [clearSessionState, posthog, session.budgetRemaining, session.budgetUsed, session.chainId]);
+        sdk.keys.clearToken();
+        setSession(defaultSession);
+    }, [posthog, session.budgetRemaining, session.budgetUsed, session.chainId]);
 
     const hasBudget = useCallback((requiredWei: number = inferencePriceWei) => (
         session.isActive && session.budgetRemaining >= requiredWei

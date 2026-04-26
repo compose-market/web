@@ -5,7 +5,7 @@ import { WalletConnector, useWalletAccount } from "@/components/connector";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertTriangle, Check, Monitor, Loader2, Shield, X, Download } from "lucide-react";
-import { API_BASE_URL } from "@/lib/api";
+import { sdk } from "@/lib/sdk";
 import { resolveAgentCardCid } from "@/lib/local-install";
 import { useChain } from "@/contexts/ChainContext";
 
@@ -94,12 +94,10 @@ export default function ConnectLocalPage() {
 
     try {
       const linkedAgentWallet = agentWallet ? (agentWallet.toLowerCase() as `0x${string}`) : null;
-      const response = await fetch(`${API_BASE_URL}/api/local/link-token`, {
+      const response = await sdk.fetch(`/api/local/link-token`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-session-user-address": address,
-          "x-chain-id": String(paymentChainId),
         },
         body: JSON.stringify({
           deviceId: mode === "local-first" ? deviceId : undefined,

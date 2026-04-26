@@ -1,20 +1,19 @@
 /**
  * useModels - Central React Query hook for model fetching
- * 
- * Single source of truth for all model data in the frontend.
- * Fetches from /v1/models (canonical) with registry fallback and 6-hour cache.
- * ALL DATA FETCHED DYNAMICALLY - NO HARDCODING.
+ *
+ * Single source of truth for all model data in the frontend. Fetches from
+ * `/v1/models` via `sdk.models.list()` with a 6-hour stale cache.
  */
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useCallback } from "react";
 import {
     buildTypeCategories,
-    fetchAvailableModels,
     getModelTypeValues,
     type CatalogModel,
     type ModelCategory,
 } from "@/lib/models";
+import { sdk } from "@/lib/sdk";
 
 // =============================================================================
 // Types
@@ -49,6 +48,14 @@ const CACHE_KEY = ["models-catalog"];
 // Hook
 // =============================================================================
 
+async function fetchCatalog(): Promise<CatalogModel[]> {
+    const result = await sdk.models.list();
+    if (!Array.isArray(result.data) || result.data.length === 0) {
+        throw new Error("No models returned from /v1/models");
+    }
+    return result.data;
+}
+
 export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
     const { type, provider, search, enabled = true } = options;
     const queryClient = useQueryClient();
@@ -61,7 +68,7 @@ export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
         dataUpdatedAt,
     } = useQuery<CatalogModel[], Error>({
         queryKey: CACHE_KEY,
-        queryFn: fetchAvailableModels,
+        queryFn: fetchCatalog,
         staleTime: STALE_TIME,
         gcTime: STALE_TIME * 2, // Keep cached 12 hours
         enabled,
@@ -134,3 +141,4 @@ export function useModelsByProvider(provider: string): CatalogModel[] {
     const { filteredModels } = useModels({ provider });
     return filteredModels;
 }
+

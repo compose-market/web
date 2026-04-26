@@ -60,7 +60,7 @@ import { CHAIN_CONFIG, getUsdcContractForChain } from "@/lib/chains";
 import { useChain } from "@/contexts/ChainContext";
 import { NetworkSelector } from "@/components/ui/network-selector";
 import { API_BASE_URL } from "@/lib/api";
-import { createPaymentFetch } from "@/lib/payment";
+import { sdk } from "@/lib/sdk";
 import { useAgenticModels } from "@/hooks/use-coordinator";
 import { useSession } from "@/hooks/use-session.tsx";
 import {
@@ -182,7 +182,7 @@ function MintWorkflowDialog({
     setGeneratedBannerUrl(null);
   };
 
-  const API_URL = (import.meta.env.VITE_API_URL || "https://api.compose.market").replace(/\/+$/, "");
+  const API_URL = sdk.baseUrl;
 
   const handleGenerateBanner = async () => {
     if (bannerGenerationCount >= MAX_BANNER_GENERATIONS) {
@@ -768,12 +768,6 @@ function ComposeFlow() {
         throw new Error("Compose key session is required");
       }
 
-      // Chain-aware payment: routes to selected chain
-      const fetchWithPayment = createPaymentFetch({
-        chainId: paymentChainId,
-        sessionToken: activeComposeKeyToken,
-      });
-
       const workflowPayload = {
         workflow: {
           id: currentWorkflow.id,
@@ -800,7 +794,7 @@ function ComposeFlow() {
 
       const headers: Record<string, string> = { "Content-Type": "application/json" };
 
-      const response = await fetchWithPayment(`${API_BASE_URL}/workflow/execute`, {
+      const response = await sdk.fetch(`/workflow/execute`, {
         method: "POST", headers, body: JSON.stringify(workflowPayload),
       });
 

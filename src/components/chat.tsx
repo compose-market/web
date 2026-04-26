@@ -40,6 +40,7 @@ import {
     ChevronDown,
     ChevronUp,
     Image as ImageIcon,
+    Wrench,
 } from "lucide-react";
 import { GenerationCanvas } from "@/components/blur";
 import { useLyriaWebSocket } from "@/hooks/use-lyria";
@@ -229,9 +230,57 @@ function ChatMessageItemInner({
                     </div>
                 )}
 
-                {message.imageUrl && <img src={message.imageUrl} alt="Generated" className="rounded-lg max-w-full mb-2" />}
+                {message.imageUrl && (
+                    <img
+                        src={message.imageUrl}
+                        alt="Generated"
+                        className={cn(
+                            "rounded-lg max-w-full mb-2 transition-all duration-300",
+                            message.partialImage ? "blur-md saturate-75 scale-[1.01]" : "blur-0 saturate-100 scale-100",
+                        )}
+                    />
+                )}
                 {message.audioUrl && <audio controls className="w-full mb-2"><source src={message.audioUrl} /></audio>}
                 {message.videoUrl && <video controls className="rounded-lg max-w-full mb-2"><source src={message.videoUrl} /></video>}
+
+                {!!message.reasoning && (
+                    <details className="mb-2 rounded-md border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs">
+                        <summary className="cursor-pointer font-mono text-amber-300">Thinking</summary>
+                        <pre className="mt-2 whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-amber-100/80">{message.reasoning}</pre>
+                    </details>
+                )}
+
+                {!!message.progressEvents?.length && (
+                    <div className="mb-2 space-y-1 rounded-md border border-cyan-500/20 bg-cyan-500/5 px-3 py-2">
+                        {message.progressEvents.map((event) => (
+                            <div key={event.id} className="text-[11px] font-mono text-cyan-200/85">
+                                <span className="mr-2 uppercase tracking-wide text-cyan-400/70">{event.phase}</span>
+                                <span>{event.message}</span>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                {!!message.toolCalls?.length && (
+                    <div className="mb-2 flex flex-wrap gap-1.5">
+                        {message.toolCalls.map((tool) => (
+                            <span
+                                key={tool.id}
+                                className={cn(
+                                    "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-mono",
+                                    tool.status === "running" && "border-cyan-500/30 bg-cyan-500/10 text-cyan-200",
+                                    tool.status === "completed" && "border-emerald-500/30 bg-emerald-500/10 text-emerald-200",
+                                    tool.status === "error" && "border-red-500/30 bg-red-500/10 text-red-200",
+                                )}
+                                title={tool.error ? `${tool.name}: ${tool.error}` : (tool.summary || tool.arguments || tool.name)}
+                            >
+                                <Wrench className="h-2.5 w-2.5 opacity-70" />
+                                <span>{tool.name}</span>
+                                <span className="opacity-70">{tool.status}</span>
+                            </span>
+                        ))}
+                    </div>
+                )}
 
                 {message.type === "embedding" ? (
                     <EmbeddingBlock content={message.content || "..."} />

@@ -1,11 +1,13 @@
 /**
  * Trigger & Hook Library
- * 
+ *
  * Universal, reusable types and API functions for workflow triggers and hooks.
- * Follows the same pattern as models.ts for consistency.
+ * All api.compose.market requests go through the shared SDK singleton.
  */
 
-const API_BASE = (import.meta.env.VITE_API_URL || "https://api.compose.market").replace(/\/+$/, "");
+import { sdk } from "./sdk";
+
+const API_BASE = sdk.baseUrl;
 
 // =============================================================================
 // Types (mirrored from backend for frontend use)

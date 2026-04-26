@@ -150,8 +150,8 @@ export function MeshDownloadPanel({
                 <span className="cm-shell-page-header__eyebrow !text-[0.78em]">Install Token Ready</span>
               </div>
               <p className="text-[0.85em] text-muted-foreground leading-relaxed">
-                Your desktop handoff is already prepared. Install Mesh if needed,
-                then open the local app with this token.
+                Your agent is ready. Install the Mesh app,
+                or open it directly, and your agent will be there.
               </p>
             </div>
             <button

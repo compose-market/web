@@ -14,20 +14,8 @@ import { ShellButton } from "@compose-market/theme/shell";
 import { useSession } from "@/hooks/use-session.tsx";
 import { useWalletAccount } from "@/components/connector";
 import { toast } from "sonner";
-import { API_BASE_URL } from "@/lib/api";
-
-interface ComposeKeyRecord {
-  keyId: string;
-  purpose: "session" | "api";
-  budgetLimit: number;
-  budgetUsed: number;
-  budgetRemaining: number;
-  createdAt: number;
-  expiresAt: number;
-  revokedAt?: number;
-  name?: string;
-  lastUsedAt?: number;
-}
+import { sdk } from "@/lib/sdk";
+import type { ComposeKeyRecord } from "@compose-market/sdk";
 
 interface SessionBudgetDialogProps {
   open?: boolean;
@@ -207,29 +195,15 @@ function SessionManageDialog({ open, onOpenChange }: SessionManageDialogProps) {
       if (!composeKeyToken) {
         throw new Error("Compose Key token unavailable");
       }
-      const response = await fetch(`${API_BASE_URL}/api/keys`, {
-        headers: {
-          Authorization: `Bearer ${composeKeyToken}`,
-          "x-session-user-address": account.address,
-          "x-chain-id": String(session.chainId || 0),
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to fetch sessions");
-      }
-
-      const data = await response.json();
-      setSessions(
-        ((data.keys || []) as ComposeKeyRecord[]).filter((key) => key.purpose === "api" && isActiveKey(key)),
-      );
+      const keys = await sdk.keys.list();
+      setSessions(keys.filter((key) => key.purpose === "api" && isActiveKey(key)));
     } catch (error) {
       console.error("Failed to fetch sessions:", error);
       toast.error("Failed to fetch sessions");
     } finally {
       setLoading(false);
     }
-  }, [account?.address, ensureComposeKeyToken, session.chainId]);
+  }, [account?.address, ensureComposeKeyToken]);
 
   useEffect(() => {
     if (open) {
@@ -247,19 +221,7 @@ function SessionManageDialog({ open, onOpenChange }: SessionManageDialogProps) {
       if (!composeKeyToken) {
         throw new Error("Compose Key token unavailable");
       }
-      const response = await fetch(`${API_BASE_URL}/api/keys/${keyId}`, {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${composeKeyToken}`,
-          "x-session-user-address": account.address,
-          "x-chain-id": String(session.chainId || 0),
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to revoke session");
-      }
-
+      await sdk.keys.revoke(keyId);
       toast.success("Session revoked");
       void fetchSessions();
     } catch (error) {
@@ -361,35 +323,31 @@ function ComposeKeyDialog({ open, onOpenChange }: ComposeKeyDialogProps) {
       if (!composeKeyToken) {
         throw new Error("Compose Key token unavailable");
       }
-      const response = await fetch(`${API_BASE_URL}/api/keys`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${composeKeyToken}`,
-          "x-session-user-address": account.address,
-          "x-chain-id": String(session.chainId || 0),
-        },
-        body: JSON.stringify({
-          budgetLimit: session.budgetRemaining,
-          expiresAt: session.expiresAt,
-          name: keyName,
-          chainId: session.chainId,
-          purpose: "api",
-        }),
+
+      // Preserve the caller's session token: sdk.keys.create stores the newly
+      // minted API-key token as the SDK's "current" token, which would
+      // silently swap the active session for an API key. Re-assert the
+      // session token after creation so downstream calls keep using it.
+      const previousToken = sdk.keys.currentToken();
+
+      const created = await sdk.keys.create({
+        purpose: "api",
+        budgetWei: session.budgetRemaining,
+        expiresAt: session.expiresAt ?? Date.now() + 24 * 60 * 60 * 1000,
+        chainId: session.chainId ?? undefined,
+        name: keyName,
       });
 
-      if (!response.ok) {
-        const error = await response.json();
-        toast.error(error.error || "Failed to generate key");
-        return;
+      if (previousToken && previousToken !== created.token) {
+        sdk.keys.use(previousToken);
       }
 
-      const data = await response.json();
-      setGeneratedKey(data.token);
+      setGeneratedKey(created.token);
       toast.success("API Key generated!");
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to generate API key";
       console.error(error);
-      toast.error("Failed to generate API key");
+      toast.error(message);
     } finally {
       setIsGenerating(false);
     }

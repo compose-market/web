@@ -12,7 +12,7 @@ import { usePostHog } from "@posthog/react";
 import { mpTrack, mpError } from "@/lib/mixpanel";
 import { useParams } from "wouter";
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
-import { createPaymentFetch } from "@/lib/payment";
+import { sdk } from "@/lib/sdk";
 import { useChain } from "@/contexts/ChainContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -24,7 +24,10 @@ import { SessionBudgetDialog } from "@/components/session";
 import { useOnchainWorkflowByIdentifier } from "@/hooks/use-onchain";
 import { MultimodalCanvas, type ChatMessage } from "@/components/chat";
 import { useChat } from "@/hooks/use-chat";
-import { API_BASE_URL, buildAttachmentPart, parseEventStream } from "@/lib/api";
+import { useComposeStream } from "@/hooks/use-stream";
+import { buildAttachmentPart } from "@/lib/api";
+import { CostReceiptIndicator } from "@/components/receipt-indicator";
+import { ToolTimeline } from "@/components/tool-timeline";
 import { WorkflowCard, WorkflowCardSkeleton } from "@/components/workflow-card";
 import {
     Sheet,
@@ -40,7 +43,6 @@ import {
     StopCircle,
 } from "lucide-react";
 
-const API_URL = API_BASE_URL;
 
 export default function ManowarPage() {
     const posthog = usePostHog();
@@ -66,14 +68,18 @@ export default function ManowarPage() {
         onError: (err) => setChatError(err),
     });
     const { messages, setMessages, scrollContainerRef, messagesEndRef,
-        streamedTextRef, currentAssistantIdRef, handleJsonResponse,
-        updateAssistantMessage, scheduleStreamUpdate, flushStreamContent,
-        activityState, clearActivityState, setActivityPhase, startToolActivity, finishToolActivity,
+        activityState,
         // Attachments
         attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, clearFiles,
         // Recording
         isRecording, recordingSupported, startRecording, stopRecording,
     } = chat;
+
+    // Shared SDK streaming dispatcher for every workflow run.
+    const streamer = useComposeStream(chat, {
+        onError: (e) => setChatError(e.message),
+    });
+
     const [inputValue, setInputValue] = useState("");
     const [sending, setSending] = useState(false);
     const [chatError, setChatError] = useState<string | null>(null);
@@ -144,8 +150,6 @@ export default function ManowarPage() {
         setSending(true);
         setChatError(null);
         setChatStatus("paying");
-        clearActivityState();
-        setActivityPhase("thinking", "Preparing workflow...");
         abortControllerRef.current = new AbortController();
 
         posthog?.capture("workflow_executed", {
@@ -167,328 +171,64 @@ export default function ManowarPage() {
         const composeRunId = crypto.randomUUID();
         const runStorageKey = `workflow-active-run:${workflowWallet}`;
         let resolvedThreadId: string | null = null;
-        let replayEventIndex = 0;
+        const replayEventIndex = 0;
 
         try {
-            setChatStatus("waiting");
+            setChatStatus("streaming");
+            abortControllerRef.current = new AbortController();
 
-            // Chain-aware payment: routes to selected chain
-            // When session is active, uses session bypass for instant <100ms latency
-            const fetchWithPayment = createPaymentFetch({
-                chainId: paymentChainId,
-                sessionToken: activeComposeKeyToken,
-            });
+            // Persistent thread ID scoped to user + workflow
+            const userAddress = wallet.getAccount()?.address ?? account.address;
+            const threadKey = `workflow-thread-${userAddress}-${workflowWallet}`;
+            let threadId = sessionStorage.getItem(threadKey);
+            if (!threadId) {
+                threadId = `workflow-${workflowWallet}-user-${userAddress}-${crypto.randomUUID()}`;
+                sessionStorage.setItem(threadKey, threadId);
+            }
+            resolvedThreadId = threadId;
+            setActiveThreadId(threadId);
+
+            sessionStorage.setItem(runStorageKey, JSON.stringify({
+                runId: composeRunId,
+                threadId,
+                lastEventIndex: replayEventIndex,
+                startedAt: Date.now(),
+            }));
 
             const attachmentPart = buildAttachmentPart(attached);
-
-            const makeChatRequest = async (): Promise<Response> => {
-                // Persistent thread ID scoped to user and workflow workflow
-                const userAddress = wallet.getAccount()?.address;
-                const threadKey = `workflow-thread-${userAddress}-${workflowWallet}`;
-                let threadId = sessionStorage.getItem(threadKey);
-                if (!threadId) {
-                    threadId = `workflow-${workflowWallet}-user-${userAddress}-${crypto.randomUUID()}`;
-                    sessionStorage.setItem(threadKey, threadId);
-                }
-                resolvedThreadId = threadId;
-                setActiveThreadId(threadId);
-
-                const headers: Record<string, string> = {
-                    "Content-Type": "application/json",
-                };
-
-                // Build request body with Pinata URL for attachments
-                const requestBody: Record<string, unknown> = {
-                    message: userMessage.content,
-                    threadId: threadId,
-                    composeRunId,
-                    lastEventIndex: replayEventIndex,
-                    continuous: continuousEnabled,
-                };
-                sessionStorage.setItem(runStorageKey, JSON.stringify({
-                    runId: composeRunId,
-                    threadId,
-                    lastEventIndex: replayEventIndex,
-                    startedAt: Date.now(),
-                }));
-
-                if (attachmentPart) {
-                    requestBody.attachment = attachmentPart;
-                }
-
-                // Use the /workflow/:id/chat endpoint - prefer wallet address for routing
-                return fetchWithPayment(`${API_URL}/workflow/${workflowWallet}/chat`, {
-                    method: "POST",
-                    headers,
-                    body: JSON.stringify(requestBody),
-                    signal: abortControllerRef.current?.signal,
-                });
-            };
-
-            const response = await makeChatRequest();
-
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.error || `Execution failed: ${response.status}`);
-            }
-
-            // Handle streaming response - same pattern as agent.tsx
-            const contentType = response.headers.get("content-type") || "";
-
-            if (contentType.includes("text/event-stream") || contentType.includes("text/plain")) {
-                const reader = response.body?.getReader();
-                if (!reader) throw new Error("No response body");
-
-                setChatStatus("streaming");
-                let finalOutput = "";
-                let handledStructuredResult = false;
-
-                currentAssistantIdRef.current = assistantId;
-                streamedTextRef.current = "";
-
-                const persistReplayCursor = () => {
-                    replayEventIndex += 1;
-                    if (resolvedThreadId) {
-                        sessionStorage.setItem(runStorageKey, JSON.stringify({
-                            runId: composeRunId,
-                            threadId: resolvedThreadId,
-                            lastEventIndex: replayEventIndex,
-                            startedAt: Date.now(),
-                        }));
-                    }
-                };
-
-                for await (const block of parseEventStream(reader)) {
-                    const dataPayload = block.data.trim();
-                    if (!dataPayload || dataPayload === "[DONE]") {
-                        continue;
-                    }
-
-                    let data: Record<string, unknown>;
-                    try {
-                        data = JSON.parse(dataPayload) as Record<string, unknown>;
-                    } catch {
-                        continue;
-                    }
-
-                    if (block.event === "start") {
-                        const message = typeof data.message === "string" ? data.message : "Starting workflow...";
-                        streamedTextRef.current = message;
-                        scheduleStreamUpdate(message);
-                        setActivityPhase("thinking", message);
-                        persistReplayCursor();
-                        continue;
-                    }
-
-                    if (block.event === "step" || block.event === "agent") {
-                        const message = typeof data.message === "string"
-                            ? data.message
-                            : `Processing ${String(data.agentName || data.stepName || "workflow step")}...`;
-                        streamedTextRef.current = message;
-                        scheduleStreamUpdate(message);
-                        setActivityPhase("thinking", message);
-                        persistReplayCursor();
-                        continue;
-                    }
-
-                    if (block.event === "progress") {
-                        const message = typeof data.message === "string"
-                            ? data.message
-                            : streamedTextRef.current || "Running workflow...";
-                        streamedTextRef.current = message;
-                        scheduleStreamUpdate(message);
-                        setActivityPhase("thinking", message);
-                        persistReplayCursor();
-                        continue;
-                    }
-
-                    if (block.event === "tool_start") {
-                        const toolName = typeof data.toolName === "string" ? data.toolName : "tool";
-                        const summary = typeof data.content === "string"
-                            ? data.content
-                            : typeof data.message === "string"
-                                ? data.message
-                                : undefined;
-                        if (summary) {
-                            streamedTextRef.current = summary;
-                            scheduleStreamUpdate(summary);
-                        }
-                        startToolActivity(toolName, summary);
-                        setActivityPhase("tool", `Using ${toolName}...`);
-                        persistReplayCursor();
-                        continue;
-                    }
-
-                    if (block.event === "tool_end") {
-                        const toolName = typeof data.toolName === "string" ? data.toolName : "tool";
-                        const summary = typeof data.message === "string" ? data.message : undefined;
-                        const failed = typeof data.error === "string" && data.error.length > 0;
-                        finishToolActivity(toolName, summary, failed);
-                        setActivityPhase(failed ? "error" : "thinking", failed ? (data.error as string) : `Processed ${toolName}`);
-                        persistReplayCursor();
-                        continue;
-                    }
-
-                    if (block.event === "result") {
-                        finalOutput = typeof data.output === "string"
-                            ? data.output
-                            : typeof data.output === "object" && data.output !== null
-                                ? JSON.stringify(data.output)
-                                : "";
-
-                        try {
-                            const parsed = typeof finalOutput === "string" ? JSON.parse(finalOutput) : finalOutput;
-                            if (parsed && typeof parsed === "object" && "type" in parsed && ("url" in parsed || "data" in parsed || "base64" in parsed)) {
-                                handledStructuredResult = true;
-                                handleJsonResponse(assistantId, parsed);
-                                setActivityPhase("streaming", `Generated ${String((parsed as { type?: unknown }).type || "output")}...`);
-                            } else if (parsed && typeof parsed === "object" && (parsed as { success?: unknown; error?: unknown }).success === false && typeof (parsed as { error?: unknown }).error === "string") {
-                                const errorText = `Error: ${String((parsed as { error: string }).error)}`;
-                                streamedTextRef.current = errorText;
-                                scheduleStreamUpdate(errorText);
-                                setActivityPhase("error", errorText);
-                            } else {
-                                streamedTextRef.current = finalOutput;
-                                scheduleStreamUpdate(finalOutput);
-                                setActivityPhase("streaming", "Finalizing response...");
-                            }
-                        } catch {
-                            streamedTextRef.current = finalOutput;
-                            scheduleStreamUpdate(finalOutput);
-                            setActivityPhase("streaming", "Finalizing response...");
-                        }
-
-                        persistReplayCursor();
-                        continue;
-                    }
-
-                    if (block.event === "error") {
-                        const errorText = typeof data.error === "string" ? data.error : "Unknown workflow error";
-                        streamedTextRef.current = `Error: ${errorText}`;
-                        scheduleStreamUpdate(streamedTextRef.current);
-                        setActivityPhase("error", errorText);
-                        persistReplayCursor();
-                        continue;
-                    }
-
-                    if (block.event === "complete") {
-                        const message = typeof data.message === "string" ? data.message : "Workflow complete!";
-                        streamedTextRef.current = message;
-                        scheduleStreamUpdate(message);
-                        setActivityPhase("thinking", message);
-                        persistReplayCursor();
-                        continue;
-                    }
-
-                    if (block.event === "done") {
-                        clearActivityState();
-                        persistReplayCursor();
-                        continue;
-                    }
-                }
-
-                // Final flush and update
-                flushStreamContent();
-
-                if (!handledStructuredResult) {
-                    updateAssistantMessage(assistantId, { content: finalOutput || streamedTextRef.current || "Workflow completed" });
-                }
-
-                if (!finalOutput && !streamedTextRef.current) {
-                    updateAssistantMessage(assistantId, { content: "No response received" });
-                }
-                sessionStorage.removeItem(runStorageKey);
-                clearActivityState();
-            } else {
-                // Non-streaming response (image/audio/video/json) - use unified handler
-                const { parseMultimodalResponse } = await import("@/lib/multimodal");
-                const result = await parseMultimodalResponse(response, {
-                    uploadToPinata: true,
-                    conversationId: `workflow-${workflowWallet}`,
-                    // Handle async video polling
-                    onVideoPolling: {
-                        onProgress: (status, progress) => {
-                            setMessages(prev =>
-                                prev.map(m => m.id === assistantId ? {
-                                    ...m,
-                                    content: `Video generating... (${status}${progress ? ` - ${progress}%` : ""})`,
-                                } : m)
-                            );
-                        },
-                        onComplete: (url) => {
-                            setMessages(prev =>
-                                prev.map(m => m.id === assistantId ? {
-                                    ...m,
-                                    content: "Video generated:",
-                                    type: "video",
-                                    videoUrl: url,
-                                } : m)
-                            );
-                        },
-                        onError: (error) => {
-                            setMessages(prev =>
-                                prev.map(m => m.id === assistantId ? {
-                                    ...m,
-                                    content: `Error: ${error}`,
-                                } : m)
-                            );
-                        },
-                    },
-                });
-
-                // Handle polling - don't update if polling in progress
-                if (result.polling) {
-                    console.log(`[workflow] Video job submitted, polling: ${result.jobId}`);
-                    return;
-                }
-
-                if (result.success) {
-                    setMessages(prev =>
-                        prev.map(m => m.id === assistantId ? {
-                            ...m,
-                            content: result.content || `Generated ${result.type}:`,
-                            type: result.type,
-                            imageUrl: result.type === "image" ? result.url : undefined,
-                            audioUrl: result.type === "audio" ? result.url : undefined,
-                            videoUrl: result.type === "video" ? result.url : undefined,
-                        } : m)
-                    );
-                    sessionStorage.removeItem(runStorageKey);
-                } else {
-                    throw new Error(result.error || "Request failed");
-                }
-            }
+            await streamer.runWorkflow({
+                workflowWallet,
+                message: userMessage.content,
+                threadId,
+                userAddress,
+                composeRunId,
+                continuous: continuousEnabled,
+                lastEventIndex: replayEventIndex,
+                ...(attachmentPart ? { attachment: attachmentPart } : {}),
+                assistantId,
+                signal: abortControllerRef.current.signal,
+            });
+            sessionStorage.removeItem(runStorageKey);
+            void resolvedThreadId;
         } catch (err) {
-            // Silent return for user-initiated abort via stop button
             if (err instanceof DOMException && err.name === "AbortError") {
-                clearActivityState();
                 return;
             }
-
-            let errorMsg = err instanceof Error ? err.message : "Unknown error";
-
-            // Note: Recovery loops removed - rely on backend Temporal state persistence
-            // Frontend simply displays errors immediately for better UX
-            // Backend handles state via Temporal workflows (resumable via run state endpoint)
-
+            const errorMsg = err instanceof Error ? err.message : String(err);
             setChatError(errorMsg);
-            setActivityPhase("error", errorMsg);
             mpError("workflow_execution", errorMsg, { workflow_wallet: workflowWallet });
-            setMessages(prev =>
-                prev.map(m => m.id === assistantId ? { ...m, content: `Error: ${errorMsg}` } : m)
-            );
         } finally {
             setSending(false);
             setChatStatus("idle");
             abortControllerRef.current = null;
         }
-    }, [inputValue, sending, workflow, workflowWallet, wallet, account, toast, attachedFiles, clearFiles, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, setShowSessionDialog, continuousEnabled, scheduleStreamUpdate, flushStreamContent, updateAssistantMessage, handleJsonResponse, posthog, clearActivityState, setActivityPhase, startToolActivity, finishToolActivity]);
+    }, [inputValue, sending, workflow, workflowWallet, wallet, account, toast, attachedFiles, clearFiles, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, setShowSessionDialog, continuousEnabled, streamer, posthog]);
 
     const handleStopExecution = useCallback(async () => {
         if (!workflow?.walletAddress || !activeThreadId) return;
         try {
             abortControllerRef.current?.abort();
-            await fetch(`${API_URL}/workflow/${workflow.walletAddress}/stop`, {
+            await fetch(`${sdk.baseUrl}/workflow/${workflow.walletAddress}/stop`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ threadId: activeThreadId }),
@@ -498,7 +238,7 @@ export default function ManowarPage() {
                 workflow_title: workflow.title,
                 thread_id: activeThreadId,
             });
-            clearActivityState();
+            chat.clearActivityState();
             setChatStatus("idle");
             setSending(false);
             toast({ title: "Stopped", description: "Workflow execution stopped" });
@@ -562,6 +302,8 @@ export default function ManowarPage() {
                 </Button>
 
                 <div className="flex items-center gap-3">
+                    <ToolTimeline />
+                    <CostReceiptIndicator />
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         <Checkbox
                             id="continuous-execution"

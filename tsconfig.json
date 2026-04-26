@@ -27,10 +27,8 @@
     "jsx": "react-jsx",
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "downlevelIteration": true,
     "allowImportingTsExtensions": true,
     "moduleResolution": "bundler",
-    "baseUrl": ".",
     "types": [
       "node",
       "vite/client"

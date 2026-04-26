@@ -13,7 +13,7 @@ import { mpTrack, mpError } from "@/lib/mixpanel";
 import { useParams } from "wouter";
 import { Link } from "wouter";
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
-import { createPaymentFetch } from "@/lib/payment";
+import { sdk } from "@/lib/sdk";
 import { uploadWorkspaceFiles } from "@/lib/workspace";
 import { useChain } from "@/contexts/ChainContext";
 import { Button } from "@/components/ui/button";
@@ -28,7 +28,10 @@ import { SessionBudgetDialog } from "@/components/session";
 import { useOnchainAgentByIdentifier } from "@/hooks/use-onchain";
 import { MultimodalCanvas, type ChatMessage } from "@/components/chat";
 import { useChat } from "@/hooks/use-chat";
-import { API_BASE_URL, buildAttachmentPart, parseEventStream } from "@/lib/api";
+import { useComposeStream } from "@/hooks/use-stream";
+import { buildAttachmentPart } from "@/lib/api";
+import { CostReceiptIndicator } from "@/components/receipt-indicator";
+import { ToolTimeline } from "@/components/tool-timeline";
 import {
   getCachedBackpackPermissions,
   grantBackpackPermission,
@@ -59,8 +62,6 @@ import {
   IdCard,
 } from "lucide-react";
 
-const API_URL = API_BASE_URL;
-
 export default function AgentDetailPage() {
   const posthog = usePostHog();
   const params = useParams<{ id: string }>();
@@ -82,14 +83,19 @@ export default function AgentDetailPage() {
     onError: (err) => setChatError(err),
   });
   const { messages, setMessages, clearMessages, scrollContainerRef, messagesEndRef,
-    streamedTextRef, currentAssistantIdRef, updateAssistantMessage,
-    scheduleStreamUpdate, flushStreamContent,
-    activityState, clearActivityState, setActivityPhase, startToolActivity, finishToolActivity,
+    activityState,
     // Attachments
     attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, clearFiles,
     // Recording
     isRecording, recordingSupported, startRecording, stopRecording,
   } = chat;
+
+  // Shared SDK streaming dispatcher. All rich SSE events (text, thinking,
+  // tool-use, receipts, budget, sessionInvalid) are dispatched into the
+  // chat activity sink + the sdk.events bus — nothing handled per-page.
+  const streamer = useComposeStream(chat, {
+    onError: (e) => setChatError(e.message),
+  });
   const [inputValue, setInputValue] = useState("");
   const [sending, setSending] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
@@ -223,8 +229,6 @@ export default function AgentDetailPage() {
     try {
       const result = await uploadWorkspaceFiles(workspaceFiles, {
         agentWallet,
-        chainId: paymentChainId,
-        sessionToken: activeComposeKeyToken,
         userAddress: account.address,
       });
 
@@ -302,8 +306,6 @@ export default function AgentDetailPage() {
     setSending(true);
     setChatError(null);
     setChatStatus("paying");
-    clearActivityState();
-    setActivityPhase("thinking", "Preparing request...");
 
     posthog?.capture("agent_chat_sent", {
       agent_wallet: agentWallet,
@@ -325,325 +327,38 @@ export default function AgentDetailPage() {
     const runStorageKey = `agent-active-run:${agentWallet || "unknown"}`;
 
     try {
-      if (!agent) {
-        throw new Error("Agent not loaded");
-      }
-
-      setChatStatus("waiting");
-
-      // Chain-aware payment: routes to selected chain
-      // When session is active, uses session bypass for instant <100ms latency
-      const fetchWithPayment = createPaymentFetch({
-        chainId: paymentChainId,
-        sessionToken: activeComposeKeyToken,
-      });
+      if (!agent) throw new Error("Agent not loaded");
+      setChatStatus("streaming");
+      const threadId = ensureConversationThread();
+      sessionStorage.setItem(runStorageKey, JSON.stringify({
+        runId: composeRunId,
+        threadId,
+        startedAt: Date.now(),
+      }));
 
       const attachmentPart = buildAttachmentPart(attached);
-
-      const makeChatRequest = async (): Promise<Response> => {
-        const threadId = ensureConversationThread();
-
-        const headers: Record<string, string> = {
-          "Content-Type": "application/json",
-          "x-compose-run-id": composeRunId,
-        };
-
-        const requestBody: Record<string, unknown> = {
-          message: userMessage.content,
-          threadId: threadId,
-          composeRunId,
-          userAddress: backpackUserId,
-          cloudPermissions: getCachedBackpackPermissions(),
-        };
-        sessionStorage.setItem(runStorageKey, JSON.stringify({
-          runId: composeRunId,
-          threadId,
-          startedAt: Date.now(),
-        }));
-
-        if (attachmentPart) {
-          requestBody.attachment = attachmentPart;
-        }
-
-        return fetchWithPayment(`${API_URL}/agent/${agentWallet}/stream`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(requestBody),
-        });
-      };
-
-      let response = await makeChatRequest();
-
-      // If runtime is still warming, retry once after bounded delay
-      if (response.status === 503) {
-        const warmupPayload = await response.clone().json().catch(() => null) as
-          | { code?: string; retryAfterMs?: number }
-          | null;
-        if (warmupPayload?.code === "AGENT_WARMING") {
-          const retryAfterMs = Math.min(Math.max(warmupPayload.retryAfterMs || 2000, 1000), 10000);
-          await new Promise((resolve) => setTimeout(resolve, retryAfterMs));
-          response = await makeChatRequest();
-        }
-      }
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Chat failed: ${response.status}`);
-      }
-
-      // Handle streaming response - same pattern as playground.tsx
-      const contentType = response.headers.get("content-type") || "";
-
-      if (contentType.includes("text/event-stream") || contentType.includes("text/plain")) {
-        const reader = response.body?.getReader();
-        if (!reader) throw new Error("No response body");
-
-        setChatStatus("streaming");
-        let fullResponse = "";
-        const cancelStream = async () => {
-          try {
-            await reader.cancel();
-          } catch {
-            // Ignore reader cancellation failures; the request is already terminal.
-          }
-        };
-
-        // Store assistant ID for RAF flush callback
-        currentAssistantIdRef.current = assistantId;
-        streamedTextRef.current = "";
-
-        setActivityPhase("thinking", "Thinking...");
-
-        for await (const block of parseEventStream(reader)) {
-          const data = block.data.trim();
-          if (!data || data === "[DONE]") {
-            continue;
-          }
-
-          let payload: Record<string, unknown> | null = null;
-          try {
-            payload = JSON.parse(data) as Record<string, unknown>;
-          } catch {
-            fullResponse += data;
-            scheduleStreamUpdate(fullResponse);
-            setActivityPhase("streaming", "Responding...");
-            continue;
-          }
-
-          const delta = payload.choices as Array<{ delta?: { content?: string } }> | undefined;
-          const streamedChunk = typeof delta?.[0]?.delta?.content === "string" ? delta[0].delta.content : null;
-          if (streamedChunk) {
-            fullResponse += streamedChunk;
-            scheduleStreamUpdate(fullResponse);
-            setActivityPhase("streaming", "Responding...");
-            continue;
-          }
-
-          if (payload.type === "thinking_start") {
-            setActivityPhase("thinking", typeof payload.message === "string" ? payload.message : "Thinking...");
-            continue;
-          }
-
-          if (payload.type === "thinking_end") {
-            setActivityPhase("streaming", "Responding...");
-            continue;
-          }
-
-          if (payload.type === "tool_start") {
-            const summary = typeof payload.content === "string" ? payload.content : undefined;
-            if (summary) {
-              fullResponse += summary;
-              scheduleStreamUpdate(fullResponse);
-            }
-            const toolName = typeof payload.toolName === "string" ? payload.toolName : "tool";
-            startToolActivity(toolName, summary);
-            setActivityPhase("tool", `Using ${toolName}...`);
-            continue;
-          }
-
-          if (payload.type === "tool_end") {
-            const toolName = typeof payload.toolName === "string" ? payload.toolName : "tool";
-            finishToolActivity(toolName);
-            setActivityPhase("thinking", `Processing ${toolName} result...`);
-            continue;
-          }
-
-          if (payload.type === "error") {
-            const errorText = typeof payload.content === "string"
-              ? payload.content
-              : typeof payload.error === "string"
-                ? payload.error
-                : "Agent stream failed";
-            setActivityPhase("error", errorText);
-            fullResponse += errorText;
-            scheduleStreamUpdate(fullResponse);
-            await cancelStream();
-            break;
-          }
-
-          if (payload.type === "done") {
-            clearActivityState();
-            await cancelStream();
-            break;
-          }
-
-          if (typeof payload.content === "string") {
-            fullResponse += payload.content;
-            scheduleStreamUpdate(fullResponse);
-            setActivityPhase("streaming", "Responding...");
-          } else if (typeof payload.text === "string") {
-            fullResponse += payload.text;
-            scheduleStreamUpdate(fullResponse);
-            setActivityPhase("streaming", "Responding...");
-          }
-        }
-
-        flushStreamContent();
-        updateAssistantMessage(assistantId, { content: fullResponse });
-
-        if (!fullResponse) {
-          updateAssistantMessage(assistantId, { content: "No response received" });
-        }
-        clearActivityState();
-      } else {
-        // Non-streaming response (image/audio/video/json) - use unified handler
-        const { parseMultimodalResponse } = await import("@/lib/multimodal");
-        const result = await parseMultimodalResponse(response, {
-          uploadToPinata: true,
-          conversationId: `agent-${agentWallet}`,
-          // Handle async video polling
-          onVideoPolling: {
-            onProgress: (status, progress) => {
-              setMessages(prev =>
-                prev.map(m => m.id === assistantId ? {
-                  ...m,
-                  content: `Video generating... (${status}${progress ? ` - ${progress}%` : ""})`,
-                } : m)
-              );
-            },
-            onComplete: (url) => {
-              setMessages(prev =>
-                prev.map(m => m.id === assistantId ? {
-                  ...m,
-                  content: "Video generated:",
-                  type: "video",
-                  videoUrl: url,
-                } : m)
-              );
-            },
-            onError: (error) => {
-              setMessages(prev =>
-                prev.map(m => m.id === assistantId ? {
-                  ...m,
-                  content: `Error: ${error}`,
-                } : m)
-              );
-            },
-          },
-        });
-
-        // Handle polling - don't update if polling in progress
-        if (result.polling) {
-          console.log(`[agent] Video job submitted, polling: ${result.jobId}`);
-          return;
-        }
-
-        if (result.success) {
-          setMessages(prev =>
-            prev.map(m => m.id === assistantId ? {
-              ...m,
-              content: result.content || `Generated ${result.type}:`,
-              type: result.type,
-              imageUrl: result.type === "image" ? result.url : undefined,
-              audioUrl: result.type === "audio" ? result.url : undefined,
-              videoUrl: result.type === "video" ? result.url : undefined,
-            } : m)
-          );
-        } else {
-          throw new Error(result.error || "Request failed");
-        }
-      }
+      await streamer.runAgent({
+        agentWallet,
+        message: userMessage.content,
+        threadId,
+        userAddress: backpackUserId,
+        composeRunId,
+        cloudPermissions: getCachedBackpackPermissions() as unknown as Record<string, unknown>,
+        ...(attachmentPart ? { attachment: attachmentPart } : {}),
+        assistantId,
+      });
     } catch (err) {
-      // Silent return for user-initiated abort
-      if (err instanceof DOMException && err.name === "AbortError") {
-        return;
+      if (!(err instanceof DOMException && err.name === "AbortError")) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        setChatError(errorMsg);
+        mpError("agent_chat", errorMsg, { agent_wallet: agentWallet });
       }
-
-      let errorMsg = err instanceof Error ? err.message : "Unknown error";
-
-      // Note: Recovery loops removed - rely on backend Temporal state persistence
-      // Frontend simply displays errors immediately for better UX
-      // Backend handles state via Temporal workflows (resumable via run state endpoint)
-
-      // Check for CONSENT_REQUIRED error from agent
-      try {
-        const parsedError = JSON.parse(errorMsg);
-        if (parsedError.code === "CONSENT_REQUIRED") {
-          const consentType = parsedError.consentType as string;
-          console.log(`[agent] Consent required: ${consentType}`);
-
-          // Trigger native browser permission prompt based on consent type
-          try {
-            if (consentType === "filesystem") {
-              // Use File System Access API
-              if ('showDirectoryPicker' in window) {
-                await (window as any).showDirectoryPicker();
-                // User granted filesystem access - retry the message
-                toast({ title: "Access Granted", description: "You can now interact with your files." });
-                await grantBackpackPermission(backpackUserId, consentType as BackpackCloudPermission);
-                // Retry by calling handleSendMessage again (user can resend)
-                setInputValue(userMessage.content || "");
-                setMessages(prev => prev.filter(m => m.id !== assistantId));
-                errorMsg = "Filesystem access granted. Please resend your message.";
-              } else {
-                errorMsg = "This browser doesn't support filesystem access. Try Chrome or Edge.";
-              }
-            } else if (consentType === "camera" || consentType === "microphone") {
-              // Use MediaDevices API
-              const constraints = consentType === "camera"
-                ? { video: true }
-                : { audio: true };
-              await navigator.mediaDevices.getUserMedia(constraints);
-              toast({ title: "Access Granted", description: `${consentType} access enabled.` });
-              await grantBackpackPermission(backpackUserId, consentType as BackpackCloudPermission);
-              setInputValue(userMessage.content || "");
-              setMessages(prev => prev.filter(m => m.id !== assistantId));
-              errorMsg = `${consentType} access granted. Please resend your message.`;
-            } else if (consentType === "geolocation") {
-              // Use Geolocation API
-              await new Promise((resolve, reject) => {
-                navigator.geolocation.getCurrentPosition(resolve, reject);
-              });
-              toast({ title: "Access Granted", description: "Location access enabled." });
-              await grantBackpackPermission(backpackUserId, consentType as BackpackCloudPermission);
-              setInputValue(userMessage.content || "");
-              setMessages(prev => prev.filter(m => m.id !== assistantId));
-              errorMsg = "Location access granted. Please resend your message.";
-            } else {
-              errorMsg = parsedError.message;
-            }
-          } catch (permErr) {
-            // User denied permission or API not available
-            errorMsg = `Permission denied for ${consentType} access. This feature requires your consent.`;
-          }
-        }
-      } catch {
-        // Not a JSON error, use as-is
-      }
-
-      setChatError(errorMsg);
-      setActivityPhase("error", errorMsg);
-      mpError("agent_chat", errorMsg, { agent_wallet: agentWallet });
-      setMessages(prev =>
-        prev.map(m => m.id === assistantId ? { ...m, content: `Error: ${errorMsg}` } : m)
-      );
-
     } finally {
       sessionStorage.removeItem(runStorageKey);
       setSending(false);
       setChatStatus("idle");
     }
-  }, [inputValue, sending, agentWallet, wallet, account, toast, agent, attachedFiles, clearFiles, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, setShowSessionDialog, ensureConversationThread, parseEventStream, scheduleStreamUpdate, flushStreamContent, updateAssistantMessage, posthog, clearActivityState, setActivityPhase, startToolActivity, finishToolActivity]);
+  }, [inputValue, sending, agentWallet, wallet, account, toast, agent, attachedFiles, clearFiles, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, setShowSessionDialog, ensureConversationThread, streamer, posthog]);
 
   const copyEndpoint = () => {
     toast({
@@ -702,6 +417,8 @@ export default function AgentDetailPage() {
         </Button>
 
         <div className="flex items-center gap-2">
+          <ToolTimeline />
+          <CostReceiptIndicator />
           <Button
             asChild
             size="sm"

@@ -1,4 +1,20 @@
-const API_BASE = (import.meta.env.VITE_API_URL || "https://api.compose.market").replace(/\/+$/, "");
+/**
+ * Catalog model display helpers.
+ *
+ * HTTP fetches against `/v1/models` and `/v1/models/:id` live on
+ * `@compose-market/sdk` (`sdk.models.list()` / `sdk.models.get(id)`). This
+ * file owns the pure UI-side derivations (pricing sections, context-window
+ * formatting, type filtering, sessionStorage persistence for the
+ * "selected model" across agent-creation hops).
+ *
+ * `CatalogModel` is re-exported as an alias of the SDK's `Model` type; both
+ * the SDK and the web app consume the flat Compose-native shape that
+ * `api.compose.market` serves.
+ */
+
+import type { Model } from "@compose-market/sdk";
+
+export type CatalogModel = Model;
 
 export type ModelJsonValue =
   | string
@@ -7,18 +23,6 @@ export type ModelJsonValue =
   | null
   | ModelJsonValue[]
   | { [key: string]: ModelJsonValue };
-
-export interface CatalogModel {
-  name: string | null;
-  modelId: string;
-  description: string | null;
-  type: string | string[] | null;
-  provider: string;
-  input: ModelJsonValue;
-  output: ModelJsonValue;
-  contextWindow: ModelJsonValue;
-  pricing: ModelJsonValue;
-}
 
 export interface ModelCategory {
   id: string;
@@ -46,35 +50,7 @@ export interface SelectedCatalogModel {
   contextWindow: ModelJsonValue;
 }
 
-interface ModelsResponse {
-  object: "list";
-  data: CatalogModel[];
-}
-
 export const MODEL_SELECTION_STORAGE_KEY = "selectedCatalogModel";
-
-export async function fetchAvailableModels(): Promise<CatalogModel[]> {
-  const response = await fetch(`${API_BASE}/v1/models`);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch /v1/models: ${response.status}`);
-  }
-
-  const data = await response.json() as ModelsResponse;
-  if (!Array.isArray(data.data) || data.data.length === 0) {
-    throw new Error("No models returned from /v1/models");
-  }
-
-  return data.data;
-}
-
-export async function fetchModelById(modelId: string): Promise<CatalogModel> {
-  const response = await fetch(`${API_BASE}/v1/models/${encodeURIComponent(modelId)}`);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch /v1/models/${modelId}: ${response.status}`);
-  }
-
-  return await response.json() as CatalogModel;
-}
 
 export function getModelTypeValues(model: CatalogModel): string[] {
   if (typeof model.type === "string") {
@@ -92,27 +68,6 @@ export function getPrimaryModelType(model: CatalogModel): string {
     throw new Error(`type is required for model ${model.modelId}`);
   }
   return values[0];
-}
-
-export function matchesModelType(model: CatalogModel, expectedType: string): boolean {
-  return getModelTypeValues(model).includes(expectedType);
-}
-
-export function getModelContextInputTokens(model: CatalogModel): number | null {
-  if (typeof model.contextWindow === "number" && Number.isInteger(model.contextWindow) && model.contextWindow > 0) {
-    return model.contextWindow;
-  }
-
-  if (!model.contextWindow || typeof model.contextWindow !== "object" || Array.isArray(model.contextWindow)) {
-    return null;
-  }
-
-  const inputTokens = (model.contextWindow as { inputTokens?: unknown }).inputTokens;
-  if (typeof inputTokens === "number" && Number.isInteger(inputTokens) && inputTokens > 0) {
-    return inputTokens;
-  }
-
-  return null;
 }
 
 export function formatModelTypeLabel(type: string): string {
@@ -181,8 +136,8 @@ export function toSelectedCatalogModel(model: CatalogModel): SelectedCatalogMode
     modelId: model.modelId,
     name: model.name,
     provider: model.provider,
-    pricing: model.pricing,
-    contextWindow: model.contextWindow,
+    pricing: model.pricing as ModelJsonValue,
+    contextWindow: model.contextWindow as ModelJsonValue,
   };
 }
 
@@ -211,9 +166,12 @@ function humanizeModelKey(value: string): string {
     .trim();
 }
 
-function formatPrimitiveValue(value: ModelJsonValue): string {
+function formatPrimitiveValue(value: unknown): string {
   if (value === null) {
     return "null";
+  }
+  if (value === undefined) {
+    return "undefined";
   }
   if (typeof value === "string") {
     return value;
@@ -224,17 +182,22 @@ function formatPrimitiveValue(value: ModelJsonValue): string {
   if (typeof value === "boolean") {
     return value ? "true" : "false";
   }
-  return JSON.stringify(value);
+  if (typeof value === "bigint") {
+    return value.toString();
+  }
+
+  const serialized = JSON.stringify(value);
+  return serialized ?? String(value);
 }
 
-function asObjectValue(value: ModelJsonValue): Record<string, ModelJsonValue> | null {
+function asObjectValue(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, ModelJsonValue>
+    ? value as Record<string, unknown>
     : null;
 }
 
-export function getModelValueList(value: ModelJsonValue): string[] {
-  if (value === null) {
+export function getModelValueList(value: unknown): string[] {
+  if (value === null || value === undefined) {
     return [];
   }
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
@@ -244,7 +207,12 @@ export function getModelValueList(value: ModelJsonValue): string[] {
     return value.map((entry) => formatPrimitiveValue(entry));
   }
 
-  return Object.entries(value).map(([key, entry]) => `${humanizeModelKey(key)}: ${formatPrimitiveValue(entry)}`);
+  const objectValue = asObjectValue(value);
+  if (!objectValue) {
+    return [formatPrimitiveValue(value)];
+  }
+
+  return Object.entries(objectValue).map(([key, entry]) => `${humanizeModelKey(key)}: ${formatPrimitiveValue(entry)}`);
 }
 
 export function formatModelValue(value: ModelJsonValue): string {
@@ -256,19 +224,20 @@ export function formatModelValue(value: ModelJsonValue): string {
 }
 
 export function getModelContextWindowEntries(model: CatalogModel): ModelDisplayField[] {
-  if (typeof model.contextWindow === "number") {
-    return [{ label: "Input tokens", value: model.contextWindow.toLocaleString() }];
+  const contextWindow = model.contextWindow;
+  if (typeof contextWindow === "number") {
+    return [{ label: "Input tokens", value: contextWindow.toLocaleString() }];
   }
-  if (model.contextWindow === null) {
+  if (contextWindow === null || contextWindow === undefined) {
     return [];
   }
 
-  const contextWindow = asObjectValue(model.contextWindow);
-  if (!contextWindow) {
+  const asObject = asObjectValue(contextWindow);
+  if (!asObject) {
     return [];
   }
 
-  return Object.entries(contextWindow).map(([key, value]) => ({
+  return Object.entries(asObject).map(([key, value]) => ({
     label: humanizeModelKey(key),
     value: formatPrimitiveValue(value),
   }));
@@ -292,7 +261,7 @@ export function getModelPricingSections(model: CatalogModel): ModelPricingSectio
   if (sectionValues) {
     return sectionValues
       .map((section) => asObjectValue(section))
-      .filter((section): section is Record<string, ModelJsonValue> => Boolean(section))
+      .filter((section): section is Record<string, unknown> => Boolean(section))
       .map((section) => {
         const entries = asObjectValue(section.entries);
         if (!entries) {
@@ -408,26 +377,4 @@ export function formatModelPricing(model: CatalogModel): string {
       return section.unit ? `${section.header} (${section.unit}): ${details}` : `${section.header}: ${details}`;
     })
     .join(" • ");
-}
-
-export function getApiKeyEnvName(provider: string): string {
-  switch (provider) {
-    case "openai":
-      return "OPENAI_API_KEY";
-    case "fireworks":
-      return "FIREWORKS_API_KEY";
-    case "gemini":
-      return "GOOGLE_GENERATIVE_AI_API_KEY";
-    case "hugging face":
-      return "HUGGING_FACE_INFERENCE_TOKEN";
-    case "cloudflare":
-      return "CF_API_TOKEN";
-    case "aiml":
-      return "AI_ML_API_KEY";
-    case "asicloud":
-      return "ASI_INFERENCE_API_KEY";
-    case "vertex":
-      return "VERTEX_AI_API_KEY";
-  }
-  throw new Error(`Unsupported provider: ${provider}`);
 }

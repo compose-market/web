@@ -1,8 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import {
-    fetchAvailableModels,
-    type CatalogModel,
-} from "@/lib/models";
+import { sdk } from "@/lib/sdk";
+import type { CatalogModel } from "@/lib/models";
 
 export const COORDINATOR_MODEL_IDS = [
     "nvidia/nemotron-3-nano-30b-a3b",
@@ -13,9 +11,9 @@ export const COORDINATOR_MODEL_IDS = [
 ] as const;
 
 async function fetchCoordinatorModels(): Promise<CatalogModel[]> {
-    const models = await fetchAvailableModels();
+    const { data } = await sdk.models.list();
     return COORDINATOR_MODEL_IDS
-        .map((modelId) => models.find((model) => model.modelId === modelId) || null)
+        .map((modelId) => data.find((model) => model.modelId === modelId) || null)
         .filter((model): model is CatalogModel => model !== null);
 }
 

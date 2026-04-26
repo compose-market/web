@@ -76,6 +76,12 @@ export interface UseChatReturn {
     createAssistantPlaceholder: (type?: ChatMessage["type"]) => string;
     /** Update assistant message by ID (O(1) for last message) */
     updateAssistantMessage: (id: string, update: Partial<ChatMessage>) => void;
+    /** Append reasoning text to an assistant message. */
+    appendAssistantReasoning: (id: string, delta: string) => void;
+    /** Upsert a persisted tool-call entry on an assistant message. */
+    upsertAssistantToolCall: (id: string, tool: NonNullable<ChatMessage["toolCalls"]>[number]) => void;
+    /** Append a workflow / agent progress breadcrumb to an assistant message. */
+    appendAssistantProgressEvent: (id: string, event: NonNullable<ChatMessage["progressEvents"]>[number]) => void;
     /** Parse OpenAI-format JSON response and update assistant message */
     handleJsonResponse: (id: string, data: unknown) => void;
     /** Clear all messages */
@@ -237,6 +243,67 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
             if (idx >= 0) {
                 next[idx] = { ...next[idx], ...update };
             }
+            return next;
+        });
+    }, []);
+
+    const appendAssistantReasoning = useCallback((id: string, delta: string) => {
+        if (!delta) return;
+        setMessages((prev) => {
+            const next = [...prev];
+            const last = next[next.length - 1];
+            const merge = (message: ChatMessage): ChatMessage => ({
+                ...message,
+                reasoning: (message.reasoning || "") + delta,
+            });
+            if (last?.id === id) {
+                next[next.length - 1] = merge(last);
+                return next;
+            }
+            const idx = next.findIndex((m) => m.id === id);
+            if (idx >= 0) next[idx] = merge(next[idx]);
+            return next;
+        });
+    }, []);
+
+    const upsertAssistantToolCall = useCallback((id: string, tool: NonNullable<ChatMessage["toolCalls"]>[number]) => {
+        setMessages((prev) => {
+            const next = [...prev];
+            const merge = (message: ChatMessage): ChatMessage => {
+                const tools = [...(message.toolCalls || [])];
+                const idx = tools.findIndex((t) => t.id === tool.id);
+                if (idx >= 0) {
+                    tools[idx] = { ...tools[idx], ...tool };
+                } else {
+                    tools.push(tool);
+                }
+                return { ...message, toolCalls: tools };
+            };
+            const last = next[next.length - 1];
+            if (last?.id === id) {
+                next[next.length - 1] = merge(last);
+                return next;
+            }
+            const idx = next.findIndex((m) => m.id === id);
+            if (idx >= 0) next[idx] = merge(next[idx]);
+            return next;
+        });
+    }, []);
+
+    const appendAssistantProgressEvent = useCallback((id: string, event: NonNullable<ChatMessage["progressEvents"]>[number]) => {
+        setMessages((prev) => {
+            const next = [...prev];
+            const merge = (message: ChatMessage): ChatMessage => ({
+                ...message,
+                progressEvents: [...(message.progressEvents || []), event],
+            });
+            const last = next[next.length - 1];
+            if (last?.id === id) {
+                next[next.length - 1] = merge(last);
+                return next;
+            }
+            const idx = next.findIndex((m) => m.id === id);
+            if (idx >= 0) next[idx] = merge(next[idx]);
             return next;
         });
     }, []);
@@ -648,6 +715,9 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         addUserMessage,
         createAssistantPlaceholder,
         updateAssistantMessage,
+        appendAssistantReasoning,
+        upsertAssistantToolCall,
+        appendAssistantProgressEvent,
         handleJsonResponse,
         clearMessages,
         // Streaming

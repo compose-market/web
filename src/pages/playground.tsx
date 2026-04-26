@@ -17,7 +17,7 @@ import { mpTrack } from "@/lib/mixpanel";
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
 import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
-import { createPaymentFetch } from "@/lib/payment";
+import { sdk } from "@/lib/sdk";
 import { useChain } from "@/contexts/ChainContext";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -43,7 +43,10 @@ import { MirrorPane, type ModelParamsSchema } from "@/components/mirror-pane";
 import { CommandBar } from "@/components/command-bar";
 import { ModelBadge } from "@/components/model-badge";
 import { useChat } from "@/hooks/use-chat";
+import { useComposeStream } from "@/hooks/use-stream";
 import { useModels } from "@/hooks/use-model";
+import { CostReceiptIndicator } from "@/components/receipt-indicator";
+import { ToolTimeline } from "@/components/tool-timeline";
 import { useToast } from "@/hooks/use-toast";
 import {
   buildProviderCategories,
@@ -55,7 +58,6 @@ import {
   isGoogleModel as isGoogleCatalogModel,
 } from "@/lib/models";
 
-const API_BASE = (import.meta.env.VITE_API_URL || "https://api.compose.market").replace(/\/+$/, "");
 const PANE_COLLAPSED_KEY = "playground_pane_collapsed";
 
 const LazyPluginTester = lazy(() =>
@@ -179,12 +181,17 @@ export default function PlaygroundPage() {
     onError: (err) => setInferenceError(err),
   });
   const { messages, setMessages, scrollContainerRef, messagesEndRef,
-    streamedTextRef, currentAssistantIdRef, updateAssistantMessage,
-    scheduleStreamUpdate, flushStreamContent,
-    activityState, clearMessages, clearActivityState, setActivityPhase,
+    activityState, clearMessages,
     attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, uploadedCids, cleanupFiles, clearFiles,
     isRecording, recordingSupported, startRecording, stopRecording,
   } = chat;
+
+  // Shared SDK streaming dispatcher. Handles text + video polling; all
+  // rich SSE events (text/reasoning/tool-call/receipt) route through the
+  // shared `useComposeStream` hook and the sdk.events bus.
+  const streamer = useComposeStream(chat, {
+    onError: (e) => setInferenceError(e.message),
+  });
   const [inputValue, setInputValue] = useState("");
 
   // ============ ⌘K Global Shortcut ============
@@ -248,23 +255,16 @@ export default function PlaygroundPage() {
     const abortController = new AbortController();
     const fetchParams = async () => {
       try {
-        const response = await fetch(`${API_BASE}/v1/models/${encodeURIComponent(selectedModel)}/params`, {
-          signal: abortController.signal,
-        });
-        if (response.ok) {
-          const data = await response.json() as ModelParamsSchema;
-          const normalizedData = Object.keys(data.params).length > 0 ? data : null;
-          modelParamsCacheRef.current.set(selectedModel, normalizedData);
-          setModelParams(normalizedData);
-          setParamValues(getDefaultParamValues(normalizedData));
-        } else {
-          modelParamsCacheRef.current.set(selectedModel, null);
-          setModelParams(null);
-          setParamValues({});
-        }
+        const data = await sdk.models.getParams(selectedModel);
+        if (abortController.signal.aborted) return;
+        const normalizedData = Object.keys(data.params).length > 0 ? (data as unknown as ModelParamsSchema) : null;
+        modelParamsCacheRef.current.set(selectedModel, normalizedData);
+        setModelParams(normalizedData);
+        setParamValues(getDefaultParamValues(normalizedData));
       } catch (err) {
         if (abortController.signal.aborted) return;
         console.error("[playground] Failed to fetch model params:", err);
+        modelParamsCacheRef.current.set(selectedModel, null);
         setModelParams(null);
         setParamValues({});
       }
@@ -334,15 +334,15 @@ export default function PlaygroundPage() {
     clearFiles();
     setStreaming(true);
     setInferenceError(null);
-    clearActivityState();
-    setActivityPhase(
+    chat.clearActivityState();
+    chat.setActivityPhase(
       "thinking",
       outputType === "text" ? "Preparing request..." : `Preparing ${outputType} generation...`,
     );
 
     const assistantId = crypto.randomUUID();
-    streamedTextRef.current = "";
-    currentAssistantIdRef.current = assistantId;
+    chat.streamedTextRef.current = "";
+    chat.currentAssistantIdRef.current = assistantId;
 
     setMessages((prev) => [
       ...prev,
@@ -350,40 +350,26 @@ export default function PlaygroundPage() {
     ]);
 
     try {
-      if (!wallet || !account) {
-        throw new Error("Connect wallet to use inference");
-      }
+      if (!wallet || !account) throw new Error("Connect wallet to use inference");
 
-      let activeComposeKeyToken = await ensureComposeKeyToken();
-      if (!activeComposeKeyToken) {
-        activeComposeKeyToken = composeKeyToken;
-      }
-
+      // Make sure the SDK has the freshly-minted Compose Key JWT cached
+      // in-memory before any billable call fires.
+      const activeComposeKeyToken = await ensureComposeKeyToken() ?? composeKeyToken;
       if (sessionActive && budgetRemaining > 0 && !activeComposeKeyToken) {
         throw new Error("Compose session key unavailable. Re-open your session and try again.");
       }
-
-      const fetchWithPayment = createPaymentFetch({
-        chainId: paymentChainId,
-        sessionToken: activeComposeKeyToken!,
-      });
-
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (activeComposeKeyToken) {
+        sdk.keys.use(activeComposeKeyToken);
+      }
 
       const toResponsesMessage = (message: typeof userMessage | typeof messages[number]) => {
         const parts: Array<Record<string, unknown>> = [];
         if (typeof message.content === "string" && message.content.trim().length > 0) {
           parts.push({ type: "text", text: message.content });
         }
-        if (message.imageUrl) {
-          parts.push({ type: "image_url", image_url: { url: message.imageUrl } });
-        }
-        if (message.audioUrl) {
-          parts.push({ type: "input_audio", input_audio: { url: message.audioUrl } });
-        }
-        if (message.videoUrl) {
-          parts.push({ type: "video_url", video_url: { url: message.videoUrl } });
-        }
+        if (message.imageUrl) parts.push({ type: "image_url", image_url: { url: message.imageUrl } });
+        if (message.audioUrl) parts.push({ type: "input_audio", input_audio: { url: message.audioUrl } });
+        if (message.videoUrl) parts.push({ type: "video_url", video_url: { url: message.videoUrl } });
         if (parts.length === 0) return { role: message.role, content: "" };
         if (parts.length === 1 && parts[0].type === "text") return { role: message.role, content: message.content };
         return { role: message.role, content: parts };
@@ -394,9 +380,7 @@ export default function PlaygroundPage() {
         role: "system" | "user" | "assistant";
         content: string | Array<Record<string, unknown>>;
       }> = history.map(toResponsesMessage);
-      if (systemPrompt.trim()) {
-        input.unshift({ role: "system", content: systemPrompt.trim() });
-      }
+      if (systemPrompt.trim()) input.unshift({ role: "system", content: systemPrompt.trim() });
 
       const modalities =
         outputType === "image" ? ["image"] :
@@ -405,26 +389,45 @@ export default function PlaygroundPage() {
               outputType === "embedding" ? ["embedding", "feature-extraction"] :
                 ["text"];
 
-      const endpoint = outputType === "embedding"
-        ? `${API_BASE}/v1/embeddings`
-        : `${API_BASE}/v1/responses`;
+      // Text + image streaming — SDK responses.stream dispatches every rich
+      // SSE event (text delta, reasoning, tool-call delta, compose.receipt,
+      // compose.error, and image partial/completed events where the provider
+      // supports them) via the shared streamer hook.
+      if (outputType === "text" || outputType === "image") {
+        await streamer.runResponses({
+          params: {
+            model: selectedModel,
+            input,
+            modalities: modalities as Array<"text" | "image" | "audio" | "video">,
+            stream: true,
+            ...(selectedModelInfo?.provider ? { provider: selectedModelInfo.provider } : {}),
+            ...(activeGoogleTools ? { google_tools: activeGoogleTools } : {}),
+            ...(Object.keys(paramValues).length > 0 ? { custom_params: paramValues } : {}),
+          },
+          assistantId,
+          options: {
+            ...(activeComposeKeyToken ? { composeKey: activeComposeKeyToken } : {}),
+            userAddress: account.address,
+            chainId: paymentChainId,
+          },
+        });
+        return;
+      }
+
+      // Remaining non-streaming modalities — submit via sdk.fetch then delegate
+      // Pinata upload to the multimodal helper. Video jobs drive polling
+      // through the SDK's typed video-status stream.
+      const endpoint = outputType === "embedding" ? "/v1/embeddings" : "/v1/responses";
       const requestBody: Record<string, unknown> = outputType === "embedding"
         ? { model: selectedModel, input: userMessage.content }
-        : { model: selectedModel, input, modalities, stream: outputType === "text" };
+        : { model: selectedModel, input, modalities, stream: false };
+      if (selectedModelInfo?.provider) requestBody.provider = selectedModelInfo.provider;
+      if (activeGoogleTools) requestBody.google_tools = activeGoogleTools;
+      if (Object.keys(paramValues).length > 0) requestBody.custom_params = paramValues;
 
-      if (selectedModelInfo?.provider) {
-        requestBody.provider = selectedModelInfo.provider;
-      }
-      if (activeGoogleTools) {
-        requestBody.google_tools = activeGoogleTools;
-      }
-      if (Object.keys(paramValues).length > 0) {
-        requestBody.custom_params = paramValues;
-      }
-
-      const response = await fetchWithPayment(endpoint, {
+      const response = await sdk.fetch(endpoint, {
         method: "POST",
-        headers,
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestBody),
       });
 
@@ -439,75 +442,44 @@ export default function PlaygroundPage() {
 
       const { parseMultimodalResponse } = await import("@/lib/multimodal");
       const result = await parseMultimodalResponse(response, {
-        onStreamChunk: (chunk) => {
-          streamedTextRef.current += chunk;
-          scheduleStreamUpdate(streamedTextRef.current);
-          setActivityPhase("streaming", "Responding...");
-        },
         uploadToPinata: true,
         conversationId,
-        videoStatusFetch: fetchWithPayment,
-        onVideoPolling: {
-          onProgress: (status, progress) => {
-            setActivityPhase("thinking", `Video ${status}${progress ? ` (${progress}%)` : ""}`);
-            updateAssistantMessage(assistantId, {
-              content: `Video generating... (${status}${progress ? ` - ${progress}%` : ""})`,
-              type: "video",
-            });
-          },
-          onComplete: (url) => {
-            clearActivityState();
-            updateAssistantMessage(assistantId, {
-              content: "Video generated:",
-              type: "video",
-              videoUrl: url,
-            });
-          },
-          onError: (error) => {
-            setActivityPhase("error", error);
-            updateAssistantMessage(assistantId, {
-              content: `Error: ${error}`,
-              type: "video",
-            });
-          },
-        },
+        videoStatusFetch: sdk.fetch.bind(sdk),
       });
 
-      flushStreamContent();
-
-      if (result.polling) {
-        updateAssistantMessage(assistantId, {
-          content: `Video generating... (${result.type === "video" ? "queued" : "processing"})`,
+      if (result.polling && result.jobId) {
+        chat.updateAssistantMessage(assistantId, {
+          content: `Video generating... (queued)`,
           type: "video",
         });
+        await streamer.runVideo({ videoId: result.jobId, assistantId });
         return;
       }
 
       if (result.success) {
         const content = result.content || (result.type === "text" ? "" : `Generated ${result.type}:`);
-        updateAssistantMessage(assistantId, {
+        chat.updateAssistantMessage(assistantId, {
           content,
           type: result.type,
           imageUrl: result.type === "image" ? result.url : undefined,
           audioUrl: result.type === "audio" ? result.url : undefined,
           videoUrl: result.type === "video" ? result.url : undefined,
         });
-        clearActivityState();
+        chat.clearActivityState();
       } else {
         throw new Error(result.error || "Request failed");
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Unknown error";
       setInferenceError(errorMsg);
-      setActivityPhase("error", errorMsg);
+      chat.setActivityPhase("error", errorMsg);
       setMessages((prev) =>
         prev.map((m) => m.id === assistantId ? { ...m, content: `Error: ${errorMsg}` } : m)
       );
     } finally {
       setStreaming(false);
     }
-  }, [inputValue, streaming, selectedModel, selectedModelInfo, messages, systemPrompt, wallet, account, budgetRemaining, outputType, attachedFiles, clearFiles, sessionActive, composeKeyToken, ensureComposeKeyToken, activeGoogleTools, paymentChainId, paramValues, toast, setShowSessionDialog, scheduleStreamUpdate, flushStreamContent, updateAssistantMessage, clearActivityState, setActivityPhase, conversationId, posthog]);
-
+  }, [inputValue, streaming, selectedModel, selectedModelInfo, messages, systemPrompt, wallet, account, budgetRemaining, outputType, attachedFiles, clearFiles, sessionActive, composeKeyToken, ensureComposeKeyToken, activeGoogleTools, paymentChainId, paramValues, toast, setShowSessionDialog, conversationId, posthog, chat, streamer, setMessages, conversationStartIndex]);
   const handleClearChat = useCallback(() => {
     clearMessages();
     setInferenceError(null);
@@ -543,6 +515,8 @@ export default function PlaygroundPage() {
         </Tabs>
 
         <div className="cm-playground__toolbar-right">
+          <ToolTimeline />
+          <CostReceiptIndicator />
           {activeTab === "model" && (
             <Button
               variant="ghost"
