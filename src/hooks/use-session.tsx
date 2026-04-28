@@ -88,6 +88,13 @@ function toNumberSafe(value: string | number | null | undefined, fallback = 0): 
     return fallback;
 }
 
+function toBudgetUsdString(value: number): string {
+    if (!Number.isFinite(value) || value <= 0) {
+        throw new Error("Session budget must be a positive USDC amount");
+    }
+    return value.toFixed(6).replace(/\.?0+$/, "");
+}
+
 function getSessionName(): string {
     return `Session ${new Date().toISOString().slice(0, 10)}`;
 }
@@ -326,7 +333,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
             const created = await sdk.keys.create({
                 purpose: "session",
-                budgetUsd: budgetUSDC,
+                budgetUsd: toBudgetUsdString(budgetUSDC),
                 durationHours,
                 name: getSessionName(),
             });
