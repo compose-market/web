@@ -157,12 +157,13 @@ async function uploadFilecoinFile(file: File, metadata: Record<string, string>):
 
 async function extractPdfText(file: File): Promise<string> {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  const document = await pdfjs.getDocument({
+  const documentInit = {
     data: new Uint8Array(await file.arrayBuffer()),
     disableFontFace: true,
     isEvalSupported: false,
     useWorkerFetch: false,
-  }).promise;
+  } as unknown as Parameters<typeof pdfjs.getDocument>[0];
+  const document = await pdfjs.getDocument(documentInit).promise;
   const pages: string[] = [];
 
   for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {

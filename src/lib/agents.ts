@@ -8,7 +8,7 @@
  * - ElizaOS: Agent framework plugins (200+ plugins)
  */
 
-import { apiUrl } from "./api";
+import { apiFetch } from "./api";
 
 // =============================================================================
 // Registry System
@@ -386,7 +386,7 @@ async function searchAgentverse(
   if (options.sort) params.set("sort", options.sort);
   if (options.direction) params.set("direction", options.direction);
 
-  const response = await fetch(apiUrl(`/api/agentverse/agents?${params}`));
+  const response = await apiFetch(`/api/agentverse/agents?${params}`);
 
   if (!response.ok) {
     const data = await response.json().catch(() => ({ error: "Unknown error" }));
@@ -568,7 +568,7 @@ async function searchManowar(
   };
 
   try {
-    const response = await fetch(apiUrl("/agents"));
+    const response = await apiFetch("/agents");
     if (!response.ok) {
       console.warn("Failed to fetch manowar agents:", response.status);
       return { agents: [], total: 0, tags: [], categories: [] };
@@ -781,7 +781,7 @@ function getRelevancyScore(agent: Agent, query: string): number {
  */
 export async function getAgent(address: string): Promise<Agent> {
   // For now, only Agentverse is implemented
-  const response = await fetch(apiUrl(`/api/agentverse/agents/${encodeURIComponent(address)}`));
+  const response = await apiFetch(`/api/agentverse/agents/${encodeURIComponent(address)}`);
 
   if (!response.ok) {
     const data = await response.json().catch(() => ({ error: "Unknown error" }));

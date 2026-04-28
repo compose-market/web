@@ -1,163 +1,152 @@
-/**
- * Multimodal Response Handler
- * 
- * - Parses responses into unified format
- * - Uploads base64 media to Pinata → IPFS URLs
- * - Handles binary blobs (audio, video, image)
- */
+import type {
+    AudioTranscriptionResponse,
+    ChatCompletion,
+    EmbeddingsResponse,
+    ImagesResponse,
+    ResponseObject,
+    VideoGenerateResponse,
+    VideoJobStatus,
+} from "@compose-market/sdk";
 
 import { uploadConversationFile } from "./pinata";
-import {
-    API_BASE_URL,
-    TIMEOUT_CONFIG,
-    type MultimodalResult,
-    type VideoJobResponse,
-    parseSSEStream,
-    parseJsonResponse,
-    detectResponseType,
-} from "./api";
 
-type VideoStatusFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+export type MultimodalType = "text" | "image" | "audio" | "video" | "embedding";
 
-// =============================================================================
-// Parse Any Response
-// =============================================================================
+export interface MultimodalResult {
+    type: MultimodalType;
+    success: boolean;
+    content?: string;
+    url?: string;
+    base64?: string;
+    mimeType?: string;
+    embeddings?: number[];
+    error?: string;
+    jobId?: string;
+    polling?: boolean;
+}
 
-/**
- * Parse any response into unified MultimodalResult
- * Handles SSE, JSON, and binary responses
- */
-export async function parseMultimodalResponse(
-    response: Response,
+export async function parseMultimodalData(
+    data: unknown,
     options?: {
-        onStreamChunk?: (chunk: string) => void;
         uploadToPinata?: boolean;
         conversationId?: string;
-        // Async video polling callbacks
-        onVideoPolling?: {
-            onProgress?: (status: string, progress?: number) => void;
-            onComplete: (url: string) => void;
-            onError: (error: string) => void;
-        };
-        videoStatusFetch?: VideoStatusFetch;
-    }
+    },
 ): Promise<MultimodalResult> {
-    const contentType = response.headers.get("content-type") || "";
-    const responseType = detectResponseType(contentType);
+    const result = parseJsonResponse(data);
 
-    switch (responseType) {
-        case "sse":
-        case "text": {
-            // Streaming text response
-            const reader = response.body?.getReader();
-            if (!reader) {
-                return { type: "text", success: false, error: "No response body" };
-            }
-
-            let fullContent = "";
-            for await (const chunk of parseSSEStream(reader)) {
-                fullContent += chunk;
-                options?.onStreamChunk?.(chunk);
-            }
-
-            return { type: "text", success: true, content: fullContent };
-        }
-
-        case "json": {
-            const data = await response.json();
-            const result = parseJsonResponse(data);
-
-            // Handle async video job - trigger polling if callbacks provided
-            if (result.polling && result.jobId && options?.onVideoPolling) {
-                // Start polling in background, return immediately with polling status
-                pollVideoJob(result.jobId, options.onVideoPolling, {
-                    conversationId: options.conversationId,
-                    fetcher: options.videoStatusFetch,
-                });
-                return result;
-            }
-
-            // Upload base64 to Pinata if enabled
-            if (options?.uploadToPinata && result.base64 && !result.url) {
-                try {
-                    const url = await uploadBase64ToPinata(
-                        result.base64,
-                        result.type as "image" | "audio" | "video",
-                        options.conversationId
-                    );
-                    return { ...result, url, base64: undefined };
-                } catch (err) {
-                    console.error("[multimodal] Pinata upload failed:", err);
-                    // Return with base64 as fallback
-                }
-            }
-
-            return result;
-        }
-
-        case "image": {
-            return await handleBinaryResponse(response, "image", options);
-        }
-
-        case "audio": {
-            return await handleBinaryResponse(response, "audio", options);
-        }
-
-        case "video": {
-            return await handleBinaryResponse(response, "video", options);
-        }
-
-        default: {
-            // Binary fallback
-            const blob = await response.blob();
-            const url = URL.createObjectURL(blob);
-            return {
-                type: "text",
-                success: true,
-                url,
-                mimeType: contentType,
-            };
-        }
-    }
-}
-
-// =============================================================================
-// Binary Response Handler
-// =============================================================================
-
-async function handleBinaryResponse(
-    response: Response,
-    type: "image" | "audio" | "video",
-    options?: { uploadToPinata?: boolean; conversationId?: string }
-): Promise<MultimodalResult> {
-    const contentType = response.headers.get("content-type") || "";
-    const blob = await response.blob();
-
-    if (options?.uploadToPinata) {
+    if (options?.uploadToPinata && result.base64 && !result.url) {
         try {
-            const url = await uploadBlobToPinata(blob, type, options.conversationId);
-            return { type, success: true, url, mimeType: contentType };
+            const url = await uploadBase64ToPinata(
+                result.base64,
+                result.type as "image" | "audio" | "video",
+                options.conversationId,
+            );
+            return { ...result, url, base64: undefined };
         } catch (err) {
-            console.error(`[multimodal] Pinata upload failed for ${type}:`, err);
+            console.error("[multimodal] Pinata upload failed:", err);
         }
     }
 
-    // Fallback to object URL
-    const url = URL.createObjectURL(blob);
-    return { type, success: true, url, mimeType: contentType };
+    return result;
 }
 
-// =============================================================================
-// Pinata Upload Helpers
-// =============================================================================
+export function parseJsonResponse(data: unknown): MultimodalResult {
+    if (isErrorResponse(data)) {
+        const err = data.error;
+        return { type: "text", success: false, error: typeof err === "string" ? err : err?.message || JSON.stringify(err) };
+    }
 
-/**
- * Upload base64-encoded media to Pinata
- */
+    if (isAgentChatResponse(data)) {
+        return { type: "text", success: true, content: data.output };
+    }
+
+    if (isWorkflowMultimodalResponse(data)) {
+        return {
+            type: data.type,
+            success: data.success,
+            url: data.url,
+            content: data.content,
+            mimeType: data.mimeType,
+            error: data.error,
+        };
+    }
+
+    if (isResponseObject(data)) {
+        return parseResponseObject(data);
+    }
+
+    if (isChatCompletion(data)) {
+        const raw = data.choices?.[0]?.message?.content as unknown;
+        return {
+            type: "text",
+            success: true,
+            content: typeof raw === "string"
+                ? raw
+                : Array.isArray(raw)
+                    ? raw.map((part: unknown) => part && typeof part === "object" && "text" in part ? String((part as { text?: unknown }).text ?? "") : "").join("")
+                    : "",
+        };
+    }
+
+    if (isImagesResponse(data)) {
+        const item = data.data?.[0];
+        return {
+            type: "image",
+            success: true,
+            base64: item?.b64_json,
+            url: item?.url,
+            mimeType: "image/png",
+        };
+    }
+
+    if (isVideoJobStatus(data)) {
+        if (data.status === "completed" && data.url) {
+            return { type: "video", success: true, url: data.url, mimeType: "video/mp4" };
+        }
+        if (data.status === "failed") {
+            return { type: "video", success: false, error: data.error || "Video generation failed" };
+        }
+        return {
+            type: "video",
+            success: true,
+            jobId: data.id,
+            polling: true,
+            content: `Video generating... (${data.status})`,
+        };
+    }
+
+    if (isVideoGenerateResponse(data)) {
+        const item = data.data?.[0];
+        return {
+            type: "video",
+            success: true,
+            base64: item?.b64_json,
+            url: item?.url,
+            mimeType: "video/mp4",
+        };
+    }
+
+    if (isEmbeddingsResponse(data)) {
+        const embedding = data.data?.[0]?.embedding;
+        return {
+            type: "embedding",
+            success: true,
+            embeddings: embedding,
+            content: JSON.stringify(embedding),
+        };
+    }
+
+    if (isAudioTranscriptionResponse(data)) {
+        return { type: "text", success: true, content: data.text };
+    }
+
+    return { type: "text", success: true, content: typeof data === "string" ? data : JSON.stringify(data) };
+}
+
 export async function uploadBase64ToPinata(
     base64: string,
     type: "image" | "audio" | "video",
-    conversationId?: string
+    conversationId?: string,
 ): Promise<string> {
     const mimeTypes = {
         image: "image/png",
@@ -170,131 +159,142 @@ export async function uploadBase64ToPinata(
         video: "mp4",
     };
 
-    // Convert base64 to blob
     const byteCharacters = atob(base64);
     const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) {
+    for (let i = 0; i < byteCharacters.length; i += 1) {
         byteNumbers[i] = byteCharacters.charCodeAt(i);
     }
-    const byteArray = new Uint8Array(byteNumbers);
-    const blob = new Blob([byteArray], { type: mimeTypes[type] });
-
-    // Create file for upload
-    const filename = `${type}-${Date.now()}.${extensions[type]}`;
-    const file = new File([blob], filename, { type: mimeTypes[type] });
-
-    // Upload via pinata lib
+    const blob = new Blob([new Uint8Array(byteNumbers)], { type: mimeTypes[type] });
+    const file = new File([blob], `${type}-${Date.now()}.${extensions[type]}`, { type: mimeTypes[type] });
     const { url } = await uploadConversationFile(file, conversationId || "default");
     return url;
 }
 
-/**
- * Upload blob to Pinata
- */
-export async function uploadBlobToPinata(
-    blob: Blob,
-    type: "image" | "audio" | "video",
-    conversationId?: string
-): Promise<string> {
-    const extensions = {
-        image: "png",
-        audio: "wav",
-        video: "mp4",
-    };
-
-    const filename = `${type}-${Date.now()}.${extensions[type]}`;
-    const file = new File([blob], filename, { type: blob.type });
-
-    const { url } = await uploadConversationFile(file, conversationId || "default");
-    return url;
-}
-
-// =============================================================================
-// Cleanup
-// =============================================================================
-
-/**
- * Revoke object URLs to free memory
- */
-export function cleanupObjectUrl(url: string): void {
-    if (url.startsWith("blob:")) {
-        URL.revokeObjectURL(url);
+function parseResponseObject(data: ResponseObject): MultimodalResult {
+    if (data.error?.message) {
+        return { type: "text", success: false, error: data.error.message };
     }
-}
-
-// =============================================================================
-// Async Video Polling
-// =============================================================================
-
-export interface VideoPollingCallbacks {
-    onProgress?: (status: string, progress?: number) => void;
-    onComplete: (url: string) => void;
-    onError: (error: string) => void;
-}
-
-/**
- * Poll for async video generation completion
- * Automatically uploads to Pinata when complete
- */
-export async function pollVideoJob(
-    jobId: string,
-    callbacks: VideoPollingCallbacks,
-    options?: {
-        pollIntervalMs?: number;
-        maxAttempts?: number;
-        conversationId?: string;
-        fetcher?: VideoStatusFetch;
+    if (data.status === "failed") {
+        return { type: "text", success: false, error: data.error?.message || "Request failed" };
     }
-): Promise<void> {
-    const API_BASE = API_BASE_URL;
-    const pollInterval = options?.pollIntervalMs ?? TIMEOUT_CONFIG.VIDEO_POLL.INTERVAL_MS;
-    const maxAttempts = options?.maxAttempts ?? TIMEOUT_CONFIG.VIDEO_POLL.MAX_ATTEMPTS;
-    const statusFetch = options?.fetcher ?? fetch;
+    if (data.status === "cancelled") {
+        return { type: "text", success: false, error: "Request cancelled" };
+    }
 
-    let attempts = 0;
+    const textParts: string[] = [];
+    let imageUrl: string | undefined;
+    let audioUrl: string | undefined;
+    let videoUrl: string | undefined;
+    let embedding: number[] | undefined;
 
-    const poll = async () => {
-        attempts++;
-
-        try {
-            const response = await statusFetch(`${API_BASE}/v1/videos/${encodeURIComponent(jobId)}`, {
-                method: "GET",
-                headers: { "Content-Type": "application/json" },
-            });
-
-            if (!response.ok) {
-                throw new Error(`Status check failed: ${response.status}`);
-            }
-
-            const data = await response.json() as VideoJobResponse;
-
-            if (data.status === "completed" && data.url) {
-                // Backend already uploaded to Pinata, just use the URL directly
-                callbacks.onComplete(data.url);
-                return;
-            }
-
-            if (data.status === "failed") {
-                callbacks.onError(data.error || "Video generation failed");
-                return;
-            }
-
-            // Still processing
-            callbacks.onProgress?.(data.status, data.progress);
-
-            if (attempts >= maxAttempts) {
-                callbacks.onError("Video generation timed out");
-                return;
-            }
-
-            // Schedule next poll
-            setTimeout(poll, pollInterval);
-
-        } catch (error) {
-            callbacks.onError(error instanceof Error ? error.message : "Unknown error");
+    for (const item of Array.isArray(data.output) ? data.output : []) {
+        const record = item as Record<string, unknown>;
+        if (record.type === "output_text" && typeof record.text === "string") {
+            textParts.push(record.text);
+            continue;
         }
-    };
+        if (record.type === "output_text" && Array.isArray(record.content)) {
+            for (const part of record.content) {
+                if (part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string") {
+                    textParts.push((part as { text: string }).text);
+                }
+            }
+            continue;
+        }
+        if (record.type === "output_image" && typeof record.image_url === "string") {
+            imageUrl = record.image_url;
+            continue;
+        }
+        if (record.type === "output_audio" && typeof record.audio_url === "string") {
+            audioUrl = record.audio_url;
+            continue;
+        }
+        if (record.type === "output_video" && typeof record.video_url === "string") {
+            videoUrl = record.video_url;
+            continue;
+        }
+        if (record.type === "output_embedding" && Array.isArray(record.embedding)) {
+            embedding = record.embedding as number[];
+        }
+    }
 
-    // Start polling
-    poll();
+    if (videoUrl) return { type: "video", success: true, url: videoUrl, mimeType: "video/mp4" };
+    if (imageUrl) return { type: "image", success: true, url: imageUrl, mimeType: "image/png" };
+    if (audioUrl) return { type: "audio", success: true, url: audioUrl, mimeType: "audio/mpeg" };
+    if (embedding) return { type: "embedding", success: true, embeddings: embedding, content: JSON.stringify(embedding) };
+
+    const text = textParts.join("").trim();
+    if (text) return { type: "text", success: true, content: text };
+
+    if (data.status === "in_progress" && typeof (data as { job_id?: unknown }).job_id === "string") {
+        return {
+            type: "video",
+            success: true,
+            jobId: (data as { job_id: string }).job_id,
+            polling: true,
+            content: "Video generating... (in_progress)",
+        };
+    }
+
+    return { type: "text", success: true, content: "" };
+}
+
+function isChatCompletion(data: unknown): data is ChatCompletion {
+    return !!data && typeof data === "object" && Array.isArray((data as ChatCompletion).choices);
+}
+
+function isImagesResponse(data: unknown): data is ImagesResponse {
+    const response = data as ImagesResponse;
+    return !!data && typeof data === "object" && Array.isArray(response.data) &&
+        (response.data[0]?.b64_json !== undefined || response.data[0]?.url !== undefined);
+}
+
+function isVideoGenerateResponse(data: unknown): data is VideoGenerateResponse {
+    const response = data as VideoGenerateResponse;
+    return !!data && typeof data === "object" && Array.isArray(response.data) &&
+        Boolean(response.data[0]?.b64_json || response.data[0]?.url);
+}
+
+function isVideoJobStatus(data: unknown): data is VideoJobStatus {
+    const record = data as Record<string, unknown>;
+    return !!data && typeof data === "object" &&
+        typeof record.id === "string" &&
+        typeof record.status === "string" &&
+        record.object === "video.generation";
+}
+
+function isResponseObject(data: unknown): data is ResponseObject {
+    const response = data as ResponseObject;
+    return !!data && typeof data === "object" && response.object === "response" && typeof response.id === "string";
+}
+
+function isEmbeddingsResponse(data: unknown): data is EmbeddingsResponse {
+    const response = data as EmbeddingsResponse;
+    return !!data && typeof data === "object" && response.object === "list" && Array.isArray(response.data);
+}
+
+function isAudioTranscriptionResponse(data: unknown): data is AudioTranscriptionResponse {
+    return !!data && typeof data === "object" && typeof (data as AudioTranscriptionResponse).text === "string";
+}
+
+function isErrorResponse(data: unknown): data is { error: string | { message?: string } } {
+    return !!data && typeof data === "object" && "error" in data;
+}
+
+function isAgentChatResponse(data: unknown): data is { output: string; messages?: unknown[] } {
+    return !!data && typeof data === "object" && typeof (data as { output?: unknown }).output === "string";
+}
+
+function isWorkflowMultimodalResponse(data: unknown): data is {
+    success: boolean;
+    type: MultimodalType;
+    url?: string;
+    content?: string;
+    mimeType?: string;
+    error?: string;
+} {
+    const record = data as Record<string, unknown>;
+    if (!record || typeof record !== "object") return false;
+    if (typeof record.success !== "boolean" || typeof record.type !== "string") return false;
+    return ["text", "image", "audio", "video", "embedding"].includes(record.type);
 }

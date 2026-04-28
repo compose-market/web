@@ -13,8 +13,6 @@ import { sdk } from "./sdk";
 // Service URLs from environment or defaults
 const CONNECTOR_URL = import.meta.env.VITE_CONNECTOR_URL || "https://services.compose.market/connector";
 const EXPORTER_URL = import.meta.env.VITE_EXPORTER_URL || "https://services.compose.market/exporter";
-// API Gateway URL for x402 payment-gated routes
-const API_BASE = sdk.baseUrl;
 
 // =============================================================================
 // Types
@@ -215,7 +213,7 @@ export async function executeMcpServer(
   args: Record<string, unknown>
 ): Promise<PluginExecutionResult> {
   // Route through api/ for x402 payment
-  const res = await fetch(`${API_BASE}/api/mcp/servers/${encodeURIComponent(serverSlug)}/call`, {
+  const res = await sdk.fetch(`/api/mcp/servers/${encodeURIComponent(serverSlug)}/call`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ tool, args }),
@@ -263,7 +261,7 @@ export async function executeRemoteMcpServer(
   args: Record<string, unknown>
 ): Promise<PluginExecutionResult> {
   // Route through api/ for x402 payment
-  const res = await fetch(`${API_BASE}/api/mcp/servers/${encodeURIComponent(serverSlug)}/call`, {
+  const res = await sdk.fetch(`/api/mcp/servers/${encodeURIComponent(serverSlug)}/call`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ tool, args }),
@@ -475,4 +473,3 @@ export async function checkAllServicesHealth(): Promise<{
       exporter.status === "ok",
   };
 }
-

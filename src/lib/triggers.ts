@@ -7,8 +7,6 @@
 
 import { sdk } from "./sdk";
 
-const API_BASE = sdk.baseUrl;
-
 // =============================================================================
 // Types (mirrored from backend for frontend use)
 // =============================================================================
@@ -151,7 +149,7 @@ export const HOOK_TEMPLATES: Record<string, Partial<HookDefinition>> = {
  */
 export async function parseNLToCron(nlDescription: string, timezone?: string): Promise<NLParseResult> {
     try {
-        const res = await fetch(`${API_BASE}/api/workflow/triggers/parse`, {
+        const res = await sdk.fetch("/api/workflow/triggers/parse", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ nlDescription, timezone }),
@@ -177,7 +175,7 @@ export async function parseNLToCron(nlDescription: string, timezone?: string): P
  */
 export async function fetchTriggers(workflowWallet: string): Promise<TriggerDefinition[]> {
     try {
-        const res = await fetch(`${API_BASE}/api/workflow/${workflowWallet}/triggers`);
+        const res = await sdk.fetch(`/api/workflow/${workflowWallet}/triggers`);
         if (!res.ok) throw new Error(`Failed to fetch triggers: ${res.status}`);
         const data = await res.json();
         return data.triggers || [];
@@ -195,7 +193,7 @@ export async function createTrigger(
     trigger: Omit<TriggerDefinition, "id" | "createdAt" | "updatedAt" | "memoryId">
 ): Promise<TriggerDefinition | null> {
     try {
-        const res = await fetch(`${API_BASE}/api/workflow/${workflowWallet}/triggers`, {
+        const res = await sdk.fetch(`/api/workflow/${workflowWallet}/triggers`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(trigger),
@@ -217,7 +215,7 @@ export async function updateTrigger(
     updates: Partial<TriggerDefinition>
 ): Promise<TriggerDefinition | null> {
     try {
-        const res = await fetch(`${API_BASE}/api/workflow/${workflowWallet}/triggers/${triggerId}`, {
+        const res = await sdk.fetch(`/api/workflow/${workflowWallet}/triggers/${triggerId}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(updates),
@@ -235,7 +233,7 @@ export async function updateTrigger(
  */
 export async function deleteTrigger(workflowWallet: string, triggerId: string): Promise<boolean> {
     try {
-        const res = await fetch(`${API_BASE}/api/workflow/${workflowWallet}/triggers/${triggerId}`, {
+        const res = await sdk.fetch(`/api/workflow/${workflowWallet}/triggers/${triggerId}`, {
             method: "DELETE",
         });
         return res.ok;
@@ -266,7 +264,7 @@ export async function testTrigger(
     inputOverride?: Record<string, unknown>
 ): Promise<{ success: boolean; executionId?: string; error?: string }> {
     try {
-        const res = await fetch(`${API_BASE}/api/workflow/${workflowWallet}/triggers/${triggerId}/test`, {
+        const res = await sdk.fetch(`/api/workflow/${workflowWallet}/triggers/${triggerId}/test`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ input: inputOverride }),
@@ -292,7 +290,7 @@ export async function testTrigger(
  */
 export async function fetchHooks(workflowWallet: string): Promise<HookDefinition[]> {
     try {
-        const res = await fetch(`${API_BASE}/api/workflow/${workflowWallet}/hooks`);
+        const res = await sdk.fetch(`/api/workflow/${workflowWallet}/hooks`);
         if (!res.ok) throw new Error(`Failed to fetch hooks: ${res.status}`);
         const data = await res.json();
         return data.hooks || [];
@@ -310,7 +308,7 @@ export async function createHook(
     hook: Omit<HookDefinition, "id" | "createdAt">
 ): Promise<HookDefinition | null> {
     try {
-        const res = await fetch(`${API_BASE}/api/workflow/${workflowWallet}/hooks`, {
+        const res = await sdk.fetch(`/api/workflow/${workflowWallet}/hooks`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(hook),
@@ -332,7 +330,7 @@ export async function updateHook(
     updates: Partial<HookDefinition>
 ): Promise<HookDefinition | null> {
     try {
-        const res = await fetch(`${API_BASE}/api/workflow/${workflowWallet}/hooks/${hookId}`, {
+        const res = await sdk.fetch(`/api/workflow/${workflowWallet}/hooks/${hookId}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(updates),
@@ -350,7 +348,7 @@ export async function updateHook(
  */
 export async function deleteHook(workflowWallet: string, hookId: string): Promise<boolean> {
     try {
-        const res = await fetch(`${API_BASE}/api/workflow/${workflowWallet}/hooks/${hookId}`, {
+        const res = await sdk.fetch(`/api/workflow/${workflowWallet}/hooks/${hookId}`, {
             method: "DELETE",
         });
         return res.ok;

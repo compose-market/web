@@ -1,4 +1,4 @@
-import { apiUrl } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 
 export interface BackpackConnectionInfo {
   slug: string;
@@ -55,8 +55,8 @@ export function resolveBackpackUserId(preferred?: string | null): string {
 }
 
 export async function fetchBackpackConnections(userAddress: string): Promise<BackpackConnectionInfo[]> {
-  const response = await fetch(
-    apiUrl(`/api/backpack/connections?userAddress=${encodeURIComponent(userAddress)}`),
+  const response = await apiFetch(
+    `/api/backpack/connections?userAddress=${encodeURIComponent(userAddress)}`,
     { method: "GET" },
   );
 
@@ -69,8 +69,8 @@ export async function fetchBackpackConnections(userAddress: string): Promise<Bac
 }
 
 export async function fetchBackpackPermissions(userAddress: string): Promise<BackpackCloudPermission[]> {
-  const response = await fetch(
-    apiUrl(`/api/backpack/permissions?userAddress=${encodeURIComponent(userAddress)}`),
+  const response = await apiFetch(
+    `/api/backpack/permissions?userAddress=${encodeURIComponent(userAddress)}`,
     { method: "GET" },
   );
 
@@ -96,7 +96,7 @@ export async function fetchBackpackPermissions(userAddress: string): Promise<Bac
 }
 
 export async function grantBackpackPermission(userAddress: string, consentType: BackpackCloudPermission): Promise<void> {
-  const response = await fetch(apiUrl("/api/backpack/permissions/grant"), {
+  const response = await apiFetch("/api/backpack/permissions/grant", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -115,7 +115,7 @@ export async function grantBackpackPermission(userAddress: string, consentType: 
 }
 
 export async function revokeBackpackPermission(userAddress: string, consentType: BackpackCloudPermission): Promise<void> {
-  const response = await fetch(apiUrl("/api/backpack/permissions/revoke"), {
+  const response = await apiFetch("/api/backpack/permissions/revoke", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
