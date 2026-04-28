@@ -270,8 +270,6 @@ export default function CreateAgent() {
   }, [toast]);
 
   // Handle AI avatar generation
-  const API_URL = sdk.baseUrl;
-
   const handleGenerateAvatar = useCallback(async () => {
     // Check generation limit
     if (generationCount >= MAX_GENERATIONS) {
@@ -309,7 +307,7 @@ export default function CreateAgent() {
 
     setIsGeneratingAvatar(true);
     try {
-      const response = await fetch(`${API_URL}/api/generate-avatar`, {
+      const response = await sdk.fetch("/api/generate-avatar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title, description }),
@@ -351,7 +349,7 @@ export default function CreateAgent() {
     } finally {
       setIsGeneratingAvatar(false);
     }
-  }, [form, generationCount, toast, API_URL]);
+  }, [form, generationCount, toast]);
 
   const handleAcceptAvatar = useCallback(() => {
     // Avatar is already set in preview, just clear the generated URL state

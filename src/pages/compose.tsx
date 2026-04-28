@@ -59,7 +59,6 @@ import {
 import { CHAIN_CONFIG, getUsdcContractForChain } from "@/lib/chains";
 import { useChain } from "@/contexts/ChainContext";
 import { NetworkSelector } from "@/components/ui/network-selector";
-import { API_BASE_URL } from "@/lib/api";
 import { sdk } from "@/lib/sdk";
 import { useAgenticModels } from "@/hooks/use-coordinator";
 import { useSession } from "@/hooks/use-session.tsx";
@@ -182,8 +181,6 @@ function MintWorkflowDialog({
     setGeneratedBannerUrl(null);
   };
 
-  const API_URL = sdk.baseUrl;
-
   const handleGenerateBanner = async () => {
     if (bannerGenerationCount >= MAX_BANNER_GENERATIONS) {
       toast({
@@ -204,7 +201,7 @@ function MintWorkflowDialog({
 
     setIsGeneratingBanner(true);
     try {
-      const response = await fetch(`${API_URL}/api/generate-banner`, {
+      const response = await sdk.fetch("/api/generate-banner", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title, description }),

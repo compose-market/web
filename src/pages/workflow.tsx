@@ -23,9 +23,8 @@ import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
 import { useOnchainWorkflowByIdentifier } from "@/hooks/use-onchain";
 import { MultimodalCanvas, type ChatMessage } from "@/components/chat";
-import { useChat } from "@/hooks/use-chat";
+import { toComposeAttachment, useChat } from "@/hooks/use-chat";
 import { useComposeStream } from "@/hooks/use-stream";
-import { buildAttachmentPart } from "@/lib/api";
 import { CostReceiptIndicator } from "@/components/receipt-indicator";
 import { ToolTimeline } from "@/components/tool-timeline";
 import { WorkflowCard, WorkflowCardSkeleton } from "@/components/workflow-card";
@@ -78,6 +77,10 @@ export default function ManowarPage() {
     // Shared SDK streaming dispatcher for every workflow run.
     const streamer = useComposeStream(chat, {
         onError: (e) => setChatError(e.message),
+        onDone: () => {
+            setSending(false);
+            setChatStatus("idle");
+        },
     });
 
     const [inputValue, setInputValue] = useState("");
@@ -115,28 +118,13 @@ export default function ManowarPage() {
             return;
         }
 
-        let activeComposeKeyToken = await ensureComposeKeyToken();
-        if (!activeComposeKeyToken) {
-            activeComposeKeyToken = composeKeyToken;
-        }
-
-        if (!activeComposeKeyToken) {
-            toast({
-                title: "Session Sync Required",
-                description: "Compose session key unavailable. Re-open your session and try again.",
-                variant: "destructive",
-            });
-            setShowSessionDialog(true);
-            return;
-        }
-
         const attached = attachedFiles[0];
         const userMessage: ChatMessage = {
             id: crypto.randomUUID(),
             role: "user",
             content: inputValue.trim(),
             timestamp: Date.now(),
-            type: attached?.type || "text",
+            type: attached?.type === "image" || attached?.type === "audio" || attached?.type === "video" ? attached.type : "text",
             // Use IPFS URL (attached.url) instead of local preview (attached.preview)
             // This ensures the displayed attachment matches what's sent to the model
             imageUrl: attached?.type === "image" ? attached.url : undefined,
@@ -169,11 +157,22 @@ export default function ManowarPage() {
         const assistantId = crypto.randomUUID();
         setMessages(prev => [...prev, { id: assistantId, role: "assistant", content: "", timestamp: Date.now() }]);
         const composeRunId = crypto.randomUUID();
-        const runStorageKey = `workflow-active-run:${workflowWallet}`;
         let resolvedThreadId: string | null = null;
         const replayEventIndex = 0;
 
         try {
+            const activeComposeKeyToken = await ensureComposeKeyToken() ?? composeKeyToken;
+            if (!activeComposeKeyToken) {
+                toast({
+                    title: "Session Sync Required",
+                    description: "Compose session key unavailable. Re-open your session and try again.",
+                    variant: "destructive",
+                });
+                setShowSessionDialog(true);
+                throw new Error("Compose session key unavailable. Re-open your session and try again.");
+            }
+            sdk.keys.use(activeComposeKeyToken);
+
             setChatStatus("streaming");
             abortControllerRef.current = new AbortController();
 
@@ -188,14 +187,7 @@ export default function ManowarPage() {
             resolvedThreadId = threadId;
             setActiveThreadId(threadId);
 
-            sessionStorage.setItem(runStorageKey, JSON.stringify({
-                runId: composeRunId,
-                threadId,
-                lastEventIndex: replayEventIndex,
-                startedAt: Date.now(),
-            }));
-
-            const attachmentPart = buildAttachmentPart(attached);
+            const attachmentPart = toComposeAttachment(attached);
             await streamer.runWorkflow({
                 workflowWallet,
                 message: userMessage.content,
@@ -207,8 +199,12 @@ export default function ManowarPage() {
                 ...(attachmentPart ? { attachment: attachmentPart } : {}),
                 assistantId,
                 signal: abortControllerRef.current.signal,
+                options: {
+                    composeKey: activeComposeKeyToken,
+                    userAddress,
+                    chainId: paymentChainId,
+                },
             });
-            sessionStorage.removeItem(runStorageKey);
             void resolvedThreadId;
         } catch (err) {
             if (err instanceof DOMException && err.name === "AbortError") {
@@ -216,6 +212,11 @@ export default function ManowarPage() {
             }
             const errorMsg = err instanceof Error ? err.message : String(err);
             setChatError(errorMsg);
+            setMessages(prev => prev.map(message => (
+                message.id === assistantId
+                    ? { ...message, content: `Error: ${errorMsg}` }
+                    : message
+            )));
             mpError("workflow_execution", errorMsg, { workflow_wallet: workflowWallet });
         } finally {
             setSending(false);
@@ -228,7 +229,7 @@ export default function ManowarPage() {
         if (!workflow?.walletAddress || !activeThreadId) return;
         try {
             abortControllerRef.current?.abort();
-            await fetch(`${sdk.baseUrl}/workflow/${workflow.walletAddress}/stop`, {
+            await sdk.fetch(`/workflow/${workflow.walletAddress}/stop`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ threadId: activeThreadId }),

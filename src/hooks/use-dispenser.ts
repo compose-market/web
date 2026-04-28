@@ -10,7 +10,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { API_BASE_URL } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import { CHAIN_CONFIG } from "@/lib/chains";
 
 // =============================================================================
@@ -63,7 +63,7 @@ export interface ClaimCheckResult {
 // =============================================================================
 
 async function fetchDispenserStatus(): Promise<DispenserStatusResponse> {
-    const response = await fetch(`${API_BASE_URL}/api/dispenser/status`);
+    const response = await apiFetch("/api/dispenser/status");
     if (!response.ok) {
         throw new Error("Failed to fetch dispenser status");
     }
@@ -71,7 +71,7 @@ async function fetchDispenserStatus(): Promise<DispenserStatusResponse> {
 }
 
 async function fetchDispenserCheck(address: string): Promise<ClaimCheckResult> {
-    const response = await fetch(`${API_BASE_URL}/api/dispenser/check/${address}`);
+    const response = await apiFetch(`/api/dispenser/check/${address}`);
     if (!response.ok) {
         throw new Error("Failed to check dispenser status");
     }
@@ -79,7 +79,7 @@ async function fetchDispenserCheck(address: string): Promise<ClaimCheckResult> {
 }
 
 async function claimDispenserUSDC(address: string, chainId: number): Promise<ClaimResult> {
-    const response = await fetch(`${API_BASE_URL}/api/dispenser/claim`, {
+    const response = await apiFetch("/api/dispenser/claim", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ address, chainId }),

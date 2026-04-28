@@ -18,6 +18,7 @@ import { useActiveWallet, useActiveAccount } from "thirdweb/react";
 import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
 import { sdk } from "@/lib/sdk";
+import { toComposeAttachment } from "@/hooks/use-chat";
 import { useChain } from "@/contexts/ChainContext";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -305,6 +306,9 @@ export default function PlaygroundPage() {
     }
 
     const attached = attachedFiles[0];
+    const attachments = attachedFiles
+      .map(toComposeAttachment)
+      .filter((attachment): attachment is NonNullable<typeof attachment> => Boolean(attachment));
     const userMessage = {
       id: crypto.randomUUID(),
       role: "user" as const,
@@ -400,6 +404,7 @@ export default function PlaygroundPage() {
             input,
             modalities: modalities as Array<"text" | "image" | "audio" | "video">,
             stream: true,
+            ...(attachments.length > 0 ? { attachments } : {}),
             ...(selectedModelInfo?.provider ? { provider: selectedModelInfo.provider } : {}),
             ...(activeGoogleTools ? { google_tools: activeGoogleTools } : {}),
             ...(Object.keys(paramValues).length > 0 ? { custom_params: paramValues } : {}),
@@ -414,37 +419,37 @@ export default function PlaygroundPage() {
         return;
       }
 
-      // Remaining non-streaming modalities — submit via sdk.fetch then delegate
-      // Pinata upload to the multimodal helper. Video jobs drive polling
-      // through the SDK's typed video-status stream.
-      const endpoint = outputType === "embedding" ? "/v1/embeddings" : "/v1/responses";
-      const requestBody: Record<string, unknown> = outputType === "embedding"
-        ? { model: selectedModel, input: userMessage.content }
-        : { model: selectedModel, input, modalities, stream: false };
-      if (selectedModelInfo?.provider) requestBody.provider = selectedModelInfo.provider;
-      if (activeGoogleTools) requestBody.google_tools = activeGoogleTools;
-      if (Object.keys(paramValues).length > 0) requestBody.custom_params = paramValues;
+      // Remaining non-streaming modalities use the typed SDK resources as a
+      // third-party integrator would. The SDK owns Compose Key headers,
+      // receipt extraction, budget events, and raw x402 fallback.
+      const callOptions = {
+        ...(activeComposeKeyToken ? { composeKey: activeComposeKeyToken } : {}),
+        userAddress: account.address,
+        chainId: paymentChainId,
+      };
+      const { parseMultimodalData } = await import("@/lib/multimodal");
+      const completion = outputType === "embedding"
+        ? await sdk.inference.embeddings.create({
+          model: selectedModel,
+          input: userMessage.content,
+          ...(attachments.length > 0 ? { attachments } : {}),
+          ...(selectedModelInfo?.provider ? { provider: selectedModelInfo.provider } : {}),
+          ...(Object.keys(paramValues).length > 0 ? { custom_params: paramValues } : {}),
+        }, callOptions)
+        : await sdk.inference.responses.create({
+          model: selectedModel,
+          input,
+          modalities: modalities as Array<"text" | "image" | "audio" | "video">,
+          stream: false,
+          ...(attachments.length > 0 ? { attachments } : {}),
+          ...(selectedModelInfo?.provider ? { provider: selectedModelInfo.provider } : {}),
+          ...(activeGoogleTools ? { google_tools: activeGoogleTools } : {}),
+          ...(Object.keys(paramValues).length > 0 ? { custom_params: paramValues } : {}),
+        }, callOptions);
 
-      const response = await sdk.fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        const errField = errorData.error;
-        const errMsg = typeof errField === "string"
-          ? errField
-          : (errField?.message || errorData.message || JSON.stringify(errField) || `Inference failed: ${response.status}`);
-        throw new Error(errMsg);
-      }
-
-      const { parseMultimodalResponse } = await import("@/lib/multimodal");
-      const result = await parseMultimodalResponse(response, {
+      const result = await parseMultimodalData(completion.data, {
         uploadToPinata: true,
         conversationId,
-        videoStatusFetch: sdk.fetch.bind(sdk),
       });
 
       if (result.polling && result.jobId) {

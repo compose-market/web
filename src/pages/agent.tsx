@@ -27,9 +27,8 @@ import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
 import { useOnchainAgentByIdentifier } from "@/hooks/use-onchain";
 import { MultimodalCanvas, type ChatMessage } from "@/components/chat";
-import { useChat } from "@/hooks/use-chat";
+import { toComposeAttachment, useChat } from "@/hooks/use-chat";
 import { useComposeStream } from "@/hooks/use-stream";
-import { buildAttachmentPart } from "@/lib/api";
 import { CostReceiptIndicator } from "@/components/receipt-indicator";
 import { ToolTimeline } from "@/components/tool-timeline";
 import {
@@ -95,6 +94,10 @@ export default function AgentDetailPage() {
   // chat activity sink + the sdk.events bus — nothing handled per-page.
   const streamer = useComposeStream(chat, {
     onError: (e) => setChatError(e.message),
+    onDone: () => {
+      setSending(false);
+      setChatStatus("idle");
+    },
   });
   const [inputValue, setInputValue] = useState("");
   const [sending, setSending] = useState(false);
@@ -141,10 +144,7 @@ export default function AgentDetailPage() {
     clearFiles();
     setChatError(null);
     resetConversationThread();
-    if (agentWallet) {
-      sessionStorage.removeItem(`agent-active-run:${agentWallet}`);
-    }
-  }, [agentWallet, clearFiles, clearMessages, resetConversationThread]);
+  }, [clearFiles, clearMessages, resetConversationThread]);
 
   const openWorkspaceDialog = useCallback(() => {
     if (!sessionActive || budgetRemaining <= 0) {
@@ -270,30 +270,15 @@ export default function AgentDetailPage() {
       return;
     }
 
-    let activeComposeKeyToken = await ensureComposeKeyToken();
-    if (!activeComposeKeyToken) {
-      activeComposeKeyToken = composeKeyToken;
-    }
-
-    if (!activeComposeKeyToken) {
-      toast({
-        title: "Session Sync Required",
-        description: "Compose session key unavailable. Re-open your session and try again.",
-        variant: "destructive",
-      });
-      setShowSessionDialog(true);
-      return;
-    }
-
     const attached = attachedFiles[0];
-    const userAddress = wallet.getAccount()?.address;
+    const userAddress = wallet.getAccount()?.address ?? account.address;
     const backpackUserId = resolveBackpackUserId(userAddress);
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
       role: "user",
       content: inputValue.trim(),
       timestamp: Date.now(),
-      type: attached?.type || "text",
+      type: attached?.type === "image" || attached?.type === "audio" || attached?.type === "video" ? attached.type : "text",
       // Use IPFS URL for all attachment types
       imageUrl: attached?.type === "image" ? attached.url : undefined,
       audioUrl: attached?.type === "audio" ? attached.url : undefined,
@@ -324,37 +309,52 @@ export default function AgentDetailPage() {
     const assistantId = crypto.randomUUID();
     setMessages(prev => [...prev, { id: assistantId, role: "assistant", content: "", timestamp: Date.now() }]);
     const composeRunId = crypto.randomUUID();
-    const runStorageKey = `agent-active-run:${agentWallet || "unknown"}`;
 
     try {
       if (!agent) throw new Error("Agent not loaded");
+      const activeComposeKeyToken = await ensureComposeKeyToken() ?? composeKeyToken;
+      if (!activeComposeKeyToken) {
+        toast({
+          title: "Session Sync Required",
+          description: "Compose session key unavailable. Re-open your session and try again.",
+          variant: "destructive",
+        });
+        setShowSessionDialog(true);
+        throw new Error("Compose session key unavailable. Re-open your session and try again.");
+      }
+      sdk.keys.use(activeComposeKeyToken);
+
       setChatStatus("streaming");
       const threadId = ensureConversationThread();
-      sessionStorage.setItem(runStorageKey, JSON.stringify({
-        runId: composeRunId,
-        threadId,
-        startedAt: Date.now(),
-      }));
 
-      const attachmentPart = buildAttachmentPart(attached);
+      const attachmentPart = toComposeAttachment(attached);
       await streamer.runAgent({
         agentWallet,
         message: userMessage.content,
         threadId,
         userAddress: backpackUserId,
         composeRunId,
-        cloudPermissions: getCachedBackpackPermissions() as unknown as Record<string, unknown>,
+        cloudPermissions: getCachedBackpackPermissions(),
         ...(attachmentPart ? { attachment: attachmentPart } : {}),
         assistantId,
+        options: {
+          composeKey: activeComposeKeyToken,
+          userAddress,
+          chainId: paymentChainId,
+        },
       });
     } catch (err) {
       if (!(err instanceof DOMException && err.name === "AbortError")) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         setChatError(errorMsg);
+        setMessages(prev => prev.map(message => (
+          message.id === assistantId
+            ? { ...message, content: `Error: ${errorMsg}` }
+            : message
+        )));
         mpError("agent_chat", errorMsg, { agent_wallet: agentWallet });
       }
     } finally {
-      sessionStorage.removeItem(runStorageKey);
       setSending(false);
       setChatStatus("idle");
     }
