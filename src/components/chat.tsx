@@ -39,18 +39,13 @@ import {
     RefreshCw,
     ChevronDown,
     ChevronUp,
+    FileText,
     Image as ImageIcon,
     Wrench,
 } from "lucide-react";
 import { GenerationCanvas } from "@/components/blur";
 import { useLyriaWebSocket } from "@/hooks/use-lyria";
-import type { ChatActivityState } from "@/hooks/use-chat";
-
-// =============================================================================
-// Types - Import from single source of truth
-// =============================================================================
-
-import { type ChatMessage, type AttachedFile } from "@/lib/api";
+import type { AttachedFile, ChatActivityState, ChatMessage } from "@/hooks/use-chat";
 
 // Re-export for convenience
 export type { ChatMessage, AttachedFile };
@@ -647,6 +642,10 @@ export function MultimodalCanvas({
                                         <img src={file.preview} alt="Preview" className="h-full w-full object-cover" />
                                     ) : file.type === "video" ? (
                                         file.preview ? <video src={file.preview} className="h-full w-full object-cover" muted /> : <Video className="h-6 w-6 text-pink-500" />
+                                    ) : file.type === "pdf" ? (
+                                        <FileText className="h-6 w-6 text-zinc-500" />
+                                    ) : file.type === "file" ? (
+                                        <Paperclip className="h-6 w-6 text-zinc-500" />
                                     ) : (
                                         <Music className="h-6 w-6 text-zinc-500" />
                                     )}
@@ -724,7 +723,7 @@ export function MultimodalCanvas({
                 </div>
 
                 {fileInputRef && onFileInputChange && (
-                    <input type="file" ref={fileInputRef} onChange={onFileInputChange} accept="image/*,audio/*,video/*" className="hidden" />
+                    <input type="file" ref={fileInputRef} onChange={onFileInputChange} accept="image/*,audio/*,video/*,application/pdf,.pdf,.txt,.md,.json,.csv,.html,.xml,text/*,application/json" className="hidden" />
                 )}
             </div>
         </div>

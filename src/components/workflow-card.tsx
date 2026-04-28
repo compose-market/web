@@ -23,7 +23,7 @@ import { getIpfsUrl } from "@/lib/pinata";
 import type { OnchainWorkflow, OnchainAgent } from "@/hooks/use-onchain";
 import type { AgentCard as AgentCardType } from "@/lib/pinata";
 import { AgentCard } from "@/components/agent-card";
-import { API_BASE_URL } from "@/lib/api";
+import { API_BASE_URL } from "@/lib/sdk";
 import {
     Copy,
     ExternalLink,

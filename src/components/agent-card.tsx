@@ -5,7 +5,7 @@ import { getIpfsUrl } from "@/lib/pinata";
 import type { OnchainAgent } from "@/hooks/use-onchain";
 import { CHAIN_CONFIG } from "@/lib/performance/chains-data";
 import { getContractAddress } from "@/lib/contracts";
-import { API_BASE_URL } from "@/lib/api";
+import { API_BASE_URL } from "@/lib/sdk";
 
 export interface AgentCardProps {
   agent: OnchainAgent;

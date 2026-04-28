@@ -56,6 +56,19 @@ function isActiveKey(key: ComposeKeyRecord): boolean {
   return !key.revokedAt && key.expiresAt > Date.now();
 }
 
+function formatWeiUsd(value: string | number | null | undefined): string {
+  const amount = typeof value === "number" ? value : Number.parseInt(String(value ?? "0"), 10);
+  const safeAmount = Number.isFinite(amount) ? amount : 0;
+  return `$${(safeAmount / 1_000_000).toFixed(2)}`;
+}
+
+function toBudgetWeiString(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error("budgetWei must be positive");
+  }
+  return String(Math.floor(value));
+}
+
 function budgetRows(selectedBudget: number, duration: number): SessionSummaryRow[] {
   return [
     {
@@ -244,7 +257,7 @@ function SessionManageDialog({ open, onOpenChange }: SessionManageDialogProps) {
     summaryRows: [
       {
         label: "Budget",
-        value: `$${(sessionKey.budgetRemaining / 1_000_000).toFixed(2)} / $${(sessionKey.budgetLimit / 1_000_000).toFixed(2)}`,
+        value: `${formatWeiUsd(sessionKey.budgetRemaining)} / ${formatWeiUsd(sessionKey.budgetLimit)}`,
       },
       {
         label: "Expires",
@@ -332,7 +345,7 @@ function ComposeKeyDialog({ open, onOpenChange }: ComposeKeyDialogProps) {
 
       const created = await sdk.keys.create({
         purpose: "api",
-        budgetWei: session.budgetRemaining,
+        budgetWei: toBudgetWeiString(session.budgetRemaining),
         expiresAt: session.expiresAt ?? Date.now() + 24 * 60 * 60 * 1000,
         chainId: session.chainId ?? undefined,
         name: keyName,

@@ -190,8 +190,6 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
   );
 
   // Handle AI avatar generation
-  const API_URL = sdk.baseUrl;
-
   const handleGenerateAvatar = useCallback(async () => {
     // Check generation limit
     if (generationCount >= MAX_GENERATIONS) {
@@ -229,7 +227,7 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
 
     setIsGeneratingAvatar(true);
     try {
-      const response = await fetch(`${API_URL}/api/generate-avatar`, {
+      const response = await sdk.fetch("/api/generate-avatar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title, description }),
@@ -271,7 +269,7 @@ export function WarpAgentForm({ agent, onBack }: WarpAgentFormProps) {
     } finally {
       setIsGeneratingAvatar(false);
     }
-  }, [form, generationCount, toast, API_URL]);
+  }, [form, generationCount, toast]);
 
   const handleAcceptAvatar = useCallback(() => {
     setGeneratedAvatarUrl(null);

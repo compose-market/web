@@ -59,7 +59,6 @@ import {
 } from "lucide-react";
 import { sdk } from "@/lib/sdk";
 
-const API_BASE = sdk.baseUrl;
 const SOCKET_BASE = (import.meta.env.VITE_SOCKET_URL || "wss://services.compose.market/socket").replace(/\/+$/, "");
 
 // =============================================================================
@@ -351,8 +350,8 @@ export function BackpackDialog({
 
         try {
             setRefreshing(true);
-            const res = await fetch(
-                `${API_BASE}/api/backpack/connections?userAddress=${encodeURIComponent(effectiveUserId)}`,
+            const res = await sdk.fetch(
+                `/api/backpack/connections?userAddress=${encodeURIComponent(effectiveUserId)}`,
                 { signal: controller.signal },
             );
 
@@ -433,8 +432,8 @@ export function BackpackDialog({
 
         setSearching(true);
         try {
-            const res = await fetch(
-                `${API_BASE}/api/backpack/toolkits?search=${encodeURIComponent(query)}&limit=15`,
+            const res = await sdk.fetch(
+                `/api/backpack/toolkits?search=${encodeURIComponent(query)}&limit=15`,
                 { signal: controller.signal },
             );
             if (res.ok) {
@@ -613,7 +612,7 @@ export function BackpackDialog({
 
         try {
             // Step 1: Call backend to get OAuth redirect URL from Composio
-            const res = await fetch(`${API_BASE}/api/backpack/connect`, {
+            const res = await sdk.fetch("/api/backpack/connect", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -648,8 +647,8 @@ export function BackpackDialog({
             });
 
             startStatusPolling(async (signal) => {
-                const statusRes = await fetch(
-                    `${API_BASE}/api/backpack/status/${encodeURIComponent(provider.slug)}?userAddress=${encodeURIComponent(effectiveUserId)}`,
+                const statusRes = await sdk.fetch(
+                    `/api/backpack/status/${encodeURIComponent(provider.slug)}?userAddress=${encodeURIComponent(effectiveUserId)}`,
                     { signal },
                 );
                 if (!statusRes.ok) {
@@ -698,7 +697,7 @@ export function BackpackDialog({
 
         try {
             // Generate a deep link
-            const res = await fetch(`${API_BASE}/api/backpack/telegram/link`, {
+            const res = await sdk.fetch("/api/backpack/telegram/link", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ userAddress: effectiveUserId }),
@@ -720,8 +719,8 @@ export function BackpackDialog({
             });
 
             startStatusPolling(async (signal) => {
-                const statusRes = await fetch(
-                    `${API_BASE}/api/backpack/telegram/status?userAddress=${encodeURIComponent(effectiveUserId)}`,
+                const statusRes = await sdk.fetch(
+                    `/api/backpack/telegram/status?userAddress=${encodeURIComponent(effectiveUserId)}`,
                     { signal },
                 );
                 if (!statusRes.ok) {
@@ -902,7 +901,7 @@ export function BackpackDialog({
         setLoadingAccount(provider.slug);
 
         try {
-            const res = await fetch(`${API_BASE}/api/backpack/disconnect`, {
+            const res = await sdk.fetch("/api/backpack/disconnect", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
