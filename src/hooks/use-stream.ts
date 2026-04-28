@@ -26,6 +26,7 @@ import type {
     AgentRuntimeEvent,
     ChatCompletionChunk,
     ChatCompletionsCreateParams,
+    ComposeAttachmentInput,
     ComposeCallOptions,
     ComposeReceipt,
     ResponseStreamEvent,
@@ -46,6 +47,8 @@ export interface ComposeStreamCallbacks {
     onSessionInvalid?: (reason: SessionInvalidReason) => void;
     onError?: (err: { code?: string; message: string }) => void;
     onVideoStatus?: (status: { jobId: string; status: "queued" | "processing" | "completed" | "failed"; progress?: number; url?: string; error?: string }) => void;
+    /** Called as soon as the SDK emits its terminal done event. */
+    onDone?: () => void;
     /** Called once with the final aggregated result after the stream ends. */
     onFinal?: (final: { text: string; requestId: string | null; structuredOutput?: unknown }) => void;
 }
@@ -60,11 +63,12 @@ export interface AgentStreamArgs {
     message: string;
     threadId: string;
     userAddress: string;
-    cloudPermissions?: Record<string, unknown>;
+    cloudPermissions?: string[];
     composeRunId?: string;
-    attachment?: unknown;
+    attachment?: ComposeAttachmentInput;
     assistantId: string;
     signal?: AbortSignal;
+    options?: StreamCallOptions;
 }
 
 export interface WorkflowStreamArgs {
@@ -75,9 +79,10 @@ export interface WorkflowStreamArgs {
     composeRunId?: string;
     continuous?: boolean;
     lastEventIndex?: number;
-    attachment?: unknown;
+    attachment?: ComposeAttachmentInput;
     assistantId: string;
     signal?: AbortSignal;
+    options?: StreamCallOptions;
 }
 
 export interface ChatStreamArgs {
@@ -180,15 +185,18 @@ export function useComposeStream(
                 ...(args.composeRunId ? { composeRunId: args.composeRunId } : {}),
                 ...(args.attachment ? { attachment: args.attachment } : {}),
             },
-            { signal: args.signal },
+            { ...args.options, signal: args.signal },
         );
 
         try {
             for await (const event of stream) {
                 dispatchAgentEvent(event, chat, callbacksRef);
+                if (event.type === "done") {
+                    completeStreamTurn(chat, args.assistantId, callbacksRef);
+                }
             }
             const final = await stream.final();
-            chat.flushStreamContent();
+            chat.flushStreamContent(args.assistantId, chat.streamedTextRef.current);
             callbacksRef.current.onFinal?.({
                 text: final.text,
                 requestId: final.requestId,
@@ -196,7 +204,7 @@ export function useComposeStream(
             if (!final.text) {
                 chat.updateAssistantMessage(args.assistantId, { content: "No response received" });
             }
-            chat.clearActivityState();
+            clearActivityIfCurrent(chat, args.assistantId);
         } catch (err) {
             handleStreamError(err, chat, args.assistantId, callbacksRef);
         }
@@ -218,7 +226,7 @@ export function useComposeStream(
                 ...(typeof args.lastEventIndex === "number" ? { lastEventIndex: args.lastEventIndex } : {}),
                 ...(args.attachment ? { attachment: args.attachment } : {}),
             },
-            { signal: args.signal },
+            { ...args.options, signal: args.signal },
         );
 
         let handledStructuredResult = false;
@@ -227,9 +235,12 @@ export function useComposeStream(
             for await (const event of stream) {
                 const structured = dispatchWorkflowEvent(event, chat, callbacksRef);
                 if (structured) handledStructuredResult = true;
+                if (event.type === "done") {
+                    completeStreamTurn(chat, args.assistantId, callbacksRef);
+                }
             }
             const final = await stream.final();
-            chat.flushStreamContent();
+            chat.flushStreamContent(args.assistantId, chat.streamedTextRef.current);
 
             if (!handledStructuredResult && final.text) {
                 chat.updateAssistantMessage(args.assistantId, { content: final.text });
@@ -243,7 +254,7 @@ export function useComposeStream(
                 requestId: final.requestId,
                 structuredOutput: final.structuredOutput,
             });
-            chat.clearActivityState();
+            clearActivityIfCurrent(chat, args.assistantId);
         } catch (err) {
             handleStreamError(err, chat, args.assistantId, callbacksRef);
         }
@@ -264,13 +275,13 @@ export function useComposeStream(
                 dispatchChatChunk(chunk, chat);
             }
             const final = await stream.final();
-            chat.flushStreamContent();
+            chat.flushStreamContent(args.assistantId, chat.streamedTextRef.current);
             const text = final.chatCompletion.choices[0]?.message.content ?? "";
             if (!text && !final.chatCompletion.choices[0]?.message.tool_calls) {
                 chat.updateAssistantMessage(args.assistantId, { content: "No response received" });
             }
             callbacksRef.current.onFinal?.({ text, requestId: final.requestId });
-            chat.clearActivityState();
+            clearActivityIfCurrent(chat, args.assistantId);
         } catch (err) {
             handleStreamError(err, chat, args.assistantId, callbacksRef);
         }
@@ -291,12 +302,12 @@ export function useComposeStream(
                 dispatchResponsesEvent(event, chat);
             }
             const final = await stream.final();
-            chat.flushStreamContent();
+            chat.flushStreamContent(args.assistantId, chat.streamedTextRef.current);
             callbacksRef.current.onFinal?.({
                 text: chat.streamedTextRef.current,
                 requestId: final.requestId,
             });
-            chat.clearActivityState();
+            clearActivityIfCurrent(chat, args.assistantId);
         } catch (err) {
             handleStreamError(err, chat, args.assistantId, callbacksRef);
         }
@@ -340,6 +351,24 @@ export function useComposeStream(
     }, [chat]);
 
     return { runAgent, runWorkflow, runChat, runResponses, runVideo };
+}
+
+function completeStreamTurn(
+    chat: UseChatReturn,
+    assistantId: string,
+    cbRef: React.MutableRefObject<ComposeStreamCallbacks>,
+): void {
+    chat.flushStreamContent(assistantId, chat.streamedTextRef.current);
+    if (chat.currentAssistantIdRef.current === assistantId) {
+        chat.clearActivityState();
+    }
+    cbRef.current.onDone?.();
+}
+
+function clearActivityIfCurrent(chat: UseChatReturn, assistantId: string): void {
+    if (chat.currentAssistantIdRef.current === assistantId) {
+        chat.clearActivityState();
+    }
 }
 
 function dispatchAgentEvent(
