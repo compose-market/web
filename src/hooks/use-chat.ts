@@ -9,20 +9,68 @@
  * Provides O(1) message updates, RAF-batched streaming, and stick-to-bottom scroll.
  */
 import { useState, useRef, useCallback, useEffect } from "react";
+import type { ComposeAttachmentInput } from "@compose-market/sdk";
 import { uploadConversationFile, cleanupConversationFiles } from "@/lib/pinata";
-import { type ChatMessage, type AttachedFile } from "@/lib/api";
 import {
     createObjectUrlPreview,
     revokeObjectUrlPreview,
     revokeObjectUrlSet,
 } from "@/lib/performance/object-url";
 
-// Re-export types for convenience
-export type { ChatMessage, AttachedFile } from "@/lib/api";
-
 // =============================================================================
 // Types
 // =============================================================================
+
+export type MessageType = "text" | "image" | "audio" | "video" | "embedding" | "pdf" | "file";
+
+export interface ChatMessage {
+    id: string;
+    role: "user" | "assistant";
+    content: string;
+    timestamp: number;
+    type?: MessageType;
+    imageUrl?: string;
+    audioUrl?: string;
+    videoUrl?: string;
+    partialImage?: boolean;
+    reasoning?: string;
+    toolCalls?: Array<{
+        id: string;
+        name: string;
+        source?: "chat" | "responses" | "agent" | "workflow";
+        summary?: string;
+        arguments?: string;
+        status: "running" | "completed" | "error";
+        error?: string;
+    }>;
+    progressEvents?: Array<{
+        id: string;
+        phase: "thinking" | "start" | "step" | "agent" | "progress" | "complete";
+        message: string;
+    }>;
+}
+
+export interface AttachedFile {
+    file: File;
+    cid?: string;
+    url?: string;
+    preview?: string;
+    uploading: boolean;
+    type: "image" | "audio" | "video" | "pdf" | "file";
+}
+
+export function toComposeAttachment(attached: Pick<AttachedFile, "type" | "url" | "file"> | undefined): ComposeAttachmentInput | undefined {
+    if (!attached?.url) {
+        return undefined;
+    }
+
+    return {
+        type: attached.type,
+        url: attached.url,
+        mimeType: attached.file.type || undefined,
+        filename: attached.file.name || undefined,
+    };
+}
 
 export interface UseChatOptions {
     /** Conversation ID for Pinata grouping */
@@ -93,7 +141,7 @@ export interface UseChatReturn {
     /** Schedule a streaming update (batched to RAF) */
     scheduleStreamUpdate: (content: string) => void;
     /** Flush any pending stream content immediately */
-    flushStreamContent: () => void;
+    flushStreamContent: (assistantId?: string, content?: string) => void;
     activityState: ChatActivityState;
     clearActivityState: () => void;
     setActivityPhase: (phase: ChatActivityPhase, label?: string) => void;
@@ -395,14 +443,14 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     // Streaming Functions
     // ==========================================================================
 
-    const flushStreamContent = useCallback(() => {
+    const flushStreamContent = useCallback((targetAssistantId?: string, targetContent?: string) => {
         if (rafRef.current !== null) {
             cancelAnimationFrame(rafRef.current);
             rafRef.current = null;
         }
 
-        const assistantId = currentAssistantIdRef.current;
-        const content = streamedTextRef.current;
+        const assistantId = targetAssistantId ?? currentAssistantIdRef.current;
+        const content = targetContent ?? streamedTextRef.current;
 
         if (assistantId && content) {
             updateAssistantMessage(assistantId, { content });
@@ -437,10 +485,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
 
     const handleJsonResponse = useCallback((id: string, data: unknown) => {
         // Import dynamically to avoid circular dependencies
-        Promise.all([
-            import("@/lib/api"),
-            import("@/lib/multimodal"),
-        ]).then(async ([{ parseJsonResponse }, { uploadBase64ToPinata }]) => {
+        import("@/lib/multimodal").then(async ({ parseJsonResponse, uploadBase64ToPinata }) => {
             const result = parseJsonResponse(data);
 
             if (!result.success) {
@@ -506,7 +551,11 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
             ? "image"
             : file.type.startsWith("video/")
                 ? "video"
-                : "audio";
+                : file.type.startsWith("audio/")
+                    ? "audio"
+                    : file.type === "application/pdf"
+                        ? "pdf"
+                        : "file";
         let preview: string | undefined;
 
         try {
