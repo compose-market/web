@@ -19,14 +19,11 @@ import { useChain } from "@/contexts/ChainContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
 import { useOnchainAgentByIdentifier } from "@/hooks/use-onchain";
-import { MultimodalCanvas, type ChatMessage } from "@/components/chat";
+import { MultimodalCanvas } from "@/components/chat";
 import { toComposeAttachment, useChat } from "@/hooks/use-chat";
 import { useComposeStream } from "@/hooks/use-stream";
 import { CostReceiptIndicator } from "@/components/receipt-indicator";
@@ -82,6 +79,7 @@ export default function AgentDetailPage() {
     onError: (err) => setChatError(err),
   });
   const { messages, setMessages, clearMessages, scrollContainerRef, messagesEndRef,
+    addUserMessage, createAssistantPlaceholder, updateAssistantMessage,
     activityState,
     // Attachments
     attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, clearFiles,
@@ -94,15 +92,11 @@ export default function AgentDetailPage() {
   // chat activity sink + the sdk.events bus — nothing handled per-page.
   const streamer = useComposeStream(chat, {
     onError: (e) => setChatError(e.message),
-    onDone: () => {
-      setSending(false);
-      setChatStatus("idle");
-    },
+    onDone: () => setSending(false),
   });
   const [inputValue, setInputValue] = useState("");
   const [sending, setSending] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
-  const [chatStatus, setChatStatus] = useState<"idle" | "paying" | "waiting" | "streaming">("idle");
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [workspaceFiles, setWorkspaceFiles] = useState<File[]>([]);
   const [workspaceUploading, setWorkspaceUploading] = useState(false);
@@ -273,24 +267,18 @@ export default function AgentDetailPage() {
     const attached = attachedFiles[0];
     const userAddress = wallet.getAccount()?.address ?? account.address;
     const backpackUserId = resolveBackpackUserId(userAddress);
-    const userMessage: ChatMessage = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: inputValue.trim(),
-      timestamp: Date.now(),
+    const prompt = inputValue.trim();
+
+    addUserMessage(prompt, {
       type: attached?.type === "image" || attached?.type === "audio" || attached?.type === "video" ? attached.type : "text",
-      // Use IPFS URL for all attachment types
       imageUrl: attached?.type === "image" ? attached.url : undefined,
       audioUrl: attached?.type === "audio" ? attached.url : undefined,
       videoUrl: attached?.type === "video" ? attached.url : undefined,
-    };
-
-    setMessages(prev => [...prev, userMessage]);
+    });
     setInputValue("");
-    clearFiles(); // Clear attachment from input after sending
+    clearFiles();
     setSending(true);
     setChatError(null);
-    setChatStatus("paying");
 
     posthog?.capture("agent_chat_sent", {
       agent_wallet: agentWallet,
@@ -305,14 +293,12 @@ export default function AgentDetailPage() {
       "Prompt Text": inputValue.trim().slice(0, 500),
     });
 
-    // Create assistant placeholder
-    const assistantId = crypto.randomUUID();
-    setMessages(prev => [...prev, { id: assistantId, role: "assistant", content: "", timestamp: Date.now() }]);
+    const assistantId = createAssistantPlaceholder();
     const composeRunId = crypto.randomUUID();
 
     try {
       if (!agent) throw new Error("Agent not loaded");
-      const activeComposeKeyToken = await ensureComposeKeyToken() ?? composeKeyToken;
+      const activeComposeKeyToken = composeKeyToken || sdk.keys.currentToken() || await ensureComposeKeyToken();
       if (!activeComposeKeyToken) {
         toast({
           title: "Session Sync Required",
@@ -324,13 +310,12 @@ export default function AgentDetailPage() {
       }
       sdk.keys.use(activeComposeKeyToken);
 
-      setChatStatus("streaming");
       const threadId = ensureConversationThread();
 
       const attachmentPart = toComposeAttachment(attached);
       await streamer.runAgent({
         agentWallet,
-        message: userMessage.content,
+        message: prompt,
         threadId,
         userAddress: backpackUserId,
         composeRunId,
@@ -347,18 +332,13 @@ export default function AgentDetailPage() {
       if (!(err instanceof DOMException && err.name === "AbortError")) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         setChatError(errorMsg);
-        setMessages(prev => prev.map(message => (
-          message.id === assistantId
-            ? { ...message, content: `Error: ${errorMsg}` }
-            : message
-        )));
+        updateAssistantMessage(assistantId, { content: `Error: ${errorMsg}` });
         mpError("agent_chat", errorMsg, { agent_wallet: agentWallet });
       }
     } finally {
       setSending(false);
-      setChatStatus("idle");
     }
-  }, [inputValue, sending, agentWallet, wallet, account, toast, agent, attachedFiles, clearFiles, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, setShowSessionDialog, ensureConversationThread, streamer, posthog]);
+  }, [inputValue, sending, agentWallet, wallet, account, toast, agent, attachedFiles, addUserMessage, clearFiles, createAssistantPlaceholder, updateAssistantMessage, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, ensureConversationThread, streamer, posthog]);
 
   const copyEndpoint = () => {
     toast({
@@ -460,7 +440,7 @@ export default function AgentDetailPage() {
             onInputChange={setInputValue}
             onSend={handleSendMessage}
             sending={sending}
-            status={chatStatus}
+            status={sending ? "streaming" : "idle"}
             activityState={activityState}
             error={chatError}
             sessionActive={sessionActive}

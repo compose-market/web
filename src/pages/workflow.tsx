@@ -22,7 +22,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
 import { useOnchainWorkflowByIdentifier } from "@/hooks/use-onchain";
-import { MultimodalCanvas, type ChatMessage } from "@/components/chat";
+import { MultimodalCanvas } from "@/components/chat";
 import { toComposeAttachment, useChat } from "@/hooks/use-chat";
 import { useComposeStream } from "@/hooks/use-stream";
 import { CostReceiptIndicator } from "@/components/receipt-indicator";
@@ -67,6 +67,7 @@ export default function ManowarPage() {
         onError: (err) => setChatError(err),
     });
     const { messages, setMessages, scrollContainerRef, messagesEndRef,
+        addUserMessage, createAssistantPlaceholder, updateAssistantMessage,
         activityState,
         // Attachments
         attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, clearFiles,
@@ -77,16 +78,12 @@ export default function ManowarPage() {
     // Shared SDK streaming dispatcher for every workflow run.
     const streamer = useComposeStream(chat, {
         onError: (e) => setChatError(e.message),
-        onDone: () => {
-            setSending(false);
-            setChatStatus("idle");
-        },
+        onDone: () => setSending(false),
     });
 
     const [inputValue, setInputValue] = useState("");
     const [sending, setSending] = useState(false);
     const [chatError, setChatError] = useState<string | null>(null);
-    const [chatStatus, setChatStatus] = useState<"idle" | "paying" | "waiting" | "streaming">("idle");
     const [continuousEnabled, setContinuousEnabled] = useState(false);
     const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
@@ -119,25 +116,18 @@ export default function ManowarPage() {
         }
 
         const attached = attachedFiles[0];
-        const userMessage: ChatMessage = {
-            id: crypto.randomUUID(),
-            role: "user",
-            content: inputValue.trim(),
-            timestamp: Date.now(),
+        const prompt = inputValue.trim();
+
+        addUserMessage(prompt, {
             type: attached?.type === "image" || attached?.type === "audio" || attached?.type === "video" ? attached.type : "text",
-            // Use IPFS URL (attached.url) instead of local preview (attached.preview)
-            // This ensures the displayed attachment matches what's sent to the model
             imageUrl: attached?.type === "image" ? attached.url : undefined,
             audioUrl: attached?.type === "audio" ? attached.url : undefined,
             videoUrl: attached?.type === "video" ? attached.url : undefined,
-        };
-
-        setMessages(prev => [...prev, userMessage]);
+        });
         setInputValue("");
         clearFiles();
         setSending(true);
         setChatError(null);
-        setChatStatus("paying");
         abortControllerRef.current = new AbortController();
 
         posthog?.capture("workflow_executed", {
@@ -153,15 +143,12 @@ export default function ManowarPage() {
             "Prompt Text": inputValue.trim().slice(0, 500),
         });
 
-        // Create assistant placeholder
-        const assistantId = crypto.randomUUID();
-        setMessages(prev => [...prev, { id: assistantId, role: "assistant", content: "", timestamp: Date.now() }]);
+        const assistantId = createAssistantPlaceholder();
         const composeRunId = crypto.randomUUID();
-        let resolvedThreadId: string | null = null;
         const replayEventIndex = 0;
 
         try {
-            const activeComposeKeyToken = await ensureComposeKeyToken() ?? composeKeyToken;
+            const activeComposeKeyToken = composeKeyToken || sdk.keys.currentToken() || await ensureComposeKeyToken();
             if (!activeComposeKeyToken) {
                 toast({
                     title: "Session Sync Required",
@@ -173,7 +160,6 @@ export default function ManowarPage() {
             }
             sdk.keys.use(activeComposeKeyToken);
 
-            setChatStatus("streaming");
             abortControllerRef.current = new AbortController();
 
             // Persistent thread ID scoped to user + workflow
@@ -184,13 +170,12 @@ export default function ManowarPage() {
                 threadId = `workflow-${workflowWallet}-user-${userAddress}-${crypto.randomUUID()}`;
                 sessionStorage.setItem(threadKey, threadId);
             }
-            resolvedThreadId = threadId;
             setActiveThreadId(threadId);
 
             const attachmentPart = toComposeAttachment(attached);
             await streamer.runWorkflow({
                 workflowWallet,
-                message: userMessage.content,
+                message: prompt,
                 threadId,
                 userAddress,
                 composeRunId,
@@ -205,25 +190,19 @@ export default function ManowarPage() {
                     chainId: paymentChainId,
                 },
             });
-            void resolvedThreadId;
         } catch (err) {
             if (err instanceof DOMException && err.name === "AbortError") {
                 return;
             }
             const errorMsg = err instanceof Error ? err.message : String(err);
             setChatError(errorMsg);
-            setMessages(prev => prev.map(message => (
-                message.id === assistantId
-                    ? { ...message, content: `Error: ${errorMsg}` }
-                    : message
-            )));
+            updateAssistantMessage(assistantId, { content: `Error: ${errorMsg}` });
             mpError("workflow_execution", errorMsg, { workflow_wallet: workflowWallet });
         } finally {
             setSending(false);
-            setChatStatus("idle");
             abortControllerRef.current = null;
         }
-    }, [inputValue, sending, workflow, workflowWallet, wallet, account, toast, attachedFiles, clearFiles, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, setShowSessionDialog, continuousEnabled, streamer, posthog]);
+    }, [inputValue, sending, workflow, workflowWallet, wallet, account, toast, attachedFiles, addUserMessage, clearFiles, createAssistantPlaceholder, updateAssistantMessage, paymentChainId, sessionActive, budgetRemaining, composeKeyToken, ensureComposeKeyToken, continuousEnabled, streamer, posthog]);
 
     const handleStopExecution = useCallback(async () => {
         if (!workflow?.walletAddress || !activeThreadId) return;
@@ -240,7 +219,6 @@ export default function ManowarPage() {
                 thread_id: activeThreadId,
             });
             chat.clearActivityState();
-            setChatStatus("idle");
             setSending(false);
             toast({ title: "Stopped", description: "Workflow execution stopped" });
         } catch {
@@ -320,7 +298,7 @@ export default function ManowarPage() {
                         size="sm"
                         className="text-muted-foreground hover:text-red-400 h-7 w-7 p-0"
                         onClick={handleStopExecution}
-                        disabled={!sending && chatStatus !== "streaming"}
+                        disabled={!sending}
                         aria-label="Stop workflow"
                     >
                         <StopCircle className="w-4 h-4" />
@@ -368,7 +346,7 @@ export default function ManowarPage() {
                             onInputChange={setInputValue}
                             onSend={handleSendMessage}
                             sending={sending}
-                            status={chatStatus}
+                            status={sending ? "streaming" : "idle"}
                             activityState={activityState}
                             error={chatError}
                             sessionActive={sessionActive}
