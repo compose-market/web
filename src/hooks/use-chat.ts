@@ -79,8 +79,6 @@ export interface UseChatOptions {
     onResponse?: (message: ChatMessage) => void;
     /** Called when an error occurs */
     onError?: (error: string) => void;
-    /** Enable 60fps max streaming updates via requestAnimationFrame */
-    rafBatching?: boolean;
     /** Max files allowed (default: 1) */
     maxFiles?: number;
 }
@@ -119,6 +117,7 @@ export interface UseChatReturn {
         type?: ChatMessage["type"];
         imageUrl?: string;
         audioUrl?: string;
+        videoUrl?: string;
     }) => string;
     /** Create an assistant placeholder, returns the message ID */
     createAssistantPlaceholder: (type?: ChatMessage["type"]) => string;
@@ -183,7 +182,6 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     const {
         conversationId: providedId,
         onError,
-        rafBatching = true,
         maxFiles = 1,
     } = options;
 
@@ -213,9 +211,8 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     const audioChunksRef = useRef<Blob[]>([]);
     const mediaStreamRef = useRef<MediaStream | null>(null);
 
-    // === RAF Batching Refs ===
+    // === Streaming refs (synchronous flush, no rAF batching) ===
     const streamedTextRef = useRef<string>("");
-    const rafRef = useRef<number | null>(null);
     const currentAssistantIdRef = useRef<string | null>(null);
 
     // === Scroll Refs ===
@@ -243,6 +240,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
             type?: ChatMessage["type"];
             imageUrl?: string;
             audioUrl?: string;
+            videoUrl?: string;
         }
     ): string => {
         const id = crypto.randomUUID();
@@ -254,6 +252,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
             type: msgOptions?.type || "text",
             imageUrl: msgOptions?.imageUrl,
             audioUrl: msgOptions?.audioUrl,
+            videoUrl: msgOptions?.videoUrl,
         };
         setMessages(prev => [...prev, message]);
         return id;
@@ -440,15 +439,10 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     }, []);
 
     // ==========================================================================
-    // Streaming Functions
+    // Streaming Functions (synchronous; per-delta updates render on every tick)
     // ==========================================================================
 
     const flushStreamContent = useCallback((targetAssistantId?: string, targetContent?: string) => {
-        if (rafRef.current !== null) {
-            cancelAnimationFrame(rafRef.current);
-            rafRef.current = null;
-        }
-
         const assistantId = targetAssistantId ?? currentAssistantIdRef.current;
         const content = targetContent ?? streamedTextRef.current;
 
@@ -459,25 +453,11 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
 
     const scheduleStreamUpdate = useCallback((content: string) => {
         streamedTextRef.current = content;
-
-        if (!rafBatching) {
-            const assistantId = currentAssistantIdRef.current;
-            if (assistantId) {
-                updateAssistantMessage(assistantId, { content });
-            }
-            return;
+        const assistantId = currentAssistantIdRef.current;
+        if (assistantId) {
+            updateAssistantMessage(assistantId, { content });
         }
-
-        if (rafRef.current === null) {
-            rafRef.current = requestAnimationFrame(() => {
-                rafRef.current = null;
-                const assistantId = currentAssistantIdRef.current;
-                if (assistantId) {
-                    updateAssistantMessage(assistantId, { content: streamedTextRef.current });
-                }
-            });
-        }
-    }, [rafBatching, updateAssistantMessage]);
+    }, [updateAssistantMessage]);
 
     // ==========================================================================
     // JSON Response Handler (delegates to centralized parseJsonResponse)
@@ -746,9 +726,6 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
 
     useEffect(() => {
         return () => {
-            if (rafRef.current !== null) {
-                cancelAnimationFrame(rafRef.current);
-            }
             if (mediaStreamRef.current) {
                 mediaStreamRef.current.getTracks().forEach((track) => track.stop());
             }

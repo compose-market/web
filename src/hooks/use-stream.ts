@@ -58,6 +58,8 @@ type StreamCallOptions = Pick<
     "x402MaxAmountWei" | "idempotencyKey" | "composeRunId" | "composeKey" | "userAddress" | "chainId"
 >;
 
+type AgentStreamEvent = AgentRuntimeEvent | { type: "reasoning-delta"; delta: string };
+
 export interface AgentStreamArgs {
     agentWallet: string;
     message: string;
@@ -173,7 +175,10 @@ export function useComposeStream(
     const runAgent = useCallback(async (args: AgentStreamArgs): Promise<void> => {
         chat.currentAssistantIdRef.current = args.assistantId;
         chat.streamedTextRef.current = "";
-        chat.setActivityPhase("thinking", "Preparing request...");
+        chat.setActivityPhase("thinking", "Thinking...");
+        const t0 = performance.now();
+        let firstEventAt: number | null = null;
+        let firstTextAt: number | null = null;
 
         const stream = sdk.agent.stream(
             {
@@ -190,6 +195,17 @@ export function useComposeStream(
 
         try {
             for await (const event of stream) {
+                if (firstEventAt === null) {
+                    firstEventAt = performance.now();
+                }
+                if (firstTextAt === null && event.type === "text-delta") {
+                    firstTextAt = performance.now();
+                    console.log("[agent-stream-timing]", JSON.stringify({
+                        runId: args.composeRunId,
+                        firstEventMs: Math.round(firstEventAt - t0),
+                        firstTextMs: Math.round(firstTextAt - t0),
+                    }));
+                }
                 dispatchAgentEvent(event, chat, callbacksRef);
                 if (event.type === "done") {
                     completeStreamTurn(chat, args.assistantId, callbacksRef);
@@ -213,7 +229,7 @@ export function useComposeStream(
     const runWorkflow = useCallback(async (args: WorkflowStreamArgs): Promise<void> => {
         chat.currentAssistantIdRef.current = args.assistantId;
         chat.streamedTextRef.current = "";
-        chat.setActivityPhase("thinking", "Preparing workflow...");
+        chat.setActivityPhase("thinking", "Thinking...");
 
         const stream = sdk.workflow.stream(
             {
@@ -263,7 +279,7 @@ export function useComposeStream(
     const runChat = useCallback(async (args: ChatStreamArgs): Promise<void> => {
         chat.currentAssistantIdRef.current = args.assistantId;
         chat.streamedTextRef.current = "";
-        chat.setActivityPhase("thinking", "Preparing request...");
+        chat.setActivityPhase("thinking", "Thinking...");
 
         const stream = sdk.inference.chat.completions.stream(args.params, {
             signal: args.signal,
@@ -290,7 +306,7 @@ export function useComposeStream(
     const runResponses = useCallback(async (args: ResponsesStreamArgs): Promise<void> => {
         chat.currentAssistantIdRef.current = args.assistantId;
         chat.streamedTextRef.current = "";
-        chat.setActivityPhase("thinking", "Preparing request...");
+        chat.setActivityPhase("thinking", "Thinking...");
 
         const stream = sdk.inference.responses.stream(args.params, {
             signal: args.signal,
@@ -372,7 +388,7 @@ function clearActivityIfCurrent(chat: UseChatReturn, assistantId: string): void 
 }
 
 function dispatchAgentEvent(
-    event: AgentRuntimeEvent,
+    event: AgentStreamEvent,
     chat: UseChatReturn,
     cbRef: React.MutableRefObject<ComposeStreamCallbacks>,
 ): void {
@@ -381,6 +397,14 @@ function dispatchAgentEvent(
             chat.streamedTextRef.current += event.delta;
             chat.scheduleStreamUpdate(chat.streamedTextRef.current);
             chat.setActivityPhase("streaming", "Responding...");
+            return;
+        }
+        case "reasoning-delta": {
+            const assistantId = chat.currentAssistantIdRef.current;
+            if (assistantId) {
+                chat.appendAssistantReasoning(assistantId, event.delta);
+            }
+            chat.setActivityPhase("thinking", "Thinking...");
             return;
         }
         case "thinking-start":
