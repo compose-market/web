@@ -172,7 +172,12 @@ function ChatMessageItemInner({
 }: ChatMessageItemProps) {
     const styles = messageVariantStyles[variant];
     const isUser = message.role === "user";
-    const isLoading = !message.content && message.role === "assistant";
+    // Only treat assistant message as "loading" when generating non-text media.
+    // Text "thinking" status is owned exclusively by the activityState bar (see line ~608),
+    // so we don't render a second per-bubble spinner for plain text turns.
+    const isLoadingMedia = !message.content
+        && message.role === "assistant"
+        && (message.type === "image" || message.type === "audio" || message.type === "video");
 
     const getAssistantIcon = () => {
         if (assistantAvatar) return assistantAvatar;
@@ -279,19 +284,11 @@ function ChatMessageItemInner({
 
                 {message.type === "embedding" ? (
                     <EmbeddingBlock content={message.content || "..."} />
-                ) : isLoading ? (
-                    // Show GenerationCanvas for media types, spinner for text
-                    message.type === "image" || message.type === "audio" || message.type === "video" ? (
-                        <GenerationCanvas
-                            type={message.type}
-                            status={message.content || undefined}
-                        />
-                    ) : (
-                        <div className="flex items-center gap-2 text-sm text-zinc-400">
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            <span>Thinking...</span>
-                        </div>
-                    )
+                ) : isLoadingMedia ? (
+                    <GenerationCanvas
+                        type={message.type as "image" | "audio" | "video"}
+                        status={message.content || undefined}
+                    />
                 ) : isUser ? (
                     <p className="whitespace-pre-wrap text-sm">{message.content || "..."}</p>
                 ) : (
