@@ -1,13 +1,14 @@
 /**
- * Pinata IPFS Storage Utility
- * Used for storing agent avatars, agent cards, and Workflow metadata
+ * IPFS Storage Utility
+ * Used for storing agent avatars, agent cards, and Workflow metadata.
+ *
+ * Pin/unpin goes through the API's server-side pin proxy (/api/ipfs/*) so
+ * the Pinata JWT never ships in the web bundle. Reads still use the public
+ * gateway directly.
  */
 
 const env = import.meta.env ?? {};
-const PINATA_JWT = env.VITE_PINATA_JWT || "";
-const PINATA_GATEWAY = env.VITE_PINATA_GATEWAY || "compose.mypinata.cloud";
-
-const PINATA_API_URL = "https://api.pinata.cloud";
+const PINATA_GATEWAY = env.VITE_PINATA_GATEWAY || "jabyl.mypinata.cloud";
 
 type NetworkId = string;
 
@@ -41,17 +42,14 @@ export async function uploadFile(
     JSON.stringify({ cidVersion: 1 })
   );
 
-  const response = await fetch(`${PINATA_API_URL}/pinning/pinFileToIPFS`, {
+  const response = await fetch("/api/ipfs/pin/file", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${PINATA_JWT}`,
-    },
     body: formData,
   });
 
   if (!response.ok) {
     const error = await response.text();
-    throw new Error(`Pinata upload failed: ${error}`);
+    throw new Error(`IPFS upload failed: ${error}`);
   }
 
   const result: PinataUploadResponse = await response.json();
@@ -65,10 +63,9 @@ export async function uploadJSON<T extends object>(
   data: T,
   metadata?: PinataMetadata
 ): Promise<string> {
-  const response = await fetch(`${PINATA_API_URL}/pinning/pinJSONToIPFS`, {
+  const response = await fetch("/api/ipfs/pin/json", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${PINATA_JWT}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -80,7 +77,7 @@ export async function uploadJSON<T extends object>(
 
   if (!response.ok) {
     const error = await response.text();
-    throw new Error(`Pinata JSON upload failed: ${error}`);
+    throw new Error(`IPFS JSON upload failed: ${error}`);
   }
 
   const result: PinataUploadResponse = await response.json();
@@ -113,33 +110,25 @@ export async function fetchFromIpfs<T = unknown>(cid: string): Promise<T> {
 }
 
 /**
- * Delete/unpin a file from Pinata by CID
+ * Delete/unpin a file from IPFS by CID
  * Used for cleaning up temporary uploads (e.g., conversation attachments)
  */
 export async function unpinFile(cid: string): Promise<boolean> {
-  if (!PINATA_JWT) {
-    console.warn("[pinata] No JWT configured, cannot unpin");
-    return false;
-  }
-
   try {
-    const response = await fetch(`${PINATA_API_URL}/pinning/unpin/${cid}`, {
+    const response = await fetch(`/api/ipfs/unpin/${encodeURIComponent(cid)}`, {
       method: "DELETE",
-      headers: {
-        Authorization: `Bearer ${PINATA_JWT}`,
-      },
     });
 
     if (!response.ok) {
       const error = await response.text();
-      console.error(`[pinata] Failed to unpin ${cid}: ${error}`);
+      console.error(`[ipfs] Failed to unpin ${cid}: ${error}`);
       return false;
     }
 
-    console.log(`[pinata] Successfully unpinned ${cid}`);
+    console.log(`[ipfs] Successfully unpinned ${cid}`);
     return true;
   } catch (error) {
-    console.error(`[pinata] Error unpinning ${cid}:`, error);
+    console.error(`[ipfs] Error unpinning ${cid}:`, error);
     return false;
   }
 }
@@ -192,6 +181,17 @@ export interface AgentCard {
   walletTimestamp?: number; // Timestamp used in wallet derivation (backend needs this)
   network: NetworkId;
   model: string;
+  target?: string;
+  route?: {
+    kind: "exact" | "bump" | "missing" | "invalid";
+    from: string;
+    to?: string;
+    checked: string;
+    reason?: string;
+    source?: string;
+    score?: number;
+    candidates?: string[];
+  };
   framework?: string; // Agent runtime framework
   licensePrice: string; // USDC in smallest unit (6 decimals) - cost to nest into Workflow
   creatorFee?: number;
@@ -201,8 +201,14 @@ export interface AgentCard {
   protocols: Array<{ name: string; version: string }>;
   connectors?: Array<{
     registryId: string;
-    name: string;
-    origin: string;
+    name?: string;
+    origin?: string;
+    tools?: Array<{
+      name: string;
+      description?: string;
+      parameters?: Record<string, unknown>;
+      inputSchema?: Record<string, unknown>;
+    }>;
   }>;
   createdAt: string;
   creator?: string;
@@ -321,10 +327,11 @@ export function generateDnaHash(skills: string[], chain: number, model: string):
 }
 
 /**
- * Check if Pinata is configured
+ * Check if IPFS pinning is available (server-side proxy; always reachable —
+ * the API answers 503 if its Pinata JWT is not configured).
  */
 export function isPinataConfigured(): boolean {
-  return Boolean(PINATA_JWT);
+  return true;
 }
 
 /**

@@ -7,9 +7,295 @@
  * - Onchain: DeFi tool connectors
  */
 
+import type { DirectoryAgent } from "@compose-market/sdk";
 import { sdk } from "./sdk";
+import { formatUsdcPrice, weiToUsdc } from "@/lib/performance/chains-data";
+import type { OnchainAgent } from "@/hooks/use-onchain";
 
-const AGENTS_URL = (import.meta.env.VITE_AGENTS_URL || "https://agents.compose.market").replace(/\/+$/, "");
+const env = import.meta.env ?? {};
+const AGENTS_URL = (env.VITE_AGENTS_URL || "https://agents.compose.market").replace(/\/+$/, "");
+
+// =============================================================================
+// Agents Worker catalog — models-worker parity (health -> version -> index)
+// =============================================================================
+
+export function agentsOrigin(value: string): string {
+  return new URL(value).origin;
+}
+
+export const AGENTS_ORIGIN = agentsOrigin(AGENTS_URL);
+
+export interface AgentsCatalogHealth {
+  agents: number;
+  version: string | null;
+  lastUpdated: string | null;
+}
+
+export async function fetchAgentsCatalogHealth(
+  origin: string,
+  fetcher: typeof fetch = fetch,
+): Promise<AgentsCatalogHealth> {
+  const response = await fetcher(`${origin}/health`, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error(`Failed to load agent catalog health: ${response.status}`);
+  const body = await response.json() as Partial<{
+    counts?: { total?: unknown };
+    version?: unknown;
+    lastUpdated?: unknown;
+  }>;
+  const agents = typeof body.counts?.total === "number" ? body.counts.total : null;
+  if (agents === null) throw new Error("Invalid agent catalog health response");
+  return {
+    agents,
+    version: typeof body.version === "string" && body.version ? body.version : null,
+    lastUpdated: typeof body.lastUpdated === "string" ? body.lastUpdated : null,
+  };
+}
+
+export async function fetchAgentsCatalogIndex(
+  origin: string,
+  version: string,
+  fetcher: typeof fetch = fetch,
+): Promise<DirectoryAgent[]> {
+  const target = new URL(`${origin}/index`);
+  target.searchParams.set("version", version);
+  const response = await fetcher(target, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+    cache: "force-cache",
+  });
+  if (!response.ok) throw new Error(`Failed to load agent catalog index: ${response.status}`);
+  const body = await response.json() as Partial<{ version?: unknown; total?: unknown; agents?: unknown }>;
+  if (body.version !== version || !Array.isArray(body.agents)) {
+    throw new Error("Invalid agent catalog index response");
+  }
+  if (body.total !== body.agents.length) {
+    throw new Error(`Incomplete agent catalog index: expected ${body.total}, received ${body.agents.length}`);
+  }
+  return body.agents as DirectoryAgent[];
+}
+
+/**
+ * Single agent card by wallet. 404 is the only "not found" — every other
+ * failure throws so react-query retries and previously loaded agents are
+ * retained instead of rendering a hard "Agent not found" screen.
+ */
+export async function fetchAgentCardByWallet(
+  walletAddress: string,
+  fetcher: typeof fetch = fetch,
+): Promise<DirectoryAgent | null> {
+  const lookup = /^0x[a-fA-F0-9]{40}$/.test(walletAddress) ? walletAddress.toLowerCase() : walletAddress;
+  const response = await fetcher(`${AGENTS_URL}/agent/${encodeURIComponent(lookup)}`, {
+    headers: { Accept: "application/json" },
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`Agent lookup failed with status ${response.status}`);
+  const card = await response.json() as DirectoryAgent;
+  return typeof card.walletAddress === "string" && card.walletAddress.length > 0 ? card : null;
+}
+
+/**
+ * Immediate indexing of a freshly minted agent card (create-agent flow).
+ * The worker fetches the card back from IPFS by CID, projects/embeds/publishes
+ * the single document, and bumps the catalog version so pollers see it.
+ */
+export async function indexAgentCard(
+  input: { cid: string; walletAddress?: string },
+  options: { timeoutMs?: number; fetcher?: typeof fetch } = {},
+): Promise<DirectoryAgent | null> {
+  const { timeoutMs = 10_000, fetcher = fetch } = options;
+  const response = await fetcher(`${AGENTS_URL}/agents/upsert`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({
+      cid: input.cid.replace(/^ipfs:\/\//i, ""),
+      ...(input.walletAddress ? { walletAddress: input.walletAddress } : {}),
+    }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!response.ok) throw new Error(`Agent indexing failed with status ${response.status}`);
+  const body = await response.json() as { agent?: DirectoryAgent };
+  return body.agent ?? null;
+}
+
+// ————— Just-created race guard ————————————————————————————————————————————
+// Landing on /agent/<wallet> between mint success and catalog publication
+// would otherwise 404. The flag lets useAgentByIdentifier keep retrying and
+// show an "indexing" state only for the wallet minted in this session.
+
+const INDEXING_FLAG_KEY = "cm:agent-indexing";
+const INDEXING_FLAG_TTL_MS = 10 * 60 * 1000;
+
+export function agentKey(walletAddress: string): string {
+  return walletAddress.startsWith("0x") ? walletAddress.toLowerCase() : walletAddress;
+}
+
+export function sameWallet(left: string, right: string): boolean {
+  return agentKey(left) === agentKey(right);
+}
+
+export function rememberJustCreatedAgent(walletAddress: string): void {
+  try {
+    sessionStorage.setItem(INDEXING_FLAG_KEY, JSON.stringify({ walletAddress, at: Date.now() }));
+  } catch {
+    // sessionStorage unavailable — the guard simply stays off
+  }
+}
+
+export function isAgentIndexing(walletAddress: string): boolean {
+  try {
+    const raw = sessionStorage.getItem(INDEXING_FLAG_KEY);
+    if (!raw) return false;
+    const flag = JSON.parse(raw) as { walletAddress?: string; at?: number };
+    if (typeof flag.walletAddress !== "string" || typeof flag.at !== "number") return false;
+    if (Date.now() - flag.at > INDEXING_FLAG_TTL_MS) return false;
+    return sameWallet(flag.walletAddress, walletAddress);
+  } catch {
+    return false;
+  }
+}
+
+// ————— Snapshot -> UI mapping (shared by market, my-assets, creator) ———————
+
+function amount(value: string | undefined): bigint {
+  const raw = value?.trim();
+  if (!raw) return 0n;
+  if (/^\d+$/.test(raw)) return BigInt(raw);
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? BigInt(Math.round(parsed * 1_000_000)) : 0n;
+}
+
+function finite(value: unknown): number | null {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function toOnchainAgent(card: DirectoryAgent): OnchainAgent {
+  const cost = amount(card.licensePrice);
+  const licenses = finite(card.licenses) ?? 0;
+  const minted = finite((card as { licensesMinted?: unknown }).licensesMinted) ?? 0;
+  const available = finite(card.licensesAvailable) ?? (licenses === 0 ? Infinity : Math.max(0, licenses - minted));
+  const creatorFee = finite(card.creatorFee) ?? 1;
+  const network = (card as { network?: OnchainAgent["network"] }).network;
+
+  return {
+    id: finite(card.agentId) ?? 0,
+    dnaHash: card.dnaHash || "",
+    walletAddress: card.walletAddress || "",
+    network,
+    licenses,
+    licensesMinted: minted,
+    licensesAvailable: available,
+    licensePrice: weiToUsdc(cost),
+    licensePriceFormatted: formatUsdcPrice(cost),
+    creatorFee,
+    creator: card.creator || "",
+    cloneable: Boolean(card.cloneable),
+    isClone: Boolean(card.isClone),
+    parentAgentId: finite(card.parentAgentId) ?? 0,
+    agentCardUri: card.cid ? `ipfs://${card.cid}` : "",
+    metadata: {
+      ...card,
+      ...(network ? { network } : {}),
+      creatorFee,
+      x402: true,
+    } as unknown as OnchainAgent["metadata"],
+    isWarped: false,
+  };
+}
+
+// ————— Hybrid search: local ranking + worker semantic hits ————————————————
+
+export interface SemanticAgentHit {
+  walletAddress: string;
+  name?: string;
+  score: number;
+}
+
+export interface RankedCatalogAgent {
+  agent: DirectoryAgent;
+  score: number;
+  source: "local" | "semantic" | "hybrid";
+}
+
+export function normalizeAgentSearchText(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/\p{M}+/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, " ")
+    .trim()
+    .replace(/\s+/gu, " ");
+}
+
+/** Rank the snapshot locally. Deterministic and fast for a few hundred rows. */
+export function rankCatalogAgents(agents: DirectoryAgent[], query: string, limit = 72): RankedCatalogAgent[] {
+  const tokens = normalizeAgentSearchText(query).split(" ").filter(Boolean);
+  if (tokens.length === 0) {
+    return agents.slice(0, limit).map((agent, index) => ({ agent, score: agents.length - index, source: "local" }));
+  }
+
+  const scored = agents
+    .map((agent, index) => {
+      const name = normalizeAgentSearchText(agent.name || "");
+      const description = normalizeAgentSearchText(agent.description || "");
+      const skills = normalizeAgentSearchText((agent.skills || []).join(" "));
+      const model = normalizeAgentSearchText(`${agent.model || ""} ${agent.target || ""}`);
+      const creator = normalizeAgentSearchText(agent.creator || "");
+      let score = 0;
+      for (const token of tokens) {
+        if (name === token) score += 120;
+        else if (name.startsWith(token)) score += 90;
+        else if (name.includes(token)) score += 70;
+        if (skills.includes(token)) score += 30;
+        if (model.includes(token)) score += 25;
+        if (description.includes(token)) score += 20;
+        if (creator.includes(token)) score += 10;
+      }
+      return { agent, index, score };
+    })
+    .filter((entry) => entry.score > 0);
+
+  scored.sort((left, right) => right.score - left.score || left.index - right.index);
+  return scored.slice(0, limit).map(({ agent, score }) => ({ agent, score, source: "local" as const }));
+}
+
+/**
+ * Merge semantic ranks into local ranks without ever rendering worker-owned
+ * hit objects: every semantic hit is resolved back to the canonical snapshot.
+ */
+export function mergeSemanticAgentRanks(
+  catalog: DirectoryAgent[],
+  local: RankedCatalogAgent[],
+  semantic: SemanticAgentHit[],
+  limit = 72,
+): RankedCatalogAgent[] {
+  const byWallet = new Map(catalog.map((agent) => [agentKey(agent.walletAddress), agent]));
+  const ranked = new Map<string, RankedCatalogAgent>();
+  for (const item of local) {
+    ranked.set(agentKey(item.agent.walletAddress), item);
+  }
+
+  for (const hit of semantic) {
+    const agent = byWallet.get(agentKey(hit.walletAddress));
+    if (!agent) continue;
+    const semanticScore = 600 + Math.max(0, Math.min(1, hit.score)) * 260;
+    const key = agentKey(agent.walletAddress);
+    const existing = ranked.get(key);
+    ranked.set(key, {
+      agent,
+      score: existing ? Math.max(existing.score, semanticScore) + 35 : semanticScore,
+      source: existing ? "hybrid" : "semantic",
+    });
+  }
+
+  return [...ranked.values()]
+    .sort((left, right) => right.score - left.score)
+    .slice(0, limit);
+}
 
 // =============================================================================
 // Registry System
@@ -192,6 +478,7 @@ type ManowarAgentCard = {
   skills?: string[];
   image?: string;
   avatar?: string;
+  avatarUrl?: string;
   dnaHash?: string;
   walletAddress?: string;
   chain?: number;
@@ -205,11 +492,6 @@ type ManowarAgentCard = {
   connectors?: Array<{ name?: string; registryId?: string; origin?: string }>;
   createdAt?: string;
   creator?: string;
-};
-
-type ManowarAgentPage = {
-  agents?: ManowarAgentCard[];
-  total?: number;
 };
 
 // =============================================================================
@@ -391,7 +673,7 @@ function manowarToAgent(card: ManowarAgentCard): Agent {
     registry: "manowar",
     readme: card.description || "",
     protocols,
-    avatarUrl: card.image || card.avatar || null,
+    avatarUrl: card.avatarUrl || card.image || card.avatar || null,
     totalInteractions: 0,
     recentInteractions: 0,
     rating: 5,
@@ -548,84 +830,71 @@ async function searchGoat(
 }
 
 /**
- * Search ManoWar native agent registry
+ * Select ManoWar native agents from the cached catalog snapshot — no network.
+ * Mirrors the previous server-side filtering (name/description/skills/model,
+ * skill tags, derived category, offset paging).
  */
-async function searchManowar(
-  options: SearchAgentsOptions
-): Promise<{ agents: Agent[]; total: number; tags: string[]; categories: string[] }> {
-  try {
-    const offset = Math.max(0, options.offset || 0);
-    const limit = Math.max(1, options.limit || 30);
-    const params = new URLSearchParams({
-      limit: String(Math.max(1, Math.min(72, offset + limit))),
+export function selectManowarAgents(
+  snapshot: DirectoryAgent[],
+  options: SearchAgentsOptions,
+): { agents: Agent[]; total: number; tags: string[]; categories: string[] } {
+  let filtered = snapshot.filter((card) => typeof card.walletAddress === "string" && card.walletAddress.length > 0);
+
+  if (options.search) {
+    const q = options.search.toLowerCase();
+    filtered = filtered.filter((card) => {
+      const name = (card.name || "").toLowerCase();
+      const description = (card.description || "").toLowerCase();
+      const skills = (card.skills || []).join(" ").toLowerCase();
+      const model = (card.model || "").toLowerCase();
+      return name.includes(q) || description.includes(q) || skills.includes(q) || model.includes(q);
     });
-    if (options.search) params.set("q", options.search);
-    const response = await fetch(`${AGENTS_URL}/agents?${params.toString()}`, {
-      headers: { Accept: "application/json" },
-    });
-    if (!response.ok) {
-      throw new Error(`Agent lookup failed with status ${response.status}`);
-    }
-    const data = await response.json() as ManowarAgentPage;
-    const cards = Array.isArray(data.agents) ? data.agents : [];
-
-    let filtered = cards.filter((card) => typeof card.walletAddress === "string" && card.walletAddress.startsWith("0x"));
-
-    if (options.search) {
-      const q = options.search.toLowerCase();
-      filtered = filtered.filter((card) => {
-        const name = (card.name || "").toLowerCase();
-        const description = (card.description || "").toLowerCase();
-        const skills = (card.skills || []).join(" ").toLowerCase();
-        const model = (card.model || "").toLowerCase();
-        return name.includes(q) || description.includes(q) || skills.includes(q) || model.includes(q);
-      });
-    }
-
-    if (options.tags?.length) {
-      const required = options.tags.map((tag) => tag.toLowerCase());
-      filtered = filtered.filter((card) => {
-        const skillTags = (card.skills || []).map((tag) => tag.toLowerCase());
-        return required.some((tag) => skillTags.includes(tag));
-      });
-    }
-
-    if (options.category) {
-      const categoryQuery = options.category.toLowerCase();
-      filtered = filtered.filter((card) => {
-        const category = deriveCategory(card.skills || []).toLowerCase();
-        return category === categoryQuery || category.includes(categoryQuery);
-      });
-    }
-
-    const paged = filtered.slice(offset, offset + limit);
-
-    const agents: Agent[] = paged.map(manowarToAgent);
-
-    const allTags = Array.from(new Set(filtered.flatMap((card) => card.skills || []).map((tag) => tag.toLowerCase()))).sort();
-    const allCategories = Array.from(new Set(filtered.map((card) => deriveCategory(card.skills || [])))).sort();
-
-    return {
-      agents,
-      total: filtered.length,
-      tags: allTags,
-      categories: allCategories,
-    };
-  } catch (err) {
-    console.warn("Error fetching manowar agents:", err);
-    return { agents: [], total: 0, tags: [], categories: [] };
   }
+
+  if (options.tags?.length) {
+    const required = options.tags.map((tag) => tag.toLowerCase());
+    filtered = filtered.filter((card) => {
+      const skillTags = (card.skills || []).map((tag) => tag.toLowerCase());
+      return required.some((tag) => skillTags.includes(tag));
+    });
+  }
+
+  if (options.category) {
+    const categoryQuery = options.category.toLowerCase();
+    filtered = filtered.filter((card) => {
+      const category = deriveCategory(card.skills || []).toLowerCase();
+      return category === categoryQuery || category.includes(categoryQuery);
+    });
+  }
+
+  const offset = Math.max(0, options.offset || 0);
+  const limit = Math.max(1, options.limit || 30);
+  const paged = filtered.slice(offset, offset + limit);
+
+  const allTags = Array.from(new Set(filtered.flatMap((card) => card.skills || []).map((tag) => tag.toLowerCase()))).sort();
+  const allCategories = Array.from(new Set(filtered.map((card) => deriveCategory(card.skills || [])))).sort();
+
+  return {
+    agents: paged.map(manowarToAgent),
+    total: filtered.length,
+    tags: allTags,
+    categories: allCategories,
+  };
 }
 
 /**
- * Unified search across all enabled registries
+ * Unified search across external registries (Agentverse, onchain connectors).
+ * ManoWar native agents come from the cached catalog snapshot via
+ * selectManowarAgents — never from a network fetch here.
  */
 export async function searchAgents(
   options: SearchAgentsOptions = {}
 ): Promise<AgentSearchResponse> {
-  const registries = options.registries?.length
+  const enabled = (Object.keys(AGENT_REGISTRIES) as AgentRegistryId[]).filter(r => AGENT_REGISTRIES[r]?.enabled);
+  const registries = (options.registries?.length
     ? options.registries.filter(r => AGENT_REGISTRIES[r]?.enabled)
-    : (Object.keys(AGENT_REGISTRIES) as AgentRegistryId[]).filter(r => AGENT_REGISTRIES[r].enabled);
+    : enabled
+  ).filter(r => r !== "manowar");
 
   // Fetch from all selected registries in parallel
   const results = await Promise.allSettled(
@@ -635,8 +904,6 @@ export async function searchAgents(
           return searchAgentverse(options);
         case "goat":
           return searchGoat(options);
-        case "manowar":
-          return searchManowar(options);
         default:
           return { agents: [], total: 0, tags: [], categories: [] };
       }
@@ -697,7 +964,7 @@ export async function searchAgents(
 /**
  * Calculate relevancy score for search ranking
  */
-function getRelevancyScore(agent: Agent, query: string): number {
+export function getRelevancyScore(agent: Agent, query: string): number {
   let score = 0;
   const nameLower = agent.name.toLowerCase();
   const descLower = agent.description.toLowerCase();
@@ -729,9 +996,12 @@ function getRelevancyScore(agent: Agent, query: string): number {
  * Get a single agent by address
  */
 export async function getAgent(address: string): Promise<Agent> {
-  if (/^0x[a-fA-F0-9]{40}$/.test(address)) {
+  // EVM addresses are case-insensitive (lowercase them); Solana base58
+  // wallets are case-sensitive and must be looked up verbatim.
+  const lookupAddress = /^0x[a-fA-F0-9]{40}$/.test(address) ? address.toLowerCase() : address;
+  if (lookupAddress.length > 0) {
     try {
-      const response = await fetch(`${AGENTS_URL}/agent/${encodeURIComponent(address.toLowerCase())}`, {
+      const response = await fetch(`${AGENTS_URL}/agent/${encodeURIComponent(lookupAddress)}`, {
         headers: { Accept: "application/json" },
       });
       if (response.ok) {

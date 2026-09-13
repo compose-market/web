@@ -41,7 +41,6 @@ function loadMathRuntime(): Promise<MathRuntime> {
     mathRuntimePromise = Promise.all([
       import("remark-math"),
       import("rehype-katex"),
-      import("katex/dist/katex.min.css"),
     ]).then(([remarkMathModule, rehypeKatexModule]) => ({
       remarkPlugins: [remarkMathModule.default],
       rehypePlugins: [rehypeKatexModule.default],
@@ -557,3 +556,4 @@ function MarkdownRendererInner({ content, className }: RendererProps) {
 }
 
 export const MarkdownRenderer = memo(MarkdownRendererInner);
+export default MarkdownRenderer;

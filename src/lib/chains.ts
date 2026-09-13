@@ -16,10 +16,6 @@ import type { EvmNetworkId, FacilitatorChain, NetworkId } from "@compose-market/
 import { CONTRACT_ADDRESSES, getContractAddress, getContractAddressForChain, type ContractName } from "./performance/chains-data";
 
 const THIRDWEB_PRESETS: Record<number, Chain> = {
-    43113: avalancheFuji,
-    43114: avalanche,
-    421614: arbitrumSepolia,
-    42161: arbitrum,
     5042002: arcTestnet,
 };
 

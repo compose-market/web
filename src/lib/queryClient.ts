@@ -7,7 +7,6 @@ import {
 import { apiFetch } from "@/lib/api";
 
 export const DURABLE_CACHE_MAX_AGE = 24 * 60 * 60 * 1000;
-export const DURABLE_CACHE_BUSTER = "dashboard-keys-v1";
 export const durableQueryMeta = { persist: true } as const;
 
 export function shouldPersistQuery(query: {
@@ -17,14 +16,14 @@ export function shouldPersistQuery(query: {
   return query.meta?.persist === true && query.state.status === "success";
 }
 
-const DATABASE_NAME = "compose-market-query-cache";
+const DATABASE_NAME = "query-cache";
 const STORE_NAME = "query-cache";
 const CLIENT_KEY = "durable-client";
 
 function openCacheDatabase(): Promise<IDBDatabase | undefined> {
   if (typeof indexedDB === "undefined") return Promise.resolve(undefined);
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DATABASE_NAME, 1);
+    const request = indexedDB.open(DATABASE_NAME, 2);
     request.onupgradeneeded = () => {
       if (!request.result.objectStoreNames.contains(STORE_NAME)) {
         request.result.createObjectStore(STORE_NAME);
@@ -95,7 +94,6 @@ const dehydrateOptions = {
 export const queryPersistenceOptions = {
   persister: indexedDbQueryPersister,
   maxAge: DURABLE_CACHE_MAX_AGE,
-  buster: DURABLE_CACHE_BUSTER,
   dehydrateOptions,
 };
 
@@ -103,7 +101,6 @@ export async function persistDurableQueries(client: QueryClient): Promise<void> 
   await persistQueryClientSave({
     queryClient: client,
     persister: indexedDbQueryPersister,
-    buster: DURABLE_CACHE_BUSTER,
     dehydrateOptions,
   });
 }
@@ -135,16 +132,16 @@ export const getQueryFn: <T>(options: {
   on401: UnauthorizedBehavior;
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
-  async ({ queryKey }) => {
-    const res = await apiFetch(queryKey.join("/") as string, {});
+    async ({ queryKey }) => {
+      const res = await apiFetch(queryKey.join("/") as string, {});
 
-    if (unauthorizedBehavior === "returnNull" && res.status === 401) {
-      return null;
-    }
+      if (unauthorizedBehavior === "returnNull" && res.status === 401) {
+        return null;
+      }
 
-    await throwIfResNotOk(res);
-    return await res.json();
-  };
+      await throwIfResNotOk(res);
+      return await res.json();
+    };
 
 export const queryClient = new QueryClient({
   defaultOptions: {
