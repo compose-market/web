@@ -119,7 +119,7 @@ export function DisclaimerModal({
       `Timestamp: ${timestamp}`,
       "",
       "By signing this statement, you acknowledge and agree that:",
-      "1. Technical Conduit: Compose.Market acts solely as a technical relay to 700+ AI models operated by 30+ independent third-party laboratories (OpenAI, Anthropic, Google Vertex, Fireworks, Mistral, etc.). We do not own, operate, or validate these third-party models.",
+      "1. Technical Conduit: Compose.Market acts solely as a technical relay to 650+ AI models operated by 30+ independent third-party laboratories (OpenAI, Anthropic, Google Vertex, Fireworks, Mistral, etc.). We do not own, operate, or validate these third-party models.",
       "2. Third-Party Governance: Your prompts, inputs, and transmitted data are governed solely by each applicable provider's Terms of Service and Privacy Policy (available at /providers).",
       "3. Zero General Training: Compose.Market does not use your data to train general models, and we prohibit upstream providers from doing so on our behalf.",
       "4. Probabilistic Outputs: AI outputs are probabilistic, may contain inaccuracies, and do not constitute professional advice. You assume all risks.",
@@ -288,7 +288,7 @@ export function DisclaimerModal({
               </div>
               <p className="text-[11px] text-muted-foreground pl-5">
                 Compose.Market acts solely as a technical relay and decentralized gateway providing unified
-                cryptographic access to 700+ AI models operated by independent third-party laboratories
+                cryptographic access to 650+ AI models operated by independent third-party laboratories
                 (e.g., OpenAI, Anthropic, Google Cloud, Mistral AI, Fireworks AI). Compose.Market does not
                 own, operate, validate, or determine the processing performed by upstream model providers.
               </p>
@@ -432,42 +432,4 @@ export function DisclaimerModal({
       </DialogContent>
     </Dialog>
   );
-}
-
-export function useDisclaimerConsent() {
-  const account = useActiveAccount();
-  const { userAddress } = useSelectedUserAddress();
-  const activeAddress = userAddress ?? account?.address ?? null;
-
-  const query = useQuery({
-    queryKey: ["user-consent", activeAddress?.toLowerCase(), DISCLAIMER_POLICY_VERSION],
-    queryFn: async () => {
-      if (!activeAddress) return { consented: false, record: null };
-      try {
-        if (typeof sdk.user?.getConsent === "function") {
-          return await sdk.user.getConsent(activeAddress, {
-            disclaimerType: DISCLAIMER_TYPE,
-            policyVersion: DISCLAIMER_POLICY_VERSION,
-          });
-        }
-        const res = await fetch(
-          `/api/user/consent/${encodeURIComponent(activeAddress)}?type=${encodeURIComponent(DISCLAIMER_TYPE)}&version=${encodeURIComponent(DISCLAIMER_POLICY_VERSION)}`
-        );
-        if (res.ok) {
-          return await res.json();
-        }
-        return { consented: false, record: null };
-      } catch (err) {
-        return { consented: false, record: null };
-      }
-    },
-    enabled: Boolean(activeAddress),
-    staleTime: 5 * 60 * 1000,
-  });
-
-  return {
-    hasConsented: query.data?.consented ?? false,
-    consentRecord: query.data?.record ?? null,
-    isLoading: query.isLoading,
-  };
 }

@@ -34,6 +34,7 @@ import {
     Layers,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatWeiUsd } from "@/lib/format";
 
 // =============================================================================
 // Types
@@ -132,11 +133,6 @@ function extractMediaUrl(output: unknown): string | null {
     }
 
     return null;
-}
-
-function formatCost(weiString: string): string {
-    const wei = parseInt(weiString) || 0;
-    return `$${(wei / 1_000_000).toFixed(4)}`;
 }
 
 function mediaDataUrl(kind: "image" | "audio" | "video", value: string): string {
@@ -322,7 +318,7 @@ export const WorkflowOutputPanel = memo(function WorkflowOutputPanel({
 
                     <div className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
                         <DollarSign className="w-3 h-3" />
-                        <span className="font-mono">{formatCost(result.totalCostWei)}</span>
+                        <span className="font-mono">{formatWeiUsd(result.totalCostWei)}</span>
                     </div>
                 </div>
 

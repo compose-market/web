@@ -10,7 +10,7 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { Check, Copy, Key, Plus, RefreshCw, Terminal, Trash2, Zap, Clock } from "lucide-react";
 import { useKeys, type KeyRecord, type UseKeysReturn } from "@/hooks/use-keys";
-import { useWalletAccount } from "@/components/connector";
+import { useWalletAccount } from "@/hooks/use-wallet";
 import { NetworkBadge } from "@/components/network-selector";
 import { useChain } from "@/contexts/Network";
 import { toast } from "sonner";
@@ -190,133 +190,133 @@ export function ApiKeysPanel() {
       <div className="cm-split">
         <div className="cm-split__main">
           <div className="cm-keys-main">
-          {mainContent ?? (
-          <>
-          {error ? (
-            <div className="rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-400">
-              Unable to update keys: {error.message}
-            </div>
-          ) : null}
-          {keys.length === 0 ? (
-            <div className="cm-dashboard__empty">
-              <Key className="cm-dashboard__empty-icon" />
-              <span className="cm-dashboard__empty-title">No API keys yet</span>
-              <span className="cm-dashboard__empty-text">
-                Two steps to any client: create a Compose Key, paste it into your tool.
-                The guide on the right has the exact config for your setup.
-              </span>
-              <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem", flexWrap: "wrap", justifyContent: "center" }}>
-                <Button onClick={openCreate} disabled={!isConnected} className="cm-shell-button cm-shell-button--primary">
-                  <Plus className="w-4 h-4" />
-                  Create Key
-                </Button>
-                <Button
-                  onClick={() => setGuideOpen(true)}
-                  className="cm-shell-button cm-shell-button--secondary cm-keys-quickstart-trigger"
-                >
-                  <Terminal className="w-4 h-4" />
-                  Setup Guide
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <>
-              <div className="cm-keys-toolbar">
-                <div className="cm-time-range">
-                  {(["all", "api", "session"] as const).map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      className="cm-time-range__option"
-                      data-active={purposeFilter === option}
-                      onClick={() => setPurposeFilter(option)}
-                    >
-                      {option === "all" ? "All" : option === "api" ? "API" : "Session"} · {purposeCounts[option]}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {filteredKeys.length === 0 ? (
-                <div className="cm-dashboard__empty">
-                  <Key className="cm-dashboard__empty-icon" />
-                  <span className="cm-dashboard__empty-text">No {purposeFilter} keys.</span>
-                </div>
-              ) : (
-                <div className="cm-keys-list">
-                  {filteredKeys.map((key) => {
-                    const status = keyStatus(key);
-                    const tone = budgetTone(key);
-                    const pct = budgetRemainingPercent(key);
-                    return (
-                      <div key={key.keyId} className="cm-key-card" data-status={status}>
-                        <div className="cm-key-card__icon" data-purpose={key.purpose}>
-                          {key.purpose === "session" ? <Zap className="w-4 h-4" /> : <Key className="w-4 h-4" />}
-                        </div>
-                        <div className="cm-key-card__body">
-                          <div className="cm-key-card__top">
-                            <span className="cm-key-card__name">{key.name || "Unnamed Key"}</span>
-                            <span className="cm-key-card__purpose" data-purpose={key.purpose}>
-                              {key.purpose}
-                            </span>
-                            <NetworkBadge network={key.network} />
-                            <span className="cm-key-card__id">inference-{key.keyId.slice(0, 8)}***</span>
-                          </div>
-                          <div className="cm-key-card__meta">
-                            <span className="cm-key-card__budget">
-                              {formatWeiUsd(key.budgetRemaining)} left of {formatWeiUsd(key.budgetLimit)}
-                              <span className="cm-key-card__budget-bar">
-                                <span
-                                  className="cm-key-card__budget-fill"
-                                  data-tone={tone === "ok" ? undefined : tone}
-                                  style={{ width: `${pct}%` }}
-                                />
-                              </span>
-                            </span>
-                            <span className="cm-key-card__status" data-status={status}>
-                              {status === "active" && (
-                                <>
-                                  <Clock className="w-2.5 h-2.5" />
-                                  {formatTimeRemaining(key.expiresAt)}
-                                </>
-                              )}
-                              {status === "expired" && "Expired"}
-                              {status === "revoked" && "Revoked"}
-                            </span>
-                            <span>Created {timeAgo(key.createdAt)}</span>
-                            {key.lastUsedAt && <span>Last used {timeAgo(key.lastUsedAt)}</span>}
-                          </div>
-                        </div>
-                        <div className="cm-key-card__actions">
+            {mainContent ?? (
+              <>
+                {error ? (
+                  <div className="rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-400">
+                    Unable to update keys: {error.message}
+                  </div>
+                ) : null}
+                {keys.length === 0 ? (
+                  <div className="cm-dashboard__empty">
+                    <Key className="cm-dashboard__empty-icon" />
+                    <span className="cm-dashboard__empty-title">No API keys yet</span>
+                    <span className="cm-dashboard__empty-text">
+                      Two steps to any client: create a Compose Key, paste it into your tool.
+                      The guide on the right has the exact config for your setup.
+                    </span>
+                    <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem", flexWrap: "wrap", justifyContent: "center" }}>
+                      <Button onClick={openCreate} disabled={!isConnected} className="cm-shell-button cm-shell-button--primary">
+                        <Plus className="w-4 h-4" />
+                        Create Key
+                      </Button>
+                      <Button
+                        onClick={() => setGuideOpen(true)}
+                        className="cm-shell-button cm-shell-button--secondary cm-keys-quickstart-trigger"
+                      >
+                        <Terminal className="w-4 h-4" />
+                        Setup Guide
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="cm-keys-toolbar">
+                      <div className="cm-time-range">
+                        {(["all", "api", "session"] as const).map((option) => (
                           <button
-                            className="cm-key-card__action"
-                            onClick={() => void handleCopy(key.keyId)}
-                            title="Copy key ID"
-                            aria-label="Copy key ID"
+                            key={option}
+                            type="button"
+                            className="cm-time-range__option"
+                            data-active={purposeFilter === option}
+                            onClick={() => setPurposeFilter(option)}
                           >
-                            {copiedKeyId === key.keyId ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                            {option === "all" ? "All" : option === "api" ? "API" : "Session"} · {purposeCounts[option]}
                           </button>
-                          {status === "active" && (
-                            <button
-                              className="cm-key-card__action"
-                              data-action="revoke"
-                              onClick={() => setRevokeTarget(key)}
-                              disabled={isRevoking || !isConnected}
-                              title="Revoke key"
-                              aria-label="Revoke key"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                        </div>
+                        ))}
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-            </>
-          )}
-          </>
-          )}
+                    </div>
+                    {filteredKeys.length === 0 ? (
+                      <div className="cm-dashboard__empty">
+                        <Key className="cm-dashboard__empty-icon" />
+                        <span className="cm-dashboard__empty-text">No {purposeFilter} keys.</span>
+                      </div>
+                    ) : (
+                      <div className="cm-keys-list">
+                        {filteredKeys.map((key) => {
+                          const status = keyStatus(key);
+                          const tone = budgetTone(key);
+                          const pct = budgetRemainingPercent(key);
+                          return (
+                            <div key={key.keyId} className="cm-key-card" data-status={status}>
+                              <div className="cm-key-card__icon" data-purpose={key.purpose}>
+                                {key.purpose === "session" ? <Zap className="w-4 h-4" /> : <Key className="w-4 h-4" />}
+                              </div>
+                              <div className="cm-key-card__body">
+                                <div className="cm-key-card__top">
+                                  <span className="cm-key-card__name">{key.name || "Unnamed Key"}</span>
+                                  <span className="cm-key-card__purpose" data-purpose={key.purpose}>
+                                    {key.purpose}
+                                  </span>
+                                  <NetworkBadge network={key.network} />
+                                  <span className="cm-key-card__id">inference-{key.keyId.slice(0, 8)}***</span>
+                                </div>
+                                <div className="cm-key-card__meta">
+                                  <span className="cm-key-card__budget">
+                                    {formatWeiUsd(key.budgetRemaining)} left of {formatWeiUsd(key.budgetLimit)}
+                                    <span className="cm-key-card__budget-bar">
+                                      <span
+                                        className="cm-key-card__budget-fill"
+                                        data-tone={tone === "ok" ? undefined : tone}
+                                        style={{ width: `${pct}%` }}
+                                      />
+                                    </span>
+                                  </span>
+                                  <span className="cm-key-card__status" data-status={status}>
+                                    {status === "active" && (
+                                      <>
+                                        <Clock className="w-2.5 h-2.5" />
+                                        {formatTimeRemaining(key.expiresAt)}
+                                      </>
+                                    )}
+                                    {status === "expired" && "Expired"}
+                                    {status === "revoked" && "Revoked"}
+                                  </span>
+                                  <span>Created {timeAgo(key.createdAt)}</span>
+                                  {key.lastUsedAt && <span>Last used {timeAgo(key.lastUsedAt)}</span>}
+                                </div>
+                              </div>
+                              <div className="cm-key-card__actions">
+                                <button
+                                  className="cm-key-card__action"
+                                  onClick={() => void handleCopy(key.keyId)}
+                                  title="Copy key ID"
+                                  aria-label="Copy key ID"
+                                >
+                                  {copiedKeyId === key.keyId ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                                </button>
+                                {status === "active" && (
+                                  <button
+                                    className="cm-key-card__action"
+                                    data-action="revoke"
+                                    onClick={() => setRevokeTarget(key)}
+                                    disabled={isRevoking || !isConnected}
+                                    title="Revoke key"
+                                    aria-label="Revoke key"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
+                )}
+              </>
+            )}
           </div>
         </div>
 

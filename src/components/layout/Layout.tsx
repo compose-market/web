@@ -14,7 +14,8 @@ import {
   Sparkles,
 } from "lucide-react";
 import { AppShell } from "@compose-market/theme/app";
-import { WalletConnector, useWalletAccount } from "@/components/connector";
+import { WalletConnector } from "@/components/connector";
+import { useWalletAccount } from "@/hooks/use-wallet";
 import { SessionIndicator } from "@/components/session";
 import { useSession } from "@/hooks/use-session";
 import { DispenserButton } from "@/components/dispenser";

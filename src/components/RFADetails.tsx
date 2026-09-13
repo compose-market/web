@@ -34,7 +34,7 @@ import {
     type OnchainRFA,
     type RFASubmission,
 } from "@/hooks/use-onchain";
-import { useAgentsByCreator } from "@/hooks/use-onchain";
+import { useAgentsByCreator } from "@/hooks/use-agents";
 import {
     getRFAContract,
     RFA_CATEGORIES,
