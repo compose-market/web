@@ -103,6 +103,19 @@ test("generated media hydrate and render as normal chat assets", () => {
   assert.match(outputSource, /SharedStreamMedia kind="image"/);
 });
 
+test("artifact merges never clobber hydrated fields with undefined follow-up frames", () => {
+  const upsert = section(chatHookSource, "const upsertAssistantArtifact", "function artifactKey");
+  assert.match(upsert, /Object\.entries\(artifact\)\.filter\(\(\[, value\]\) => value !== undefined\)/);
+  assert.match(upsert, /\.\.\.patch, id: artifacts\[idx\]\.id/);
+  assert.doesNotMatch(upsert, /\.\.\.artifact, id: artifacts\[idx\]\.id/);
+});
+
+test("mission control roots never duplicate between declared roots and orphan re-roots", () => {
+  const roots = section(missionSource, "const visited = new Set<string>();", "const groupedRoots");
+  assert.match(roots, /const rootIds = new Set\(roots\.map\(\(n\) => n\.id\)\)/);
+  assert.match(roots, /rootIds\.has\(n\.id\)/);
+});
+
 test("embedding artifacts render as foldable vectors without fake artifact status chrome", () => {
   const artifactBlock = section(chatSource, "function ArtifactBlock", "function artifactTitle");
   const embeddingBlock = section(chatSource, "function EmbeddingBlock", "function shortId");
@@ -215,7 +228,7 @@ test("ordinary responses stop presenting as live while payment finalizes and rem
 });
 
 test("theme stream nodes keep raw kind and status out of visible chrome by default", () => {
-  const nodeSource = section(themeStreamSource, "export function StreamNode", "export interface StreamArtifactProps");
+  const nodeSource = section(themeStreamSource, "export function StreamNode", "export interface MissionControlPanelProps");
   assert.match(nodeSource, /data-kind=\{kind\}/);
   assert.match(nodeSource, /data-status=\{status\}/);
   assert.match(themeStreamSource, /badges\?: React\.ReactNode/);

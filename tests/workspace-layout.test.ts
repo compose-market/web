@@ -256,11 +256,13 @@ test("launch recovery pages use content canvases instead of blind clipping", () 
   assert.match(assets, /cm-web-page__canvas cm-workspace-canvas--fade/);
   assert.match(assets, /cm-control-rail/);
   assert.doesNotMatch(assets, /useAgentsByCreator/);
-  assert.match(assets, /DirectoryAgent/);
-  assert.match(assets, /params\.set\("creator", input\.creator\)/);
-  assert.match(assets, /fetch\(`\$\{AGENTS_URL\}\/agents/);
-  assert.match(assets, /staleTime:\s*0/);
-  assert.match(assets, /gcTime:\s*0/);
+  // Agents tab renders the shared cached catalog snapshot (models-worker
+  // parity) — no private fetching, no zero-TTL cache churn.
+  assert.match(assets, /useAgentCatalog/);
+  assert.match(assets, /toOnchainAgent/);
+  assert.doesNotMatch(assets, /AGENTS_URL/);
+  assert.doesNotMatch(assets, /staleTime:\s*0/);
+  assert.doesNotMatch(assets, /gcTime:\s*0/);
   assert.match(assets, /cm-market-agent-canvas/);
   assert.match(assets, /variant="market"/);
   assert.doesNotMatch(assets, /cm-agent-card--market-full/);

@@ -24,9 +24,13 @@ test("agent stream hook forwards structured MSM controls into the SDK request", 
 
 test("agent page persists thread ids across remounts until clear chat", () => {
   const page = readFileSync(resolve(root, "src/pages/agent.tsx"), "utf8");
+  const threadHook = readFileSync(resolve(root, "src/hooks/use-thread.ts"), "utf8");
 
+  // The page scopes the thread key (user + agent); the shared hook owns the
+  // sessionStorage persistence (get on reattach, set on reset, remove on clear).
   assert.match(page, /agent-thread-\$\{backpackUserId\}-\$\{agentWallet\}/);
-  assert.match(page, /sessionStorage\.getItem\(threadKey\)/);
-  assert.match(page, /sessionStorage\.setItem\(threadKey,\s*nextThreadId\)/);
-  assert.match(page, /sessionStorage\.removeItem\(threadKey\)/);
+  assert.match(page, /useConversationThread\(/);
+  assert.match(threadHook, /sessionStorage\.getItem\(thread\.key\)/);
+  assert.match(threadHook, /sessionStorage\.setItem\(thread\.key, nextThreadId\)/);
+  assert.match(threadHook, /sessionStorage\.removeItem\(thread\.key\)/);
 });

@@ -187,32 +187,30 @@ test("semantic hits enrich rankings but resolve to canonical catalog models", ()
 
 test("Playground catalog loading uses the durable compact index and independent resources", async () => {
   const { readFile } = await import("node:fs/promises");
-  const [modelsHook, playground, commandBar, capabilities, styles] = await Promise.all([
+  const [modelsHook, modelCatalog, playground, commandBar, capabilities, styles] = await Promise.all([
     readFile(new URL("../src/hooks/use-model.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/lib/models.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/pages/playground.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/components/models/command-bar.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/components/models/capabilities.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/styles/index.css", import.meta.url), "utf8"),
   ]);
 
-  assert.match(modelsHook, /sdk\.fetch\("\/v1\/models\/index"/);
+  assert.match(modelsHook, /fetchModelCatalogHealth\(MODELS_ORIGIN\)/);
+  assert.match(modelsHook, /fetchModelCatalogIndex\(MODELS_ORIGIN,\s*version!/);
+  assert.match(modelCatalog, /new URL\(`\$\{origin\}\/index`\)/);
+  assert.match(modelCatalog, /cache:\s*"force-cache"/);
   assert.match(modelsHook, /meta:\s*durableQueryMeta/);
-  assert.match(modelsHook, /FRONTIERS_CACHE_KEY\s*=\s*\["models-latest-compact",\s*MODELS_ORIGIN,\s*1\]/);
-  assert.match(modelsHook, /load\("frontier"\)/);
-  assert.match(modelsHook, /load\("latest"\)/);
-  assert.match(modelsHook, /next_cursor/);
-  assert.match(modelsHook, /cache:\s*"no-cache"/);
-  assert.doesNotMatch(modelsHook, /refetchOnMount:\s*"always"/);
+  assert.match(modelsHook, /model\.isFrontier\s*===\s*true\s*\|\|\s*model\.isLatest\s*===\s*true/);
+  assert.match(modelsHook, /refetchOnMount:\s*"always"/);
   assert.match(modelsHook, /refetchOnMount:\s*false/);
-  assert.match(modelsHook, /refetchQueries\(\{\s*queryKey:\s*CACHE_KEY,\s*type:\s*"active"\s*\}\)/);
-  assert.match(modelsHook, /refetchQueries\(\{\s*queryKey:\s*FRONTIERS_CACHE_KEY,\s*type:\s*"active"\s*\}\)/);
+  assert.match(modelsHook, /queryKey:\s*\[\.\.\.CATALOG_CACHE_PREFIX,\s*health\.version\]/);
   assert.match(modelsHook, /refetchQueries\(\{\s*queryKey:\s*\["model-card"\],\s*type:\s*"active"\s*\}\)/);
   assert.match(modelsHook, /removeQueries\(\{\s*queryKey:\s*\["model-card"\],\s*type:\s*"inactive"\s*\}\)/);
-  assert.match(modelsHook, /retry:\s*0/);
-  assert.match(modelsHook, /No frontier models returned/);
   assert.match(modelsHook, /useModelDetails/);
   assert.match(modelsHook, /useModelParams/);
   assert.doesNotMatch(modelsHook, /sdk\.models\.list\(\)/);
+  assert.doesNotMatch(modelsHook, /sdk\.fetch\("\/v1\/models\/index"/);
   assert.match(playground, /useRegistryMeta\(\{\s*enabled:\s*activeTab\s*===\s*"connectors"\s*\}\)/);
   assert.doesNotMatch(playground, /sdk\.models\.getParams/);
   assert.match(playground, /isRefetching:\s*modelsRefetching/);
