@@ -116,7 +116,7 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, family }
   const listRef = useRef<HTMLDivElement>(null);
   const selectedKeyRef = useRef<string | null>(null);
 
-  const { models, frontiers } = useModels({ enabled: open });
+  const { models, frontiers, refreshError } = useModels({ enabled: open });
   const deferredQuery = useDeferredValue(searchQuery);
 
   useEffect(() => {
@@ -392,6 +392,9 @@ export function CommandBar({ open, onOpenChange, value, onSelect, type, family }
           <span>
             {filteredModels.length} of {models.length} models
             {semanticLoading && searchActive ? " · semantic search…" : ""}
+            {refreshError ? (
+              <span className="text-amber-400"> · catalog refresh failed — showing cached</span>
+            ) : null}
           </span>
           <div className="cm-command-footer__hints">
             <span className="cm-command-hint">
