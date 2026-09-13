@@ -12,6 +12,7 @@ export const NETWORK_LOGOS: Record<string, string> = {
   "eip155:42161": "/networks/arbitrum.png",
   "eip155:5042002": "/networks/arcTestnet.jpeg",
   "eip155:5042": "/networks/arc.jpeg",
+  "eip155:677": "/networks/botchain.jpg",
   "eip155:1328": "/networks/seiTestnet.jpeg",
   "eip155:1329": "/networks/sei.jpeg",
   "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1": "/networks/solanaDevnet.jpeg",
