@@ -20,7 +20,70 @@ export type CatalogModel = Model & {
   params?: Record<string, unknown>;
   family?: string;
   requiresImageInput?: boolean;
+  isFrontier?: boolean;
+  isLatest?: boolean;
 };
+
+export interface ModelCatalogHealth {
+  models: number;
+  version: string;
+  lastUpdated: string | null;
+}
+
+export interface ModelCatalogIndex {
+  data: CatalogModel[];
+  total: number;
+  version: string;
+  lastUpdated: string | null;
+}
+
+export function modelsOrigin(value: string): string {
+  return new URL(value).origin;
+}
+
+export async function fetchModelCatalogHealth(
+  origin: string,
+  fetcher: typeof fetch = fetch,
+): Promise<ModelCatalogHealth> {
+  const response = await fetcher(`${origin}/health`, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error(`Failed to load model catalog version: ${response.status}`);
+  const body = await response.json() as Partial<ModelCatalogHealth>;
+  if (typeof body.version !== "string" || !body.version || typeof body.models !== "number") {
+    throw new Error("Invalid model catalog health response");
+  }
+  return {
+    models: body.models,
+    version: body.version,
+    lastUpdated: typeof body.lastUpdated === "string" ? body.lastUpdated : null,
+  };
+}
+
+export async function fetchModelCatalogIndex(
+  origin: string,
+  version: string,
+  fetcher: typeof fetch = fetch,
+): Promise<CatalogModel[]> {
+  const target = new URL(`${origin}/index`);
+  target.searchParams.set("version", version);
+  const response = await fetcher(target, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+    cache: "force-cache",
+  });
+  if (!response.ok) throw new Error(`Failed to load model catalog index: ${response.status}`);
+  const body = await response.json() as Partial<ModelCatalogIndex>;
+  if (body.version !== version || !Array.isArray(body.data) || body.data.length === 0) {
+    throw new Error("Invalid model catalog index response");
+  }
+  if (body.total !== body.data.length) {
+    throw new Error(`Incomplete model catalog index: expected ${body.total}, received ${body.data.length}`);
+  }
+  return body.data;
+}
 
 export const IMAGE_ATTACHMENT_REQUIRED_MESSAGE = "Upload an image to use this model.";
 
@@ -344,7 +407,7 @@ function modelSearchScore(model: CatalogModel, query: SearchProfile): number {
   return Math.max(nameScore, familyScore, typeScore, descriptionScore);
 }
 
-/** Rank a catalog locally. This is intentionally deterministic and fast for 700+ rows. */
+/** Rank a catalog locally. This is intentionally deterministic and fast for 650+ rows. */
 export function rankCatalogModels(models: CatalogModel[], query: string, limit = 50): RankedCatalogModel[] {
   const profile = searchProfile(query);
   if (!profile.compact) {

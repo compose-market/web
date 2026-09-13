@@ -172,20 +172,17 @@ export function benchmarkOperationForCatalogModel(model: CatalogModel | null | u
 
 export function catalogModelSupportsBenchmarks(model: CatalogModel | null | undefined): boolean {
     if (!model) return false;
-    const semanticOperations = (model as CatalogModel & {
-        semantics?: { operations?: unknown };
-    }).semantics?.operations;
-    const operations = Array.isArray(semanticOperations)
-        ? semanticOperations
-        : Array.isArray(model.operations)
-            ? model.operations.map((operation) =>
-                typeof operation === "string"
-                    ? operation
-                    : operation && typeof operation === "object"
-                        ? (operation as { operation?: unknown }).operation
-                        : undefined
-            ).filter(Boolean)
-            : [];
+    // Operations are served by the models worker's /index, derived from
+    // the catalog's per-operation capabilities.
+    const operations = Array.isArray(model.operations)
+        ? model.operations.map((operation) =>
+            typeof operation === "string"
+                ? operation
+                : operation && typeof operation === "object"
+                    ? (operation as { operation?: unknown }).operation
+                    : undefined
+        ).filter(Boolean)
+        : [];
     const supportedOperations = new Set([
         "chat",
         "vision-chat",
