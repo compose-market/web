@@ -59,6 +59,7 @@ import {
     RadioTower,
     Gamepad2,
     Hash,
+    KeyRound,
 } from "lucide-react";
 import { sdk } from "@/lib/sdk";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -108,6 +109,30 @@ interface ToolkitResult {
     description: string;
     categories: string[];
     authSchemes: string[];
+}
+
+const CONNECTORS_URL = (import.meta.env.VITE_CONNECTORS_URL || "https://connectors.compose.market").replace(/\/+$/, "");
+
+interface ConnectorVarSpec {
+    varName: string;
+    description?: string;
+    obtainUrl?: string;
+}
+
+interface ConnectorRow {
+    slug: string;
+    name: string;
+    connected: boolean;
+    allowed: boolean;
+    status: string;
+    missingVars: ConnectorVarSpec[];
+    actions?: string[];
+}
+
+interface ConnectorCatalogEntry {
+    slug: string;
+    name: string;
+    description?: string;
 }
 
 type StatusMap = Partial<Record<ChannelName, ChannelStatusResponse>>;
@@ -350,6 +375,23 @@ export function BackpackDialog({
     // Connection states fetched from Composio via backend
     const [connections, setConnections] = useState<Record<string, ConnectionStatus>>({});
 
+    // Credential-gated connector states (user-scoped backpack)
+    const [connectorRows, setConnectorRows] = useState<ConnectorRow[]>([]);
+    const [loadingConnectors, setLoadingConnectors] = useState(false);
+    const [connectorBusy, setConnectorBusy] = useState<string | null>(null);
+    const [gatedCatalog, setGatedCatalog] = useState<ConnectorCatalogEntry[]>([]);
+    const [connectPanel, setConnectPanel] = useState<null | { slug: string; name: string; credentials: ConnectorVarSpec[] }>(null);
+    const [connectVars, setConnectVars] = useState<Record<string, string>>({});
+    const [connectSubmitting, setConnectSubmitting] = useState(false);
+    const [connectError, setConnectError] = useState<string | null>(null);
+
+    // Connector catalog search (same pattern as the accounts toolkit search)
+    const [connectorSearchQuery, setConnectorSearchQuery] = useState("");
+    const [connectorSearchResults, setConnectorSearchResults] = useState<ConnectorCatalogEntry[]>([]);
+    const [searchingConnectors, setSearchingConnectors] = useState(false);
+    const connectorSearchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const connectorSearchAbortRef = useRef<AbortController | null>(null);
+
     const handleOpen = open !== undefined ? open : isOpen;
     const handleOpenChange = onOpenChange || setIsOpen;
 
@@ -397,6 +439,14 @@ export function BackpackDialog({
             connectionsAbortRef.current.abort();
             connectionsAbortRef.current = null;
         }
+        if (connectorSearchDebounceRef.current) {
+            clearTimeout(connectorSearchDebounceRef.current);
+            connectorSearchDebounceRef.current = null;
+        }
+        if (connectorSearchAbortRef.current) {
+            connectorSearchAbortRef.current.abort();
+            connectorSearchAbortRef.current = null;
+        }
         clearStatusPolling();
         if (whatsappWsRef.current) {
             whatsappWsRef.current.close();
@@ -415,6 +465,13 @@ export function BackpackDialog({
         setSearching(false);
         setWhatsappChannelState(null);
         setBusyChannel(null);
+        setConnectPanel(null);
+        setConnectVars({});
+        setConnectSubmitting(false);
+        setConnectError(null);
+        setConnectorSearchQuery("");
+        setConnectorSearchResults([]);
+        setSearchingConnectors(false);
     }, []);
 
     const handleDialogOpenChange = useCallback((nextOpen: boolean) => {
@@ -473,6 +530,206 @@ export function BackpackDialog({
             }
         }
     }, [agentWallet, effectiveUserId]);
+
+    // ==========================================================================
+    // Credential-Gated Connectors (user-scoped backpack)
+    // ==========================================================================
+
+    const fetchConnectors = useCallback(async () => {
+        if (!agentWallet) {
+            setConnectorRows([]);
+            return;
+        }
+        setLoadingConnectors(true);
+        try {
+            const status = await sdk.gated.status({ userAddress: effectiveUserId, agentWallet });
+            setConnectorRows(status.connectors || []);
+        } catch (err) {
+            console.warn("[Backpack] Could not fetch connectors:", err);
+        } finally {
+            setLoadingConnectors(false);
+        }
+    }, [agentWallet, effectiveUserId]);
+
+    const fetchGatedCatalog = useCallback(async () => {
+        try {
+            const response = await fetch(`${CONNECTORS_URL}/mcps?status=credential_gated&limit=100`, {
+                headers: { Accept: "application/json" },
+                signal: AbortSignal.timeout(8000),
+            });
+            if (!response.ok) return;
+            const data = await response.json() as {
+                servers?: Array<{ slug?: string; name?: string; description?: string }>;
+            };
+            setGatedCatalog((data.servers || [])
+                .filter((server): server is { slug: string; name?: string; description?: string } => typeof server.slug === "string" && server.slug.length > 0)
+                .map((server) => ({
+                    slug: server.slug,
+                    name: server.name || server.slug,
+                    ...(server.description ? { description: server.description } : {}),
+                })));
+        } catch (err) {
+            console.warn("[Backpack] Could not fetch gated catalog:", err);
+        }
+    }, []);
+
+    const searchConnectors = useCallback(async (query: string) => {
+        if (!query.trim()) {
+            if (connectorSearchAbortRef.current) {
+                connectorSearchAbortRef.current.abort();
+                connectorSearchAbortRef.current = null;
+            }
+            setConnectorSearchResults([]);
+            return;
+        }
+
+        if (connectorSearchAbortRef.current) {
+            connectorSearchAbortRef.current.abort();
+        }
+
+        const controller = new AbortController();
+        connectorSearchAbortRef.current = controller;
+
+        setSearchingConnectors(true);
+        try {
+            const response = await fetch(
+                `${CONNECTORS_URL}/mcps/search?q=${encodeURIComponent(query)}&limit=30`,
+                { headers: { Accept: "application/json" }, signal: controller.signal },
+            );
+            if (!response.ok) {
+                setConnectorSearchResults([]);
+                return;
+            }
+            const data = await response.json() as {
+                servers?: Array<{ slug?: string; name?: string; description?: string; status?: string }>;
+            };
+            setConnectorSearchResults((data.servers || [])
+                .filter((server): server is { slug: string; name?: string; description?: string } =>
+                    typeof server.slug === "string" && server.slug.length > 0 && server.status === "credential_gated")
+                .map((server) => ({
+                    slug: server.slug,
+                    name: server.name || server.slug,
+                    ...(server.description ? { description: server.description } : {}),
+                })));
+        } catch (err) {
+            if (controller.signal.aborted) {
+                return;
+            }
+            console.warn("[Backpack] Connector search error:", err);
+        } finally {
+            if (connectorSearchAbortRef.current === controller) {
+                connectorSearchAbortRef.current = null;
+                setSearchingConnectors(false);
+            }
+        }
+    }, []);
+
+    // Debounced connector search
+    useEffect(() => {
+        if (connectorSearchDebounceRef.current) {
+            clearTimeout(connectorSearchDebounceRef.current);
+        }
+        if (!connectorSearchQuery.trim()) {
+            if (connectorSearchAbortRef.current) {
+                connectorSearchAbortRef.current.abort();
+                connectorSearchAbortRef.current = null;
+            }
+            setConnectorSearchResults([]);
+            setSearchingConnectors(false);
+            return;
+        }
+        connectorSearchDebounceRef.current = setTimeout(() => {
+            searchConnectors(connectorSearchQuery);
+        }, 300);
+        return () => {
+            if (connectorSearchDebounceRef.current) clearTimeout(connectorSearchDebounceRef.current);
+        };
+    }, [connectorSearchQuery, searchConnectors]);
+
+    const openConnectPanel = useCallback(async (slug: string, name?: string) => {
+        setConnectorBusy(slug);
+        setConnectError(null);
+        try {
+            const response = await fetch(`${CONNECTORS_URL}/mcps/${encodeURIComponent(slug)}`, {
+                headers: { Accept: "application/json" },
+                signal: AbortSignal.timeout(8000),
+            });
+            if (!response.ok) {
+                throw new Error(`Connector catalog entry unavailable (${response.status}).`);
+            }
+            const card = await response.json() as {
+                slug?: string;
+                name?: string;
+                credentials?: Array<{ varName?: string; description?: string; obtainUrl?: string }>;
+            };
+            const credentials = (card.credentials || [])
+                .filter((entry): entry is { varName: string; description?: string; obtainUrl?: string } =>
+                    typeof entry?.varName === "string" && entry.varName.trim().length > 0)
+                .map((entry) => ({
+                    varName: entry.varName.trim(),
+                    ...(entry.description ? { description: entry.description } : {}),
+                    ...(entry.obtainUrl ? { obtainUrl: entry.obtainUrl } : {}),
+                }));
+            setConnectPanel({ slug, name: card.name || name || slug, credentials });
+            setConnectVars(Object.fromEntries(credentials.map((credential) => [credential.varName, ""])));
+        } catch (err) {
+            setConnectError(err instanceof Error ? err.message : "Could not load connector requirements.");
+        } finally {
+            setConnectorBusy(null);
+        }
+    }, []);
+
+    const submitConnectorConnect = useCallback(async () => {
+        if (!connectPanel || !agentWallet) return;
+        setConnectSubmitting(true);
+        setConnectError(null);
+        try {
+            const vars: Record<string, string> = {};
+            for (const credential of connectPanel.credentials) {
+                const value = (connectVars[credential.varName] || "").trim();
+                if (!value) {
+                    throw new Error(`${credential.varName} is required.`);
+                }
+                vars[credential.varName] = value;
+            }
+            await sdk.gated.connect({
+                userAddress: effectiveUserId,
+                slug: connectPanel.slug,
+                vars,
+                agentWallet,
+            });
+            toast({
+                title: "Connector connected",
+                description: `${connectPanel.name} credentials stored and ${agentLabel} granted.`,
+            });
+            setConnectPanel(null);
+            setConnectVars({});
+            void fetchConnectors();
+        } catch (err) {
+            const message = err instanceof Error ? err.message : "Could not connect connector.";
+            setConnectError(message);
+            toast({ title: "Connector connect failed", description: message, variant: "destructive" });
+        } finally {
+            setConnectSubmitting(false);
+        }
+    }, [agentLabel, agentWallet, connectPanel, connectVars, effectiveUserId, fetchConnectors, toast]);
+
+    const disconnectConnector = useCallback(async (row: ConnectorRow) => {
+        setConnectorBusy(row.slug);
+        try {
+            await sdk.gated.disconnect({ userAddress: effectiveUserId, slug: row.slug });
+            toast({ title: "Connector disconnected", description: `${row.name} credentials removed.` });
+            void fetchConnectors();
+        } catch (err) {
+            toast({
+                title: "Disconnect failed",
+                description: err instanceof Error ? err.message : "Could not disconnect connector.",
+                variant: "destructive",
+            });
+        } finally {
+            setConnectorBusy(null);
+        }
+    }, [effectiveUserId, fetchConnectors, toast]);
 
     const refreshChannels = useCallback(async (signal?: AbortSignal) => {
         if (!agentWallet) return;
@@ -702,6 +959,14 @@ export function BackpackDialog({
             fetchConnections();
         }
     }, [handleOpen, activeTab, fetchConnections]);
+
+    // Fetch gated connectors when the connectors tab is opened
+    useEffect(() => {
+        if (handleOpen && activeTab === "connectors") {
+            void fetchConnectors();
+            void fetchGatedCatalog();
+        }
+    }, [handleOpen, activeTab, fetchConnectors, fetchGatedCatalog]);
 
     // ==========================================================================
     // Toolkit Search
@@ -1253,6 +1518,7 @@ export function BackpackDialog({
     const grantedPermissionsCount = Object.values(permissions).filter(Boolean).length;
     const connectedChannelsCount = Object.values(channelStatuses).filter(status => (status?.routes || []).length > 0).length;
     const connectedAccountsCount = Object.values(connections).filter(c => c.connected).length;
+    const connectedConnectorsCount = connectorRows.filter(c => c.connected).length;
 
     // Provider card renderer — shared between featured and search results
     const renderProviderCard = (provider: ProviderDisplay) => {
@@ -1519,7 +1785,7 @@ export function BackpackDialog({
                     <>
 
                         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 min-h-0 overflow-hidden">
-                            <TabsList className="grid w-full grid-cols-3 flex-shrink-0">
+                            <TabsList className="grid w-full grid-cols-4 flex-shrink-0">
                                 <TabsTrigger value="permissions" className="gap-2">
                                     <Shield className="w-4 h-4" />
                                     Permissions
@@ -1544,6 +1810,15 @@ export function BackpackDialog({
                                     {connectedAccountsCount > 0 && (
                                         <Badge variant="secondary" className="ml-1 text-xs px-1.5">
                                             {connectedAccountsCount}
+                                        </Badge>
+                                    )}
+                                </TabsTrigger>
+                                <TabsTrigger value="connectors" className="gap-2">
+                                    <KeyRound className="w-4 h-4" />
+                                    Connectors
+                                    {connectedConnectorsCount > 0 && (
+                                        <Badge variant="secondary" className="ml-1 text-xs px-1.5">
+                                            {connectedConnectorsCount}
                                         </Badge>
                                     )}
                                 </TabsTrigger>
@@ -1846,6 +2121,260 @@ export function BackpackDialog({
                                 <p className="text-xs text-muted-foreground text-center pt-4 flex-shrink-0">
                                     Compose Market never sees or stores your tokens.
                                 </p>
+                            </TabsContent>
+
+                            {/* Credential-Gated Connectors Tab */}
+                            <TabsContent value="connectors" className="mt-4 flex flex-col flex-1 min-h-0 overflow-hidden">
+                                {connectPanel ? (
+                                    <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-3">
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="self-start gap-1.5 text-muted-foreground hover:text-foreground -ml-2"
+                                            onClick={() => {
+                                                setConnectPanel(null);
+                                                setConnectVars({});
+                                                setConnectError(null);
+                                            }}
+                                        >
+                                            <ArrowLeft className="w-4 h-4" />
+                                            Back
+                                        </Button>
+
+                                        <div className="flex items-center gap-3">
+                                            <div className="cm-setting-row__icon">
+                                                <KeyRound className="w-5 h-5 text-fuchsia-400" />
+                                            </div>
+                                            <div>
+                                                <h3 className="text-base font-semibold text-foreground">Connect {connectPanel.name}</h3>
+                                                <p className="text-xs text-muted-foreground">
+                                                    Credentials are encrypted at rest and only ever injected into the connector at execution time.
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        {connectPanel.credentials.length === 0 ? (
+                                            <p className="text-sm text-muted-foreground py-4">
+                                                This connector declares no credential variables.
+                                            </p>
+                                        ) : (
+                                            <div className="space-y-3">
+                                                {connectPanel.credentials.map((credential) => (
+                                                    <div key={credential.varName} className="space-y-1">
+                                                        <div className="flex items-center justify-between">
+                                                            <label className="text-xs font-mono text-foreground">{credential.varName}</label>
+                                                            {credential.obtainUrl && (
+                                                                <a
+                                                                    href={credential.obtainUrl}
+                                                                    target="_blank"
+                                                                    rel="noopener noreferrer"
+                                                                    className="text-xs text-fuchsia-400 hover:underline inline-flex items-center gap-1"
+                                                                >
+                                                                    Get key <ExternalLink className="w-3 h-3" />
+                                                                </a>
+                                                            )}
+                                                        </div>
+                                                        {credential.description && (
+                                                            <p className="text-xs text-muted-foreground">{credential.description}</p>
+                                                        )}
+                                                        <Input
+                                                            type="password"
+                                                            autoComplete="off"
+                                                            value={connectVars[credential.varName] || ""}
+                                                            onChange={(e) => setConnectVars((current) => ({ ...current, [credential.varName]: e.target.value }))}
+                                                            placeholder={credential.varName}
+                                                            className="h-9 text-sm bg-background/70 font-mono"
+                                                        />
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+
+                                        {connectError && (
+                                            <p className="text-xs text-destructive">{connectError}</p>
+                                        )}
+
+                                        <Button
+                                            onClick={() => void submitConnectorConnect()}
+                                            disabled={connectSubmitting || connectPanel.credentials.some((credential) => !(connectVars[credential.varName] || "").trim())}
+                                            className="w-full"
+                                        >
+                                            {connectSubmitting ? (
+                                                <Loader2 className="w-4 h-4 animate-spin mr-1.5" />
+                                            ) : (
+                                                <KeyRound className="w-4 h-4 mr-1.5" />
+                                            )}
+                                            Connect
+                                        </Button>
+                                    </div>
+                                ) : (
+                                    <>
+                                        {/* Search + Refresh row */}
+                                        <div className="flex items-center gap-2 mb-2 flex-shrink-0">
+                                            <div className="relative flex-1">
+                                                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                                                <input
+                                                    type="text"
+                                                    placeholder="Search API-key connectors..."
+                                                    value={connectorSearchQuery}
+                                                    onChange={(e) => setConnectorSearchQuery(e.target.value)}
+                                                    className="w-full h-8 pl-8 pr-8 text-sm bg-background/70 border border-primary/20 rounded-md text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-fuchsia-500/50 focus:ring-1 focus:ring-fuchsia-500/20 transition-colors"
+                                                />
+                                                {connectorSearchQuery && (
+                                                    <button
+                                                        onClick={() => setConnectorSearchQuery("")}
+                                                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                                    >
+                                                        <X className="w-3.5 h-3.5" />
+                                                    </button>
+                                                )}
+                                            </div>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground shrink-0"
+                                                onClick={() => void fetchConnectors()}
+                                                disabled={loadingConnectors}
+                                            >
+                                                <RefreshCw className={`w-3 h-3 mr-1 ${loadingConnectors ? "animate-spin" : ""}`} />
+                                                Refresh
+                                            </Button>
+                                        </div>
+
+                                        <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-3">
+                                            {connectorSearchQuery.trim() && (
+                                                <div className="space-y-2">
+                                                    {searchingConnectors && (
+                                                        <div className="flex items-center justify-center py-4 text-muted-foreground text-sm">
+                                                            <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                                                            Searching...
+                                                        </div>
+                                                    )}
+                                                    {!searchingConnectors && connectorSearchResults.length === 0 && !connectorRows.some((row) =>
+                                                        row.name.toLowerCase().includes(connectorSearchQuery.trim().toLowerCase())
+                                                        || row.slug.toLowerCase().includes(connectorSearchQuery.trim().toLowerCase())) && (
+                                                        <div className="text-center py-4 text-muted-foreground text-sm">
+                                                            No API-key connectors found for "{connectorSearchQuery}"
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                            {loadingConnectors && connectorRows.length === 0 && !connectorSearchQuery.trim() ? (
+                                                <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
+                                                    <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                                                    Loading connectors...
+                                                </div>
+                                            ) : (
+                                                <>
+                                                    {connectorRows
+                                                        .filter((row) => !connectorSearchQuery.trim()
+                                                            || row.name.toLowerCase().includes(connectorSearchQuery.trim().toLowerCase())
+                                                            || row.slug.toLowerCase().includes(connectorSearchQuery.trim().toLowerCase()))
+                                                        .map((row) => (
+                                                        <div key={row.slug} className="cm-setting-row">
+                                                            <div className="cm-setting-row__icon">
+                                                                <KeyRound className="w-4 h-4 text-fuchsia-400" />
+                                                            </div>
+                                                            <div className="cm-setting-row__copy">
+                                                                <div className="cm-setting-row__label flex items-center gap-1.5">
+                                                                    {row.name}
+                                                                    {row.connected && (
+                                                                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0 border-primary/20 text-green-400 font-normal">
+                                                                            connected
+                                                                        </Badge>
+                                                                    )}
+                                                                    {row.allowed && (
+                                                                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0 border-primary/20 text-muted-foreground font-normal">
+                                                                            granted
+                                                                        </Badge>
+                                                                    )}
+                                                                </div>
+                                                                <div className="cm-setting-row__description truncate hidden sm:block">
+                                                                    {row.connected
+                                                                        ? `${row.actions?.length ? `${row.actions.length} actions` : "ready"}`
+                                                                        : row.missingVars.length > 0
+                                                                            ? `Missing: ${row.missingVars.map((v) => v.varName).join(", ")}`
+                                                                            : "Not connected"}
+                                                                </div>
+                                                            </div>
+
+                                                            <div className="cm-setting-row__control">
+                                                                {connectorBusy === row.slug ? (
+                                                                    <Loader2 className="w-4 h-4 animate-spin text-fuchsia-400" />
+                                                                ) : row.connected ? (
+                                                                    <Button
+                                                                        variant="destructive"
+                                                                        size="sm"
+                                                                        className="shrink-0 h-8 w-8 sm:w-auto p-0 sm:px-2.5 flex items-center justify-center"
+                                                                        onClick={() => void disconnectConnector(row)}
+                                                                    >
+                                                                        <Unplug className="w-4 h-4" />
+                                                                        <span className="hidden sm:inline ml-1 text-xs">Disconnect</span>
+                                                                    </Button>
+                                                                ) : (
+                                                                    <Button
+                                                                        variant="outline"
+                                                                        size="sm"
+                                                                        className="shrink-0 h-8 w-8 sm:w-auto p-0 sm:px-2.5 flex items-center justify-center"
+                                                                        onClick={() => void openConnectPanel(row.slug, row.name)}
+                                                                    >
+                                                                        <KeyRound className="w-4 h-4" />
+                                                                        <span className="hidden sm:inline ml-1 text-xs">Connect</span>
+                                                                    </Button>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+
+                                                    {(connectorSearchQuery.trim() ? connectorSearchResults : gatedCatalog)
+                                                        .filter((entry) => !connectorRows.some((row) => row.slug === entry.slug))
+                                                        .map((entry) => (
+                                                            <div key={entry.slug} className="cm-setting-row">
+                                                                <div className="cm-setting-row__icon">
+                                                                    <KeyRound className="w-4 h-4 text-muted-foreground" />
+                                                                </div>
+                                                                <div className="cm-setting-row__copy">
+                                                                    <div className="cm-setting-row__label">{entry.name}</div>
+                                                                    <div className="cm-setting-row__description truncate hidden sm:block">
+                                                                        {entry.description || entry.slug}
+                                                                    </div>
+                                                                </div>
+                                                                <div className="cm-setting-row__control">
+                                                                    {connectorBusy === entry.slug ? (
+                                                                        <Loader2 className="w-4 h-4 animate-spin text-fuchsia-400" />
+                                                                    ) : (
+                                                                        <Button
+                                                                            variant="outline"
+                                                                            size="sm"
+                                                                            className="shrink-0 h-8 w-8 sm:w-auto p-0 sm:px-2.5 flex items-center justify-center"
+                                                                            onClick={() => void openConnectPanel(entry.slug, entry.name)}
+                                                                        >
+                                                                            <KeyRound className="w-4 h-4" />
+                                                                            <span className="hidden sm:inline ml-1 text-xs">Connect</span>
+                                                                        </Button>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        ))}
+
+                                                    {connectorRows.length === 0 && gatedCatalog.length === 0 && !loadingConnectors && !connectorSearchQuery.trim() && (
+                                                        <div className="text-center py-8 text-muted-foreground text-sm">
+                                                            No credential-gated connectors available.
+                                                        </div>
+                                                    )}
+                                                </>
+                                            )}
+                                        </div>
+
+                                        {connectError && (
+                                            <p className="text-xs text-destructive pt-2 flex-shrink-0">{connectError}</p>
+                                        )}
+
+                                        <p className="text-xs text-muted-foreground text-center pt-4 flex-shrink-0">
+                                            Keys are encrypted and injected blind at execution time — never shown again.
+                                        </p>
+                                    </>
+                                )}
                             </TabsContent>
                         </Tabs>
                     </>)}
