@@ -12,12 +12,11 @@ import type {
     SessionBudgetSnapshot,
     SessionInvalidReason,
     AgentStreamControls,
-    ProposalTask,
 } from "@compose-market/sdk";
 import { createRunProjection, reduceRunProjection } from "@compose-market/sdk";
 
 import { sdk } from "@/lib/sdk";
-import { noticeId, type Artifact, type Plan, type UseChatReturn } from "@/hooks/use-chat";
+import { noticeId, type Artifact, type ConnectorRequest, type Plan, type Task, type UseChatReturn } from "@/hooks/use-chat";
 import {
     getModelTypeValues,
     IMAGE_ATTACHMENT_REQUIRED_MESSAGE,
@@ -89,6 +88,7 @@ export interface UseStream {
     runResponses: (args: ResponsesStreamArgs) => Promise<void>;
     appendResponses: (args: ResponsesAppendArgs) => Promise<void>;
     cancelResponses: () => void;
+    watchPlan: (params: { agentWallet: string; runId: string; threadId: string }) => Promise<void>;
 }
 
 interface LiveResponse {
@@ -520,7 +520,125 @@ export function useStream(
         });
     }, []);
 
-    return useMemo(() => ({ runAgent, runWorkflow, runResponses, appendResponses, cancelResponses }), [runAgent, runWorkflow, runResponses, appendResponses, cancelResponses]);
+    // Global plan-watch: after a decision (or any moment the page needs
+    // follow-through), subscribe to the run's watch SSE and route its
+    // events through the same dispatch pipeline as the live stream —
+    // approved-plan execution, connector gates, the completion turn, and
+    // the delivery artifact become visible without a follow-up chat
+    // message.
+    //
+    // Watch-origin routing (agent<>user chat):
+    //   - the user-facing agent's own model deltas (completion turn, runId
+    //     not a sub-run) render as chat text on a watch-created assistant
+    //     message — the agent speaks to the user;
+    //   - sub-agent model deltas NEVER render in chat — their work shows in
+    //     mission control's activity tree only;
+    //   - sub-agent tasks/plans never merge into the user's plan card —
+    //     only the user-facing plan (runId not a sub-run) renders;
+    //   - activity events attach to the activity tree (mission control).
+    //
+    // The watch is resilient: on transport failure or stream end it
+    // reconnects with capped backoff until a terminal plan state is
+    // observed (or the total watch window elapses), because plan execution
+    // outlives any single SSE connection.
+    const watchPlan = useCallback(async (params: { agentWallet: string; runId: string; threadId: string }): Promise<void> => {
+        const WATCH_RECONNECT_BASE_MS = 1_000;
+        const WATCH_RECONNECT_MAX_MS = 30_000;
+        const WATCH_TOTAL_MS = 2 * 60 * 60 * 1_000;
+        const TERMINAL_PLAN_STATES = new Set(["completed", "failed", "cancelled", "expired", "rejected"]);
+        const startedAt = Date.now();
+        let backoff = WATCH_RECONNECT_BASE_MS;
+        const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+        const isTerminal = (event: RunEvent): boolean => {
+            if (event.domain !== "activity") return false;
+            const record = event as unknown as { type?: string; payload?: Record<string, unknown> };
+            if (record.type === "activity.run" && isRecord(record.payload)) {
+                const status = str(record.payload.status);
+                return status !== undefined && TERMINAL_PLAN_STATES.has(status);
+            }
+            if (record.type === "activity.plan" && isRecord(record.payload)) {
+                const state = str(record.payload.state);
+                return state !== undefined && TERMINAL_PLAN_STATES.has(state);
+            }
+            return false;
+        };
+
+        const isSubRun = (event: RunEvent): boolean => {
+            const runId = (event as unknown as { runId?: unknown }).runId;
+            return typeof runId === "string" && runId.startsWith("sub:");
+        };
+
+        // Nested sub-plan completion turns (complete-sub:*) are sub-agent
+        // speech — mission control's activity tree only, never the user's chat.
+        const isNestedCompletion = (event: RunEvent): boolean => {
+            const runId = (event as unknown as { runId?: unknown }).runId;
+            return typeof runId === "string" && runId.startsWith("complete-sub:");
+        };
+
+        const routeWatchEvent = (event: RunEvent): void => {
+            const chat = chatRef.current;
+            if (event.domain === "model") {
+                // Sub-agent model output never renders in the user's chat —
+                // but its reasoning/answer folds into the child agent's
+                // mission-control tree node.
+                if (isSubRun(event)) {
+                    routeChildModelToTree(event, chat);
+                    return;
+                }
+                if (isNestedCompletion(event)) {
+                    routeChildModelToTree(event, chat);
+                    return;
+                }
+                // The user-facing agent's own words (the completion turn)
+                // need an assistant message when no live turn is running.
+                if (!chat.currentAssistantIdRef.current && (event.type === "model.text.delta" || event.type === "model.reasoning.delta")) {
+                    const assistantId = chat.createAssistantPlaceholder();
+                    chat.currentAssistantIdRef.current = assistantId;
+                    chat.streamedTextRef.current = "";
+                    textBlockRef.current = null;
+                }
+                route(event, chat, callbacksRef, textBlockRef, blockSeqRef);
+                return;
+            }
+            if (event.domain === "activity" && event.type === "activity.plan") {
+                // Only the user-facing plan renders in chat — sub-agent
+                // proposals are their parents' business, not the user's UI.
+                const payload = (event as unknown as { payload?: Record<string, unknown> }).payload;
+                const planRunId = str(payload?.runId);
+                if (planRunId !== undefined && planRunId.startsWith("sub:")) return;
+                route(event, chat, callbacksRef, textBlockRef, blockSeqRef);
+                return;
+            }
+            route(event, chat, callbacksRef, textBlockRef, blockSeqRef);
+        };
+
+        for (; ;) {
+            let terminal = false;
+            try {
+                const stream = sdk.agent.watch({ ...params, timeoutMs: 3_600_000 });
+                for (; ;) {
+                    const next = await stream.next();
+                    if (next.done) break;
+                    routeWatchEvent(next.value);
+                    if (isTerminal(next.value)) {
+                        terminal = true;
+                        break;
+                    }
+                }
+            } catch {
+                // Watch transport failures leave durable state untouched;
+                // reconnect below and re-derive from the snapshot replay.
+            }
+            if (terminal) return;
+            if (Date.now() - startedAt >= WATCH_TOTAL_MS) return;
+            await sleep(backoff);
+            backoff = Math.min(backoff * 2, WATCH_RECONNECT_MAX_MS);
+            if (Date.now() - startedAt >= WATCH_TOTAL_MS) return;
+        }
+    }, []);
+
+    return useMemo(() => ({ runAgent, runWorkflow, runResponses, appendResponses, cancelResponses, watchPlan }), [runAgent, runWorkflow, runResponses, appendResponses, cancelResponses, watchPlan]);
 }
 
 async function consume(
@@ -551,6 +669,62 @@ function route(
     }
 }
 
+/**
+ * Sub-agent model output never renders in the user's chat, but its work
+ * belongs in mission control: child reasoning and answer deltas fold into
+ * the child agent's tree node (agent:<runKey>) so each task fold shows what
+ * its assigned agent is thinking and saying.
+ */
+function routeChildModelToTree(event: ModelEvent, chat: UseChatReturn): void {
+    const assistantId = chat.currentAssistantIdRef.current;
+    const runId = typeof event.runId === "string" ? event.runId : undefined;
+    if (!assistantId || !runId) return;
+    // Nested sub-plan completion turns run as `complete-<sub runKey>` — their
+    // speech folds under the SAME agent node as the sub-agent's task run.
+    const agentRunKey = runId.startsWith("complete-") ? runId.slice("complete-".length) : runId;
+
+    if (event.type === "model.reasoning.delta" && event.delta) {
+        chat.applyAssistantActivityEvent(assistantId, {
+            domain: "activity",
+            type: "activity.thinking",
+            id: `thinking:${runId}`,
+            ts: event.ts,
+            kind: "thinking",
+            status: "running",
+            parentId: `agent:${agentRunKey}`,
+            spanId: `thinking:${runId}`,
+            delta: event.delta,
+        });
+        return;
+    }
+    if (event.type === "model.reasoning.done") {
+        chat.applyAssistantActivityEvent(assistantId, {
+            domain: "activity",
+            type: "activity.thinking",
+            id: `thinking:${runId}`,
+            ts: event.ts,
+            kind: "thinking",
+            status: "completed",
+            parentId: `agent:${agentRunKey}`,
+            spanId: `thinking:${runId}`,
+        });
+        return;
+    }
+    if (event.type === "model.text.delta" && event.delta) {
+        chat.applyAssistantActivityEvent(assistantId, {
+            domain: "activity",
+            type: "activity.message",
+            id: `message:${runId}`,
+            ts: event.ts,
+            kind: "message",
+            status: "running",
+            parentId: `agent:${agentRunKey}`,
+            spanId: `message:${runId}`,
+            delta: event.delta,
+        });
+    }
+}
+
 function dispatchModel(
     event: ModelEvent,
     chat: UseChatReturn,
@@ -561,12 +735,17 @@ function dispatchModel(
     const assistantId = chat.currentAssistantIdRef.current;
     if (!assistantId) return;
 
+    // Agent<>user chat: sub-agent model output never renders in the
+    // user's chat — the user-facing agent's own words are the chat; the
+    // swarm's work shows in mission control's activity tree.
+    if (typeof event.runId === "string" && event.runId.startsWith("sub:")) {
+        routeChildModelToTree(event, chat);
+        return;
+    }
+
     chat.applyAssistantModelEvent(assistantId, event);
 
-    const rawStatus = event.raw && typeof event.raw === "object" && "status" in event.raw
-        ? (event.raw as { status?: unknown }).status
-        : undefined;
-    const phase = "phase" in event && typeof event.phase === "string" ? event.phase : rawStatus;
+    const phase = event.phase;
     if (event.type === "model.status" && phase === "finalizing_payment") {
         chat.clearActivityStateUnlessError();
         return;
@@ -595,12 +774,9 @@ function dispatchModel(
         return;
     }
 
-    const rawType = event.raw && typeof event.raw === "object" && "type" in event.raw
-        ? (event.raw as { type?: unknown }).type
-        : undefined;
-    if ((rawType === "response.reasoning_summary_text.done" || rawType === "response.reasoning_text.done") && typeof (event.raw as { text?: unknown }).text === "string") {
+    if (event.type === "model.reasoning.done" && event.text) {
         const blockId = `reasoning:${event.responseId ?? "main"}`;
-        chat.upsertAssistantBlock(assistantId, { id: blockId, type: "reasoning", text: (event.raw as { text: string }).text });
+        chat.upsertAssistantBlock(assistantId, { id: blockId, type: "reasoning", text: event.text });
         return;
     }
 
@@ -662,6 +838,19 @@ function dispatchActivity(
     textBlockRef: React.MutableRefObject<string | null>,
     blockSeqRef: React.MutableRefObject<number>,
 ): void {
+    // Plan delivery artifacts are the run's FINAL product — they render
+    // inline like a picture even when the agent chose to speak nothing
+    // (speech is optional; the delivery never is). Without a live assistant
+    // message, the delivery creates its own carrier message.
+    if (event.type === "activity.tool" && event.status === "completed") {
+        const deliveryArtifact = artifactFromActivityEvent(event);
+        if (deliveryArtifact?.artifactType === "delivery" && !chat.currentAssistantIdRef.current) {
+            const carrierId = chat.createAssistantPlaceholder();
+            chat.streamedTextRef.current = "";
+            chat.upsertAssistantArtifact(carrierId, deliveryArtifact);
+        }
+    }
+
     const assistantId = chat.currentAssistantIdRef.current;
     if (!assistantId) return;
 
@@ -689,13 +878,35 @@ function dispatchActivity(
         return;
     }
 
+    if (event.type === "activity.thinking" && event.delta) {
+        chat.appendAssistantBlockText(assistantId, `reasoning:${event.runId ?? "main"}`, "reasoning", event.delta);
+        return;
+    }
+
     if (event.type !== "activity.trace") textBlockRef.current = null;
 
     if (event.type === "activity.plan") {
         const plan = planFromActivityEvent(event);
         mergePlan(chat, assistantId, plan, chat.streamedTextRef.current);
         chat.upsertAssistantBlock(assistantId, { id: `plan`, type: "plan", planId: plan.proposalId });
-        chat.setActivityPhase("thinking", plan.decision ? `Plan ${plan.decision}` : "Awaiting plan decision");
+        // State-based phase label — the decision stays "approved" forever,
+        // so a decision-based label would freeze at "Plan approved" even
+        // after execution completes.
+        chat.setActivityPhase("thinking", planPhaseLabel(plan));
+        return;
+    }
+
+    if (event.type === "activity.connector") {
+        const request = connectorFromActivityEvent(event);
+        if (request) {
+            mergeConnectorRequest(chat, assistantId, request);
+            chat.setActivityPhase(
+                "thinking",
+                request.state === "requested"
+                    ? `Awaiting connector decision: ${request.slug}`
+                    : `Connector ${request.state}: ${request.slug}`,
+            );
+        }
         return;
     }
 
@@ -763,18 +974,29 @@ function fail(
     cbRef.current.onError?.({ message });
 }
 
+/** State-based phase label for a plan — never decision-based. */
+function planPhaseLabel(plan: Plan): string {
+    if (plan.state === "completed") return "Plan completed";
+    if (plan.state === "failed" || plan.state === "blocked") return "Plan failed";
+    if (plan.state === "executing" || plan.state === "monitoring") return "Plan executing";
+    if (plan.state === "approved") return "Plan executing";
+    if (plan.state === "awaiting_approval") return "Awaiting plan decision";
+    if (plan.state === "changes_requested") return "Plan feedback requested";
+    if (plan.decision) return `Plan ${plan.decision}`;
+    return "Awaiting plan decision";
+}
+
 function planFromActivityEvent(event: ActivityEvent): Plan {
     const payload = event.payload ?? {};
-    const rawType = event.raw && typeof event.raw === "object" && "type" in event.raw
-        ? (event.raw as Record<string, unknown>).type as string
-        : "";
-    const planType: Plan["type"] = rawType === "approval.decided"
+    const planType: Plan["type"] = decision(payload.decision)
         ? "approval.decided"
-        : rawType === "plan.feedback_requested"
+        : str(payload.feedback)
             ? "plan.feedback_requested"
-            : rawType === "approval.requested"
-                ? "approval.requested"
-                : "plan.proposed";
+            : "plan.proposed";
+    // Live task rows (payload.tasks) win — statuses, forks, retries, errors
+    // update post-approval; the proposal snapshot is the fallback.
+    const liveTasks = proposalTasks(payload.tasks);
+    const snapshotTasks = proposalTasks(payload.proposal);
     return {
         type: planType,
         proposalId: str(payload.proposalId) ?? event.id,
@@ -784,11 +1006,12 @@ function planFromActivityEvent(event: ActivityEvent): Plan {
         rootRunId: event.rootId,
         runId: event.runId,
         proposal: proposalSnapshot(payload.proposal),
-        tasks: proposalTasks(payload.proposal),
+        tasks: liveTasks.length > 0 ? liveTasks : snapshotTasks.length > 0 ? snapshotTasks : undefined,
         markdown: str(payload.markdown),
         approver: str(payload.approver),
         reason: str(payload.reason),
         feedback: str(payload.feedback),
+        ...(str(payload.failureReason) ? { failureReason: str(payload.failureReason) } : {}),
         ts: event.ts,
         updatedAt: event.ts,
     };
@@ -811,9 +1034,53 @@ function mergePlan(chat: UseChatReturn, assistantId: string, plan: Plan, content
     }));
 }
 
+function connectorFromActivityEvent(event: ActivityEvent): ConnectorRequest | null {
+    const payload = event.payload ?? {};
+    const requestId = str(payload.requestId);
+    const slug = str(payload.slug);
+    if (!requestId || !slug) return null;
+    const decisionValue = str(payload.decision);
+    const state: ConnectorRequest["state"] = decisionValue === "connected" || decisionValue === "discarded"
+        ? decisionValue
+        : "requested";
+    const actions = Array.isArray(payload.actions)
+        ? payload.actions.filter((action): action is string => typeof action === "string")
+        : undefined;
+    return {
+        requestId,
+        slug,
+        bindingId: str(payload.bindingId),
+        runId: str(payload.runId) ?? event.runId,
+        rootRunId: str(payload.rootRunId) ?? event.rootId,
+        userAddress: str(payload.userAddress),
+        agentWallet: str(payload.agentWallet),
+        ...(actions?.length ? { actions } : {}),
+        reason: str(payload.reason),
+        state,
+        ts: event.ts,
+    };
+}
+
+function mergeConnectorRequest(chat: UseChatReturn, assistantId: string, request: ConnectorRequest): void {
+    chat.setMessages((messages) => messages.map((message) => {
+        if (message.id !== assistantId) return message;
+        const existing = message.connectorRequests ?? [];
+        const index = existing.findIndex((entry) => entry.requestId === request.requestId);
+        const next = existing.slice();
+        if (index >= 0) {
+            next[index] = { ...next[index], ...request };
+        } else {
+            next.push(request);
+        }
+        return { ...message, connectorRequests: next };
+    }));
+}
+
 function isTaskEvent(event: ActivityEvent): boolean {
-    const type = rawType(event);
-    return type === "task.completed" || type === "task.blocked" || type === "task.failed" || type === "task.heartbeat";
+    const result = event.payload?.result;
+    if (!isRecord(result) || !isRecord(result.plan)) return false;
+    const tasks = result.plan.tasks;
+    return Array.isArray(tasks);
 }
 
 function mergePlanTasks(chat: UseChatReturn, assistantId: string, event: ActivityEvent): void {
@@ -831,13 +1098,13 @@ function mergePlanTasks(chat: UseChatReturn, assistantId: string, event: Activit
     }));
 }
 
-function proposalTasks(value: unknown): ProposalTask[] {
+function proposalTasks(value: unknown): Task[] {
     const source = Array.isArray(value)
         ? value
         : isRecord(value) && Array.isArray(value.tasks)
             ? value.tasks
             : [];
-    return source.filter((task): task is ProposalTask => {
+    return source.filter((task): task is Task => {
         if (!isRecord(task)) return false;
         return typeof task.id === "string"
             && typeof task.title === "string"
@@ -853,12 +1120,34 @@ function proposalSnapshot(value: unknown): Plan["proposal"] | undefined {
 }
 
 function artifactFromActivityEvent(event: ActivityEvent): Artifact | null {
-    if (rawType(event) !== "artifact.created") return null;
-    const raw = isRecord(event.payload?.artifact) ? event.payload.artifact : undefined;
-    if (!raw) return null;
+    const payload = event.payload ?? {};
+    if (!isRecord(payload.artifact) || !str(payload.artifactId)) return null;
+    const raw = payload.artifact;
+    const kind = artifactKind(raw.type);
+    if (kind === "delivery") {
+        return {
+            id: str(raw.id) ?? str(payload.artifactId) ?? event.id,
+            artifactType: "delivery",
+            deliverableId: str(raw.deliverableId) ?? str(payload.artifactId),
+            title: str(raw.title),
+            content: str(raw.content),
+            summary: str(raw.summary),
+            contentHash: str(raw.contentHash),
+            taskId: str(raw.taskId),
+            taskTitle: str(raw.taskTitle),
+            agentWallet: str(raw.agentWallet) ?? str(raw.createdBy),
+            bytes: num(raw.bytes),
+            mimeType: "text/markdown",
+            status: str(raw.status) ?? "completed",
+            sourceTool: event.target?.name ?? "deliverable_create",
+            source: "agent",
+            runKey: str(raw.runId) ?? event.runId,
+            raw,
+        };
+    }
     return {
-        id: str(raw.id) ?? str(event.payload?.artifactId) ?? event.id,
-        artifactType: artifactKind(raw.type),
+        id: str(raw.id) ?? str(payload.artifactId) ?? event.id,
+        artifactType: kind,
         url: str(raw.url),
         inline: raw.inline === true,
         mimeType: str(raw.mimeType),
@@ -873,10 +1162,6 @@ function artifactFromActivityEvent(event: ActivityEvent): Artifact | null {
     };
 }
 
-function rawType(event: ActivityEvent): string {
-    return isRecord(event.raw) && typeof event.raw.type === "string" ? event.raw.type : "";
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -887,32 +1172,31 @@ function decision(value: unknown): Plan["decision"] | undefined {
 
 function artifactFromModelEvent(event: ModelEvent): Artifact {
     const asset = event.asset ?? { kind: "artifact" as const };
-    const raw = asset.raw ?? {};
-    const kind = artifactKind(asset.kind ?? raw.artifactType ?? raw.type);
-    const mimeType = asset.mimeType ?? str(raw.mimeType) ?? str(raw.mime_type);
-    const base64 = asset.base64 ?? str(raw.base64) ?? str(raw.data);
+    const kind = artifactKind(asset.kind);
+    const mimeType = asset.mimeType;
+    const base64 = asset.base64;
     const live = kind === "audio" && asset.partial === true && Boolean(base64);
     const url = live
         ? undefined
-        : asset.url ?? str(raw.url) ?? (base64 ? `data:${mimeType || defaultMime(kind)};base64,${base64}` : undefined);
+        : asset.url ?? (base64 ? `data:${mimeType || defaultMime(kind)};base64,${base64}` : undefined);
     return {
         id: event.id,
         artifactType: kind,
         url,
         inline: asset.inline === true,
         partial: asset.partial === true,
-        embedding: embedding(asset.embedding ?? raw.embedding ?? raw.embeddings),
+        embedding: embedding(asset.embedding),
         mimeType,
-        bytes: num(raw.bytes),
-        responseId: asset.responseId ?? event.responseId ?? str(raw.responseId) ?? str(raw.response_id),
-        outputIndex: asset.outputIndex ?? event.outputIndex ?? num(raw.outputIndex) ?? num(raw.output_index),
+        bytes: asset.bytes,
+        responseId: asset.responseId ?? event.responseId,
+        outputIndex: asset.outputIndex ?? event.outputIndex,
         status: asset.status ?? event.status,
-        progress: asset.progress ?? num(raw.progress),
-        jobId: asset.jobId ?? str(raw.jobId) ?? str(raw.job_id),
+        progress: asset.progress,
+        jobId: asset.jobId,
         sourceTool: event.toolCallId,
         ...(event.runId ? { source: "agent" as const } : {}),
         runKey: event.runId,
-        raw: { ...raw, ...asset },
+        raw: asset as unknown as Record<string, unknown>,
     };
 }
 
@@ -924,6 +1208,7 @@ function artifactKind(value: unknown): Artifact["artifactType"] {
     if (raw === "embedding" || raw === "output_embedding") return "embedding";
     if (raw === "realtime" || raw === "output_realtime" || raw === "realtime_session") return "realtime";
     if (raw === "file") return "file";
+    if (raw === "delivery") return "delivery";
     return "artifact";
 }
 

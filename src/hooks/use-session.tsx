@@ -40,6 +40,7 @@ import { durableQueryMeta, DURABLE_CACHE_MAX_AGE } from "@/lib/queryClient";
 import { buildSwigApproveTransaction } from "@/lib/svm/swig";
 import { deriveSwigConfigAddress } from "@/lib/svm/account";
 import { fetchSolanaUsdcBalance } from "@/hooks/use-multichain";
+import { submitBotchainSessionApproval } from "@/lib/botchain";
 import type { SolanaNetworkId } from "@compose-market/sdk/chains";
 
 type SessionThirdwebDeps = {
@@ -82,6 +83,8 @@ interface SessionContextValue {
     error: string | null;
     createSession: (budgetUSDC: number, durationHours?: number) => Promise<SessionCreationResult>;
     ensureKeyToken: () => Promise<string | null>;
+    /** One session bootstrap: cached token → state token → freshly minted. */
+    resolveActiveKeyToken: () => Promise<string | null>;
     endSession: () => void;
     hasBudget: (requiredWei?: number) => boolean;
     formatBudget: (weiAmount: number) => string;
@@ -302,6 +305,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         return refreshed;
     }, [syncSessionFromBackend, userAddress, userAddressResolving]);
 
+    const resolveActiveKeyToken = useCallback(async (): Promise<string | null> => {
+        const cached = sdk.keys.currentToken() ?? sessionRef.current.keyToken;
+        if (cached) {
+            sdk.keys.use(cached);
+            return cached;
+        }
+        return ensureKeyToken();
+    }, [ensureKeyToken]);
+
     // Subscribe to the SDK event bus for live budget / invalid / active /
     // expired signals. No window events — the SDK is the only emitter.
     useEffect(() => {
@@ -450,21 +462,48 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 }
 
                 if (currentAllowance < BigInt(budgetWei)) {
-                    const approval = await sendTransaction({
-                        transaction: approve({
-                            contract: usdcContract,
-                            spender: TREASURY_WALLET,
-                            amountWei: BigInt(budgetWei),
-                        }),
-                        account,
-                    });
-                    transactions.push({
-                        kind: "approval",
-                        title: "Session spending approved",
-                        description: `Approved $${budgetUSDC.toFixed(6).replace(/0+$/, "").replace(/\.$/, "")} USDC for this session.`,
-                        transactionHash: approval.transactionHash,
-                        network: paymentNetwork,
-                    });
+                    // Botchain has no Thirdweb bundler: route the session
+                    // approval through the merchant relay instead — the
+                    // admin signs the UserOperation hash (identity only),
+                    // the API pays for its submission.
+                    if (paymentNetwork === "eip155:677") {
+                        const adminAccount = adminWallet?.getAccount?.();
+                        if (!adminAccount) {
+                            throw new globalThis.Error("Admin account unavailable for Botchain session approval");
+                        }
+                        const approvalResult = await submitBotchainSessionApproval({
+                            adminWallet: adminAccount,
+                            owner: adminAccount.address,
+                            account: account.address,
+                            amount: String(budgetWei),
+                        });
+                        if (!approvalResult.success || !approvalResult.txHash) {
+                            throw new globalThis.Error(approvalResult.error ?? "Botchain session approval failed");
+                        }
+                        transactions.push({
+                            kind: "approval",
+                            title: "Session spending approved",
+                            description: `Approved $${budgetUSDC.toFixed(6).replace(/0+$/, "").replace(/\.$/, "")} USDC for this session.`,
+                            transactionHash: approvalResult.txHash,
+                            network: paymentNetwork,
+                        });
+                    } else {
+                        const approval = await sendTransaction({
+                            transaction: approve({
+                                contract: usdcContract,
+                                spender: TREASURY_WALLET,
+                                amountWei: BigInt(budgetWei),
+                            }),
+                            account,
+                        });
+                        transactions.push({
+                            kind: "approval",
+                            title: "Session spending approved",
+                            description: `Approved $${budgetUSDC.toFixed(6).replace(/0+$/, "").replace(/\.$/, "")} USDC for this session.`,
+                            transactionHash: approval.transactionHash,
+                            network: paymentNetwork,
+                        });
+                    }
                 }
             } else {
                 // Solana path: build + relay a Swig-signed SPL approve that
@@ -631,6 +670,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         error,
         createSession,
         ensureKeyToken,
+        resolveActiveKeyToken,
         endSession,
         hasBudget,
         formatBudget,

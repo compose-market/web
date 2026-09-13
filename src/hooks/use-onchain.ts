@@ -5,7 +5,6 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { readContract } from "thirdweb";
-import { isAddress as isSolanaAddress } from "@solana/kit";
 import {
   getAgentFactoryContract,
   getWorkflowContract,
@@ -23,8 +22,6 @@ import { networkFromChainId, SUPPORTED_CHAINS } from "@/lib/chains";
 import { getIpfsUrl } from "@/lib/pinata";
 import type { NetworkId } from "@compose-market/sdk/chains";
 import type { AgentCard, WorkflowMetadata } from "@/lib/pinata";
-
-const AGENTS_URL = (import.meta.env.VITE_AGENTS_URL || "https://agents.compose.market").replace(/\/+$/, "");
 
 // =============================================================================
 // Types
@@ -81,20 +78,6 @@ export interface OnchainWorkflow {
   // Internal EVM read-loop chain id, used only for EVM contract reads.
   chainId?: number;
 }
-
-type AgentDirectoryResponse = {
-  agents?: AgentCard[];
-  nextCursor?: string | null;
-  hasMore?: boolean;
-};
-
-type DirectoryAgentCard = AgentCard & {
-  licensesMinted?: number;
-  licensesAvailable?: number;
-  isClone?: boolean;
-  parentAgentId?: number;
-  cid?: string;
-};
 
 // =============================================================================
 // Contract Read Helpers
@@ -156,155 +139,9 @@ async function fetchAgentData(agentWallet: number, chainId?: number): Promise<On
   }
 }
 
-function price(value: string | undefined): bigint {
-  const raw = value?.trim();
-  if (!raw) return 0n;
-  if (/^\d+$/.test(raw)) return BigInt(raw);
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) ? BigInt(Math.round(parsed * 1_000_000)) : 0n;
-}
 function finite(value: unknown): number | null {
   const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-function fromCard(card: DirectoryAgentCard): OnchainAgent {
-  const amount = price(card.licensePrice);
-  const licenses = Number.isFinite(Number(card.licenses)) ? Number(card.licenses) : 0;
-  const minted = Number.isFinite(Number(card.licensesMinted)) ? Number(card.licensesMinted) : 0;
-  const available = Number.isFinite(Number(card.licensesAvailable))
-    ? Number(card.licensesAvailable)
-    : licenses === 0 ? Infinity : Math.max(0, licenses - minted);
-  const creatorFee = finite(card.creatorFee) ?? 1;
-
-  return {
-    id: 0,
-    dnaHash: card.dnaHash || "",
-    walletAddress: card.walletAddress || "",
-    network: card.network as NetworkId,
-    licenses,
-    licensesMinted: minted,
-    licensesAvailable: available,
-    licensePrice: weiToUsdc(amount),
-    licensePriceFormatted: formatUsdcPrice(amount),
-    creatorFee,
-    creator: card.creator || "",
-    cloneable: Boolean(card.cloneable),
-    isClone: Boolean(card.isClone),
-    parentAgentId: Number.isFinite(Number(card.parentAgentId)) ? Number(card.parentAgentId) : 0,
-    agentCardUri: card.cid ? `ipfs://${card.cid}` : "",
-    metadata: {
-      ...card,
-      creatorFee,
-    },
-    isWarped: false,
-  };
-}
-
-async function fetchCatalogAgents(input: { creator?: string } = {}): Promise<OnchainAgent[]> {
-  const cards: AgentCard[] = [];
-  let cursor: string | undefined;
-  for (let page = 0; page < 100; page += 1) {
-    const params = new URLSearchParams({ limit: "60" });
-    if (input.creator) params.set("creator", input.creator);
-    if (cursor) params.set("cursor", cursor);
-    const response = await fetch(`${AGENTS_URL}/agents?${params.toString()}`, {
-      headers: { Accept: "application/json" },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!response.ok) {
-      throw new Error(`Agent lookup failed with status ${response.status}`);
-    }
-    const data = await response.json() as AgentDirectoryResponse;
-    if (Array.isArray(data.agents)) {
-      cards.push(...data.agents);
-    }
-    if (!data.hasMore || !data.nextCursor) break;
-    cursor = data.nextCursor;
-  }
-  return cards
-    .filter((card): card is DirectoryAgentCard => typeof card.walletAddress === "string" && card.walletAddress.length > 0)
-    .map(fromCard);
-}
-
-async function fetchCatalogAgentByWallet(walletAddress: string): Promise<OnchainAgent | null> {
-  const controller = new AbortController();
-  const timeout = globalThis.setTimeout(() => controller.abort(), 5_000);
-  try {
-    const response = await fetch(`${AGENTS_URL}/agent/${encodeURIComponent(walletAddress)}`, {
-      headers: { Accept: "application/json" },
-      signal: controller.signal,
-    });
-    if (!response.ok) return null;
-    const card = await response.json() as DirectoryAgentCard;
-    return typeof card.walletAddress === "string" && card.walletAddress.length > 0
-      ? fromCard(card)
-      : null;
-  } finally {
-    globalThis.clearTimeout(timeout);
-  }
-}
-
-async function fetchChainAgents(includeMetadata: boolean): Promise<OnchainAgent[]> {
-  const chainPromises = SUPPORTED_CHAINS.map(async ({ id: chainId }) => {
-    try {
-      const contract = getAgentFactoryContractForChain(chainId);
-      const total = await readContract({
-        contract,
-        method: "function totalAgents() view returns (uint256)",
-        params: [],
-      }) as bigint;
-
-      const totalNum = Number(total);
-      if (totalNum === 0) return [];
-
-      const agentPromises = Array.from({ length: totalNum }, (_, i) =>
-        fetchAgentData(i + 1, chainId)
-      );
-
-      let agents = (await Promise.all(agentPromises)).filter((a): a is OnchainAgent => a !== null);
-
-      if (includeMetadata) {
-        agents = await Promise.all(agents.map(fetchAgentMetadata));
-      }
-
-      return agents;
-    } catch (error) {
-      console.warn(`Failed to fetch agents from chain ${chainId}:`, error);
-      return [];
-    }
-  });
-
-  const chainsAgents = await Promise.all(chainPromises);
-  return chainsAgents.flat();
-}
-
-function mergeAgents(apiAgents: OnchainAgent[], chainAgents: OnchainAgent[]): OnchainAgent[] {
-  const byWallet = new Map<string, OnchainAgent>();
-  for (const agent of apiAgents) {
-    byWallet.set(agent.walletAddress.toLowerCase(), agent);
-  }
-  for (const chain of chainAgents) {
-    const key = chain.walletAddress.toLowerCase();
-    const catalog = byWallet.get(key);
-    if (!catalog) {
-      byWallet.set(key, chain);
-      continue;
-    }
-    byWallet.set(key, {
-      ...catalog,
-      id: chain.id || catalog.id,
-      creator: catalog.creator || chain.creator,
-      licensesMinted: chain.licensesMinted,
-      licensesAvailable: chain.licensesAvailable,
-      cloneable: catalog.cloneable || chain.cloneable,
-      isClone: chain.isClone,
-      parentAgentId: chain.parentAgentId,
-      agentCardUri: catalog.agentCardUri || chain.agentCardUri,
-      isWarped: chain.isWarped,
-    });
-  }
-  return Array.from(byWallet.values());
 }
 
 async function fetchAgentMetadata(agent: OnchainAgent): Promise<OnchainAgent> {
@@ -474,33 +311,9 @@ async function fetchWorkflowMetadata(workflow: OnchainWorkflow, chainId?: number
 // =============================================================================
 // Hooks
 // =============================================================================
-
-/**
- * Fetch all on-chain agents from ALL supported chains
- * Each workflow carries a CAIP-2 network id for deployment identity.
- */
-export function useOnchainAgents(options?: { includeMetadata?: boolean }) {
-  const { includeMetadata = true } = options || {};
-
-  const api = useQuery({
-    queryKey: ["agents-catalog", includeMetadata],
-    queryFn: () => fetchCatalogAgents(),
-    staleTime: 0,
-    gcTime: 0,
-    retry: 2,
-  });
-  const apiAgents = api.data || [];
-
-  return {
-    ...api,
-    data: apiAgents,
-    isLoading: api.isLoading && apiAgents.length === 0,
-    error: api.error,
-    refetch: async () => {
-      return await api.refetch();
-    },
-  };
-}
+// NOTE: agent catalog reads (list, by-wallet, by-creator) moved to
+// @/hooks/use-agents.ts — the versioned agents-worker snapshot pattern that
+// mirrors use-model.ts. Only numeric contract-read hooks remain here.
 
 /**
  * Fetch a single agent by numeric ID
@@ -517,49 +330,6 @@ export function useOnchainAgent(agentWallet: number | null) {
     enabled: !!agentWallet,
     staleTime: 30 * 1000,
     gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
-  });
-}
-
-/**
- * Fetch a single agent by wallet address
- * This is the preferred method since wallet address is the canonical identifier
- */
-export function useOnchainAgentByWallet(walletAddress: string | null) {
-  return useQuery({
-    queryKey: ["agent-wallet", walletAddress],
-    queryFn: async () => {
-      if (!walletAddress) return null;
-      return fetchCatalogAgentByWallet(walletAddress);
-    },
-    enabled: !!walletAddress,
-    staleTime: 0,
-    gcTime: 0,
-  });
-}
-
-/**
- * Fetch a single agent by wallet address from the Cloudflare agent catalog.
- * Agent detail pages must not scan contracts; new mints appear through the
- * catalog worker once indexed.
- */
-export function useOnchainAgentByIdentifier(identifier: string | null) {
-  const value = identifier ? decodeURIComponent(identifier).trim() : "";
-  const walletAddress = /^0x[a-fA-F0-9]{40}$/.test(value) || isSolanaAddress(value) ? value : null;
-
-  return useOnchainAgentByWallet(walletAddress);
-}
-
-/**
- * Fetch agents owned by a specific address
- */
-export function useAgentsByCreator(creator: string | undefined) {
-  return useQuery({
-    queryKey: ["agents-creator", creator?.toLowerCase()],
-    queryFn: async () => creator ? await fetchCatalogAgents({ creator }) : [],
-    enabled: Boolean(creator),
-    staleTime: 0,
-    gcTime: 0,
-    retry: 2,
   });
 }
 

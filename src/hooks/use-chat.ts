@@ -16,8 +16,9 @@ import type {
     ModelEvent,
     PlanDecision,
     ProposalSnapshot,
-    ProposalTask,
 } from "@compose-market/sdk";
+
+export type Task = NonNullable<ProposalSnapshot["tasks"]>[number];
 import { createActivityState, reduceActivityState, decodeActivityEvent } from "@compose-market/sdk";
 import { uploadConversationFile, cleanupConversationFiles } from "@/lib/pinata";
 import {
@@ -42,20 +43,36 @@ export interface Plan {
     runId?: string;
     requestedBy?: string;
     proposal?: ProposalSnapshot;
-    tasks?: ProposalTask[];
+    tasks?: Task[];
     markdown?: string;
     ts?: number;
     updatedAt?: number;
     approver?: string;
     reason?: string;
     feedback?: string;
+    /** Machine failure reason when the plan state is failed. */
+    failureReason?: string;
     pending?: boolean;
     error?: string;
 }
 
+export interface ConnectorRequest {
+    requestId: string;
+    slug: string;
+    bindingId?: string;
+    runId?: string;
+    rootRunId?: string;
+    userAddress?: string;
+    agentWallet?: string;
+    actions?: string[];
+    reason?: string;
+    state: "requested" | "escalated" | "connected" | "discarded";
+    ts?: number;
+}
+
 export interface Artifact {
     id: string;
-    artifactType: "image" | "audio" | "video" | "embedding" | "realtime" | "file" | "artifact";
+    artifactType: "image" | "audio" | "video" | "embedding" | "realtime" | "file" | "artifact" | "delivery";
     url?: string;
     inline?: boolean;
     partial?: boolean;
@@ -73,6 +90,15 @@ export interface Artifact {
     raw?: Record<string, unknown>;
     hydrating?: boolean;
     error?: string;
+    /** Delivery artifacts (plan final delivery content store). */
+    title?: string;
+    content?: string;
+    summary?: string;
+    deliverableId?: string;
+    contentHash?: string;
+    taskId?: string;
+    taskTitle?: string;
+    agentWallet?: string;
 }
 
 export type MessageBlock =
@@ -95,6 +121,7 @@ export interface Message {
     partialImage?: boolean;
     activity?: ActivityState;
     proposal?: Plan;
+    connectorRequests?: ConnectorRequest[];
     artifacts?: Artifact[];
     blocks?: MessageBlock[];
 }
@@ -577,7 +604,10 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
                 const idx = artifacts.findIndex((item) => item.id === artifact.id || (key !== undefined && artifactKey(item) === key));
                 const blockId = idx >= 0 ? artifacts[idx].id : artifact.id;
                 if (idx >= 0) {
-                    artifacts[idx] = { ...artifacts[idx], ...artifact, id: artifacts[idx].id };
+                    const patch = Object.fromEntries(
+                        Object.entries(artifact).filter(([, value]) => value !== undefined),
+                    ) as Partial<Artifact>;
+                    artifacts[idx] = { ...artifacts[idx], ...patch, id: artifacts[idx].id };
                 } else {
                     artifacts.push(artifact);
                 }
@@ -1138,9 +1168,16 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     return useMemo(() => ({
         // Messages
         messages,
-        latestActivity: messages.length > 0
-            ? [...messages].reverse().find((m) => m.role === "assistant" && m.activity)?.activity
-            : undefined,
+        // The plan's children live on the assistant message that proposed
+        // it (their parent run IS the proposing run). Bind mission control
+        // to that message's tree so later assistant messages (e.g. the
+        // completion turn) don't supersede the swarm's work; fall back to
+        // the newest tree when no plan owns the panel.
+        latestActivity: (() => {
+            const planMessage = [...messages].reverse().find((m) => m.role === "assistant" && m.proposal);
+            if (planMessage?.activity) return planMessage.activity;
+            return [...messages].reverse().find((m) => m.role === "assistant" && m.activity)?.activity;
+        })(),
         latestPlan: messages.length > 0
             ? [...messages].reverse().find((m) => m.role === "assistant" && m.proposal)?.proposal
             : undefined,

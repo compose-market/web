@@ -1,8 +1,8 @@
 /**
  * useModels - Central React Query hook for model fetching
  *
- * Single source of truth for selector/search model data. Fetches the compact
- * `/v1/models/index`; selected full cards and params use independent queries.
+ * Single source of truth for selector/search model data. Fetches the compact,
+ * versioned Models Worker index; selected full cards and params use the API.
  */
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -18,6 +18,7 @@ import {
 } from "@/lib/models";
 import { sdk } from "@/lib/sdk";
 import { durableQueryMeta, DURABLE_CACHE_MAX_AGE } from "@/lib/queryClient";
+import { fetchModelCatalogHealth, fetchModelCatalogIndex, modelsOrigin } from "@/lib/models";
 
 // =============================================================================
 // Types
@@ -37,6 +38,8 @@ export interface UseModelsReturn {
     isLoading: boolean;
     isRefetching: boolean;
     error: Error | null;
+    /** Refresh failed while cached catalog data renders; null whenever `error` is set. */
+    refreshError: Error | null;
     forceRefresh: () => Promise<void>;
     lastUpdated: Date | null;
     typeCategories: ModelCategory[];
@@ -55,108 +58,77 @@ export interface FrontierModelRef {
 // =============================================================================
 
 const STALE_TIME = 6 * 60 * 60 * 1000; // 6 hours
-const CACHE_KEY = ["models-catalog-index"];
 const MODELS_URL = (import.meta.env.VITE_MODELS_URL ?? "https://models.compose.market").replace(/\/+$/u, "");
-const MODELS_ORIGIN = new URL(MODELS_URL).origin;
-const FRONTIERS_CACHE_KEY = ["models-latest-compact", MODELS_ORIGIN, 1];
+const MODELS_ORIGIN = modelsOrigin(MODELS_URL);
+const CATALOG_CACHE_PREFIX = ["models-catalog", MODELS_ORIGIN];
+const CATALOG_VERSION_KEY = ["models-health", MODELS_ORIGIN];
 
 // =============================================================================
 // Hook
 // =============================================================================
 
-async function fetchCatalog(): Promise<CatalogModel[]> {
-    const response = await sdk.fetch("/v1/models/index", {
-        method: "GET",
-        cache: "no-cache",
-        key: null,
-        paymentMode: "key",
-    });
-    if (!response.ok) {
-        throw new Error(`Failed to load model index: ${response.status}`);
-    }
-    const result = await response.json() as { data?: unknown };
-    if (!Array.isArray(result.data) || result.data.length === 0) {
-        throw new Error("No models returned from /v1/models/index");
-    }
-
-    return result.data as CatalogModel[];
-}
-
-async function fetchFrontiers(): Promise<FrontierModelRef[]> {
-    const load = async (filter: "frontier" | "latest") => {
-        const rows: FrontierModelRef[] = [];
-        let cursor: string | null = "0";
-        while (cursor !== null) {
-            const response = await fetch(`${MODELS_ORIGIN}/models?${filter}=1&compact=1&limit=200&cursor=${cursor}`, {
-                method: "GET",
-                headers: { Accept: "application/json" },
-                cache: "no-cache",
-            });
-            if (!response.ok) throw new Error(`Failed to load ${filter} models: ${response.status}`);
-            const body = await response.json() as { data?: unknown; next_cursor?: unknown };
-            if (!Array.isArray(body.data)) throw new Error(`Invalid ${filter} model response`);
-            for (const item of body.data) {
-                if (!item || typeof item !== "object") continue;
-                const row = item as Record<string, unknown>;
-                if (typeof row.modelId !== "string" || typeof row.provider !== "string") continue;
-                rows.push({
-                    modelId: row.modelId,
-                    provider: row.provider,
-                    ...(typeof row.family === "string" ? { family: row.family } : {}),
-                    isFrontier: row.isFrontier === true,
-                    isLatest: row.isLatest === true,
-                });
-            }
-            cursor = typeof body.next_cursor === "string" ? body.next_cursor : null;
-        }
-        return rows;
-    };
-
-    const merged = new Map<string, FrontierModelRef>();
-    for (const item of (await Promise.all([load("frontier"), load("latest")])).flat()) {
-        const key = `${item.provider.toLowerCase()}:${item.modelId.toLowerCase()}`;
-        const current = merged.get(key);
-        merged.set(key, {
-            ...item,
-            isFrontier: Boolean(current?.isFrontier || item.isFrontier),
-            isLatest: Boolean(current?.isLatest || item.isLatest),
-        });
-    }
-    const frontiers = [...merged.values()];
-    if (frontiers.length === 0) throw new Error("No frontier models returned");
-    return frontiers;
+function latestCachedCatalog(queryClient: ReturnType<typeof useQueryClient>): CatalogModel[] {
+    const current = queryClient.getQueryCache()
+        .findAll({ queryKey: CATALOG_CACHE_PREFIX })
+        .filter((query) => Array.isArray(query.state.data))
+        .sort((left, right) => right.state.dataUpdatedAt - left.state.dataUpdatedAt)[0]
+        ?.state.data;
+    if (Array.isArray(current) && current.length > 0) return current as CatalogModel[];
+    return [];
 }
 
 export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
     const { type, family, search, enabled = true } = options;
     const queryClient = useQueryClient();
+    const healthQuery = useQuery({
+        queryKey: CATALOG_VERSION_KEY,
+        queryFn: () => fetchModelCatalogHealth(MODELS_ORIGIN),
+        // Background /health poll: a worker catalog update swaps the catalog
+        // in within one interval, non-blocking, while the old one renders.
+        staleTime: 5_000,
+        gcTime: DURABLE_CACHE_MAX_AGE,
+        refetchInterval: 5_000,
+        refetchOnMount: "always",
+        refetchOnWindowFocus: true,
+        enabled,
+        retry: 2,
+    });
+    const version = healthQuery.data?.version ?? null;
+    const cachedModels = latestCachedCatalog(queryClient);
 
     const {
-        data: models = [],
-        isLoading,
+        data: loadedModels,
+        isLoading: isCatalogLoading,
         isFetching,
-        error,
+        error: catalogError,
         dataUpdatedAt,
     } = useQuery<CatalogModel[], Error>({
-        queryKey: CACHE_KEY,
-        queryFn: fetchCatalog,
-        staleTime: STALE_TIME,
+        queryKey: [...CATALOG_CACHE_PREFIX, version],
+        queryFn: () => fetchModelCatalogIndex(MODELS_ORIGIN, version!),
+        staleTime: Infinity,
         gcTime: DURABLE_CACHE_MAX_AGE,
+        placeholderData: cachedModels,
         refetchOnMount: false,
-        enabled,
+        enabled: enabled && Boolean(version),
         meta: durableQueryMeta,
     });
-    const frontierQuery = useQuery<FrontierModelRef[], Error>({
-        queryKey: FRONTIERS_CACHE_KEY,
-        queryFn: fetchFrontiers,
-        staleTime: 5 * 60 * 1000,
-        gcTime: DURABLE_CACHE_MAX_AGE,
-        refetchOnMount: false,
-        enabled,
-        retry: 0,
-        meta: durableQueryMeta,
-    });
-    const frontiers = frontierQuery.data ?? [];
+    const models = loadedModels ?? cachedModels;
+    const error = models.length === 0 ? (catalogError ?? healthQuery.error ?? null) : null;
+    // A refresh failure while cached catalog data renders is surfaced
+    // separately so a stale catalog can never silently masquerade as live.
+    const refreshError = models.length > 0 ? (catalogError ?? healthQuery.error ?? null) : null;
+    const isLoading = enabled && models.length === 0 && (healthQuery.isLoading || isCatalogLoading);
+    const frontiers = useMemo(() => models.flatMap((model): FrontierModelRef[] =>
+        model.isFrontier === true || model.isLatest === true
+            ? [{
+                modelId: model.modelId,
+                provider: model.provider,
+                ...(model.family ? { family: model.family } : {}),
+                isFrontier: model.isFrontier === true,
+                isLatest: model.isLatest === true,
+            }]
+            : []
+    ), [models]);
 
     // Filter models based on options
     const filteredModels = useMemo(() => {
@@ -182,22 +154,30 @@ export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
     // Manual refresh - named distinctly to avoid collision with query.refetch
     const forceRefresh = useCallback(async () => {
         queryClient.removeQueries({ queryKey: ["model-card"], type: "inactive" });
+        const health = await fetchModelCatalogHealth(MODELS_ORIGIN);
+        queryClient.setQueryData(CATALOG_VERSION_KEY, health);
         await Promise.all([
-            queryClient.refetchQueries({ queryKey: CACHE_KEY, type: "active" }),
-            queryClient.refetchQueries({ queryKey: FRONTIERS_CACHE_KEY, type: "active" }),
+            queryClient.fetchQuery({
+                queryKey: [...CATALOG_CACHE_PREFIX, health.version],
+                queryFn: () => fetchModelCatalogIndex(MODELS_ORIGIN, health.version),
+                staleTime: Infinity,
+            }),
             queryClient.refetchQueries({ queryKey: ["model-card"], type: "active" }),
         ]);
     }, [queryClient]);
 
-    const lastUpdated = dataUpdatedAt ? new Date(dataUpdatedAt) : null;
+    const lastUpdated = healthQuery.data?.lastUpdated
+        ? new Date(healthQuery.data.lastUpdated)
+        : dataUpdatedAt ? new Date(dataUpdatedAt) : null;
 
     return {
         models,
         frontiers,
         filteredModels,
         isLoading,
-        isRefetching: (isFetching && !isLoading) || frontierQuery.isFetching,
+        isRefetching: isFetching && !isLoading,
         error: error || null,
+        refreshError,
         forceRefresh,
         lastUpdated,
         typeCategories,
@@ -229,10 +209,8 @@ export function useModelDetails(modelId: string | null): UseModelResourceReturn<
             signal,
         ),
         enabled: Boolean(modelId),
-        staleTime: STALE_TIME,
+        staleTime: 5 * 60 * 1000,
         gcTime: DURABLE_CACHE_MAX_AGE,
-        refetchOnMount: false,
-        meta: durableQueryMeta,
     });
     return { data: result.data ?? null, isLoading: result.isLoading, error: result.error ?? null };
 }
@@ -278,7 +256,7 @@ export function useSemanticModelSearch(
     const result = useQuery<SemanticModelHit[], Error>({
         queryKey: ["models-semantic-search", normalized, limit],
         queryFn: async ({ signal }) => {
-            const target = new URL(`${MODELS_URL}/search`);
+            const target = new URL(`${MODELS_ORIGIN}/search`);
             target.searchParams.set("q", query.trim());
             target.searchParams.set("limit", String(limit));
             target.searchParams.set("compact", "1");
