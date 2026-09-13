@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ConnectButton, useActiveAccount, useActiveWallet, useActiveWalletConnectionStatus } from "thirdweb/react";
+import { ConnectButton, useActiveAccount, useActiveWallet, useActiveWalletConnectionStatus, useAdminWallet } from "thirdweb/react";
 import { createWallet, inAppWallet } from "thirdweb/wallets";
 import type { SmartWalletOptions } from "thirdweb/wallets";
 import { ChevronDown, LogOut, Copy, Check, ExternalLink, Wallet, ShieldCheck } from "lucide-react";
@@ -11,15 +11,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { thirdwebClient, getChainObject, getUsdcAddress, getExplorerUrl, isEvmNetwork, evmChainId } from "@/lib/chains";
+import { thirdwebClient, getChainObject, getChainConfig, getUsdcAddress, getExplorerUrl, isEvmNetwork, evmChainId } from "@/lib/chains";
 import { useChain } from "@/contexts/Network";
 import { useTotalBalance } from "@/hooks/use-multichain";
 import { useSelectedUserAddress } from "@/hooks/use-address";
+import { sdk } from "@/lib/sdk";
 import { cn } from "@/lib/utils";
 import { mpIdentify, mpReset } from "@/lib/mixpanel";
 import { clearCachedAccount, readCachedAccount, writeCachedAccount } from "@/lib/cache";
 import type { EvmNetworkId } from "@compose-market/sdk/chains";
-import { DisclaimerModal, useDisclaimerConsent } from "@/components/disclaimer";
+import { DisclaimerModal } from "@/components/disclaimer";
 
 const wallets = [
   inAppWallet({
@@ -43,6 +44,8 @@ const wallets = [
   createWallet("me.rainbow"),
 ];
 
+const botchainAccountTriggers = new Set<string>();
+
 interface WalletConnectorProps {
   className?: string;
   compact?: boolean;
@@ -51,6 +54,7 @@ interface WalletConnectorProps {
 export function WalletConnector({ className, compact = false }: WalletConnectorProps) {
   const account = useActiveAccount();
   const wallet = useActiveWallet();
+  const adminWallet = useAdminWallet();
   const connectionStatus = useActiveWalletConnectionStatus();
   const { paymentNetwork, getChainByNetworkId, evmChains, defaultNetwork } = useChain();
   const {
@@ -90,6 +94,27 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
     }
   }, [connectionStatus]);
 
+  // First time the connector lands on Botchain with a resolved identity
+  // (selection change or login with Botchain already selected), ask the API
+  // to deploy the deterministic smart account there. The merchant wallet
+  // pays the creation transaction; the endpoint is idempotent for accounts
+  // that are already deployed. Fire and forget — no UI surface. Guarded so
+  // an SDK build without the botchain resource skips instead of crashing.
+  useEffect(() => {
+    const owner = adminWallet?.getAccount?.()?.address?.toLowerCase() ?? null;
+    const accountAddress = account?.address?.toLowerCase() ?? null;
+    if (paymentNetwork !== "eip155:677" || !owner || !accountAddress) return;
+    if (typeof sdk.botchain?.createAccount !== "function") {
+      console.warn("[botchain] SDK build does not expose botchain.createAccount; skipping smart account trigger");
+      return;
+    }
+    if (botchainAccountTriggers.has(accountAddress)) return;
+    botchainAccountTriggers.add(accountAddress);
+    sdk.botchain.createAccount({ owner, account: accountAddress }).catch((error) => {
+      console.warn("[botchain] smart account creation trigger failed", error);
+    });
+  }, [paymentNetwork, account?.address, adminWallet]);
+
   const fallbackEvmNetwork = useMemo((): EvmNetworkId | undefined => {
     if (isEvmNetwork(defaultNetwork)) return defaultNetwork;
     const first = evmChains.find((chain) => isEvmNetwork(chain.network));
@@ -113,10 +138,11 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
     if (thirdwebChainIdValue == null) return undefined;
     const usdcAddress = getUsdcAddress(thirdwebChainIdValue);
     if (!usdcAddress) return undefined;
+    const asset = getChainConfig(thirdwebChainIdValue)?.asset ?? "USDC";
     return {
       address: usdcAddress,
-      name: "USD Coin",
-      symbol: "USDC",
+      name: asset === "USDT" ? "USDT" : "USD Coin",
+      symbol: asset,
       icon: "/tokens/usdc.svg",
     };
   }, [thirdwebChainIdValue]);
@@ -317,7 +343,7 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
               </span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-muted-foreground text-xs font-mono">Total USDC</span>
+              <span className="text-muted-foreground text-xs font-mono">Total</span>
               <span className="text-cyan-400 font-mono font-bold">
                 ${balanceLoading ? "..." : totalBalance}
               </span>
@@ -356,7 +382,7 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
                 <p className="text-[10px] font-mono text-amber-300">
                   {isActivationFunded
                     ? "Ready to activate when you create a session."
-                    : `Fund this address with ${requiredActivationSol} SOL or 10 USDC to activate it.`}
+                    : `Fund this address with ${requiredActivationSol} SOL or 5 USDC to activate it.`}
                 </p>
                 {currentActivationSol ? (
                   <p className="mt-0.5 text-[9px] font-mono text-muted-foreground">
@@ -384,18 +410,3 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
     </>
   );
 }
-
-export function useWalletAccount() {
-  const account = useActiveAccount();
-  const wallet = useActiveWallet();
-
-  return {
-    isConnected: !!account,
-    address: account?.address,
-    account,
-    wallet,
-  };
-}
-
-export { useActiveAccount, useActiveWallet } from "thirdweb/react";
-export { DisclaimerModal, useDisclaimerConsent } from "@/components/disclaimer";

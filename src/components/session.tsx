@@ -12,7 +12,7 @@ import {
 } from "@compose-market/theme/session";
 import { ShellButton } from "@compose-market/theme/shell";
 import { useSession } from "@/hooks/use-session.tsx";
-import { useWalletAccount } from "@/components/connector";
+import { useWalletAccount } from "@/hooks/use-wallet";
 import { toast } from "sonner";
 import { sdk } from "@/lib/sdk";
 import { cn } from "@/lib/utils";
@@ -147,7 +147,8 @@ export function SessionBudgetDialog({
         title="Session Budget"
         subtitle="Set a spending limit to skip wallet signatures for each AI call. One approval, unlimited inference within your budget."
         titleIcon={<Shield size={18} />}
-        budgetLabel="Budget Limit (USDC)"
+        budgetLabel="Budget Limit"
+        budgetIcon={<Wallet size={14} />}
         durationLabel="Session Duration"
         durationIcon={<Clock size={14} />}
         budgetChoices={budgetPresets.map((preset) => ({
