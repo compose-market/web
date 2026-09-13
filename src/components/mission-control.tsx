@@ -24,11 +24,11 @@ import {
     PlanVersionCarousel,
 } from "@compose-market/theme";
 import type { ActivityState, ActivityNode } from "@compose-market/sdk";
-import type { Plan, Message } from "@/hooks/use-chat";
+import type { Artifact, ConnectorRequest, Plan, Message, MessageBlock } from "@/hooks/use-chat";
+import { taskFoldRows, TASK_ROW_STATUS, type TaskFoldRow } from "@/lib/folds";
+import { InlineConnectorGate } from "@/components/chat";
 
-const LazyMarkdownRenderer = lazy(() =>
-    import("@/lib/performance/markdown").then((module) => ({ default: module.MarkdownRenderer }))
-);
+import { MarkdownRenderer } from "@/lib/performance/markdown";
 
 export interface MissionControlSidePanelProps {
     activity?: ActivityState;
@@ -51,15 +51,6 @@ function shortId(value?: string): string {
     return value.length > 14 ? `${value.slice(0, 6)}...${value.slice(-4)}` : value;
 }
 
-function cleanLabel(value?: string): string {
-    if (!value) return "";
-    return value
-        .replace(/[_-]+/g, " ")
-        .replace(/\b(runtime|debug|info|source)\b:?/gi, "")
-        .replace(/\s+/g, " ")
-        .trim();
-}
-
 function text(value: unknown): string | undefined {
     if (typeof value === "string" && value.length > 0) return value;
     if (typeof value === "number" && Number.isFinite(value)) return String(value);
@@ -70,14 +61,8 @@ function truncate(value: string, max = 80): string {
     return value.length > max ? `${value.slice(0, max - 1)}\u2026` : value;
 }
 
-const GENERIC_WORDS = new Set(["model", "connector", "agent", "tool", "conclave", "search", "harness", "route", "swarm"]);
-
-function isGenericWord(value?: string): boolean {
-    return !value || GENERIC_WORDS.has(value.toLowerCase());
-}
-
 function isVisibleNode(node: ActivityNode): boolean {
-    if (node.kind === "trace" || node.kind === "plan") return false;
+    if (node.kind === "trace" || node.kind === "plan" || node.kind === "connector") return false;
     if (node.kind === "message" && !node.parentId) return false;
     return true;
 }
@@ -92,43 +77,25 @@ function statusLabel(status: ActivityNode["status"]): string | undefined {
 }
 
 // =============================================================================
-// Rich Title — digs into target.details for actual names, never shows generic kind words
+// Rich Title — the protocol carries the human-readable name on target
 // =============================================================================
 
 function nodeTitle(node: ActivityNode): string {
     const target = node.target;
-    const details = target?.details;
-    const raw = node.raw as Record<string, unknown> | undefined;
 
     if (node.kind === "tool") {
         const kind = target?.kind;
-        if (kind === "model") {
-            const name = firstNonGeneric(target?.name, text(details?.model), text(details?.provider), node.name);
-            return name ?? "Model call";
-        }
-        if (kind === "connector") {
-            const name = firstNonGeneric(target?.name, text(details?.connector), node.name);
-            return name ?? "Connector call";
-        }
-        if (kind === "agent") {
-            const name = firstNonGeneric(target?.name, node.name);
-            return name ?? "Agent search";
-        }
-        if (kind === "search") {
-            const name = firstNonGeneric(target?.name, node.name);
-            return name ?? "Search";
-        }
-        if (kind === "conclave") {
-            return target?.target ?? "Conclave";
-        }
-        return firstNonGeneric(target?.name, node.name) ?? "Tool call";
+        const name = target?.name ?? node.name;
+        if (kind === "model") return name ?? "Model call";
+        if (kind === "connector") return name ?? "Connector call";
+        if (kind === "agent") return name ?? "Agent search";
+        if (kind === "search") return name ?? "Search";
+        if (kind === "conclave") return target?.target ?? "Conclave";
+        return name ?? "Tool call";
     }
 
     if (node.kind === "agent") {
-        const subId = text(details?.subId);
-        const role = subId ? subId.split(":").pop() : undefined;
-        const name = firstNonGeneric(role, target?.name, node.name, text(raw?.agentName));
-        return name ?? "Agent";
+        return target?.name ?? node.name ?? "Agent";
     }
 
     if (node.kind === "thinking") return "Thinking";
@@ -141,14 +108,7 @@ function nodeTitle(node: ActivityNode): string {
         if (node.status === "cancelled") return "Run stopped";
         return "Run";
     }
-    return firstNonGeneric(target?.name, node.name) ?? "Activity";
-}
-
-function firstNonGeneric(...values: Array<string | undefined>): string | undefined {
-    for (const v of values) {
-        if (v && !isGenericWord(v)) return cleanLabel(v);
-    }
-    return undefined;
+    return target?.name ?? node.name ?? "Activity";
 }
 
 // =============================================================================
@@ -160,14 +120,19 @@ function nodeSummary(node: ActivityNode): string | undefined {
     const target = node.target;
 
     if (node.kind === "message") {
-        return node.text ? truncate(cleanLabel(node.text) || "", 120) : undefined;
+        return node.text ? truncate(node.text, 120) : undefined;
+    }
+
+    // Child reasoning accumulates into the node text — the reasoning sub-fold.
+    if (node.kind === "thinking") {
+        return node.text ? truncate(node.text, 120) : undefined;
     }
 
     if (node.kind === "conclave") {
         const action = text(payload.action) ?? text(target?.details?.action);
         const key = text(payload.key) ?? target?.target;
         if (action && key) return `${action} ${key}`;
-        return target?.summary ? cleanLabel(target.summary) : undefined;
+        return target?.summary;
     }
 
     const summary = node.text
@@ -177,7 +142,7 @@ function nodeSummary(node: ActivityNode): string | undefined {
         || text(payload.error)
         || text(payload.reason);
 
-    if (summary) return truncate(cleanLabel(summary) || "", 120);
+    if (summary) return truncate(summary, 120);
 
     if (node.kind === "tool" && node.status === "running" && payload.input) {
         const inputStr = typeof payload.input === "string"
@@ -207,15 +172,19 @@ function nodeSummaryPreview(node: ActivityNode): string | undefined {
         const action = text(target?.details?.action) ?? text(node.payload?.action);
         const key = target?.target ?? text(node.payload?.key);
         if (action && key) return `${action} ${key}`;
-        return target?.summary ? cleanLabel(target.summary) : undefined;
+        return target?.summary;
     }
 
     if (node.kind === "message" && node.text) {
-        return truncate(cleanLabel(node.text) || "", 80);
+        return truncate(node.text, 80);
     }
 
-    if (target?.summary && !isGenericWord(target.summary)) {
-        return truncate(cleanLabel(target.summary) || "", 80);
+    if (node.kind === "thinking" && node.text) {
+        return truncate(node.text, 80);
+    }
+
+    if (target?.summary) {
+        return truncate(target.summary, 80);
     }
 
     const payload = node.payload ?? {};
@@ -238,6 +207,54 @@ function nodeMeta(node: ActivityNode): string | undefined {
     const status = statusLabel(node.status);
     const updates = node.events > 1 ? `${node.events} events` : undefined;
     return [status, updates].filter(Boolean).join(" \u00B7 ") || undefined;
+}
+
+// =============================================================================
+// Task folds — every plan task is assigned to an agent (another or the
+// planner itself); each task renders its own fold with its agent's live
+// activity and reasoning inside. Derivation lives in lib/task-folds.
+// =============================================================================
+
+function TaskFold({ row, activity }: { row: TaskFoldRow; activity: ActivityState }) {
+    const { task, agentNodes } = row;
+    const ownerName = task.ownerName ?? task.title;
+    const status = TASK_ROW_STATUS[task.status] ?? "pending";
+    const isRunning = status === "running";
+    const isFailed = status === "failed";
+    const firstActivity = agentNodes[0];
+    const preview = agentNodes.length > 0
+        ? `${agentNodes.length} agent run${agentNodes.length > 1 ? "s" : ""}${task.startedAt ? "" : ""}`
+        : "not started";
+
+    return (
+        <StreamNode
+            title={`task ${task.id} - ${ownerName}`}
+            kind="agent"
+            status={status}
+            depth={0}
+            targetKind="agent"
+            summary={task.title}
+            summaryPreview={preview}
+            metadata={firstActivity ? statusLabel(firstActivity.status) : undefined}
+            defaultOpen={isRunning || isFailed}
+        >
+            {agentNodes.length > 0 ? (
+                agentNodes.map((node) => (
+                    <SwarmNode
+                        key={node.id}
+                        node={node}
+                        activity={activity}
+                        depth={1}
+                        visited={new Set<string>()}
+                    />
+                ))
+            ) : (
+                <div className="cm-stream-node__summary text-xs text-muted-foreground pl-2">
+                    Assigned to {ownerName} — waiting for its turn in the plan.
+                </div>
+            )}
+        </StreamNode>
+    );
 }
 
 // =============================================================================
@@ -306,10 +323,12 @@ interface SwarmNodeProps {
     activity: ActivityState;
     depth: number;
     visited: Set<string>;
+    /** Node ids claimed by per-task folds — skipped in the general timeline. */
+    hiddenIds?: Set<string>;
 }
 
-function SwarmNode({ node, activity, depth, visited }: SwarmNodeProps) {
-    if (!isVisibleNode(node) || visited.has(node.id)) return null;
+function SwarmNode({ node, activity, depth, visited, hiddenIds }: SwarmNodeProps) {
+    if (!isVisibleNode(node) || visited.has(node.id) || hiddenIds?.has(node.id)) return null;
     visited.add(node.id);
 
     const children = node.children
@@ -337,6 +356,7 @@ function SwarmNode({ node, activity, depth, visited }: SwarmNodeProps) {
                     activity={activity}
                     depth={depth + 1}
                     visited={visited}
+                    hiddenIds={hiddenIds}
                 />
             ))}
         </>
@@ -428,19 +448,46 @@ function parseTasksFromMarkdown(md?: string): Array<{ title: string; status: "pe
 
 function planTasks(plan: Plan): Array<{ title: string; description?: string; status: "pending" | "running" | "completed" | "failed" }> {
     if (plan.tasks?.length) {
-        return plan.tasks.map((task) => ({
-            title: task.title,
-            ...(task.error ? { description: task.error } : task.owner ? { description: task.owner } : {}),
-            status: task.status === "done"
-                ? "completed"
-                : task.status === "doing"
-                    ? "running"
-                    : task.status === "failed" || task.status === "blocked"
-                        ? "failed"
-                        : "pending",
-        }));
+        return plan.tasks.map((task) => {
+            // Fork + retry badges: dependency pairing and machine repair
+            // attempts, exactly as the plan recorded them.
+            const badges: string[] = [];
+            if (task.dependsOn?.length) badges.push(`Needs ${task.dependsOn.join(", ")}`);
+            if (task.parallel?.length) badges.push(`Parallel: ${task.parallel.join(", ")}`);
+            if (task.retryCount && task.retryCount > 0) badges.push(`Retried ${task.retryCount}×`);
+            const badgeText = badges.length ? badges.join(" · ") : undefined;
+            const description = [
+                ...(task.error ? [task.error] : []),
+                ...(badgeText ? [badgeText] : []),
+                ...(task.ownerName ? [`Assigned: ${task.ownerName}`] : task.owner && !task.error && !badgeText ? [task.owner] : []),
+            ].join(" — ") || undefined;
+            return {
+                title: task.title,
+                ...(description ? { description } : {}),
+                status: task.status === "done"
+                    ? "completed"
+                    : task.status === "doing"
+                        ? "running"
+                        : task.status === "failed" || task.status === "blocked"
+                            ? "failed"
+                            : "pending",
+            };
+        });
     }
     return parseTasksFromMarkdown(plan.markdown);
+}
+
+/** Delivery artifacts attached to the conversation (plan final delivery). */
+function messageDeliveries(messages: Message[]): Artifact[] {
+    const rows: Artifact[] = [];
+    for (const message of messages) {
+        for (const artifact of message.artifacts ?? []) {
+            if (artifact.artifactType === "delivery") {
+                rows.push(artifact);
+            }
+        }
+    }
+    return rows;
 }
 
 // =============================================================================
@@ -496,15 +543,27 @@ export function MissionControlSidePanel({
     const [feedbackOpen, setFeedbackOpen] = useState(false);
     const [feedbackText, setFeedbackText] = useState("");
 
-    if (!activity && !activePlan) return null;
+    const { rows: taskRows, claimedIds } = useMemo(
+        () => taskFoldRows(activePlan, activity),
+        [activePlan, activity],
+    );
+
+    const connectorRequests = useMemo(() => {
+        return messages
+            .flatMap((m) => m.connectorRequests ?? [])
+            .filter((request, idx, self) => self.findIndex((x) => x.requestId === request.requestId) === idx);
+    }, [messages]);
+
+    if (!activity && !activePlan && connectorRequests.length === 0) return null;
 
     const visited = new Set<string>();
     const roots = activity
         ? activity.roots.map((id) => activity.nodes[id]).filter((n): n is ActivityNode => Boolean(n))
         : [];
+    const rootIds = new Set(roots.map((n) => n.id));
     const orphanRoots = activity
         ? Object.values(activity.nodes).filter((n) => {
-            if (visited.has(n.id) || !isVisibleNode(n)) return false;
+            if (rootIds.has(n.id) || !isVisibleNode(n)) return false;
             const parent = n.parentId ? activity.nodes[n.parentId] : undefined;
             return !parent || !isVisibleNode(parent);
         })
@@ -538,6 +597,9 @@ export function MissionControlSidePanel({
         const decided = activePlan.decision || activePlan.state === "approved" || activePlan.state === "rejected" || activePlan.state === "changes_requested";
         const canAct = Boolean(onPlanDecision) && !activePlan.pending && !decided;
         const tasks = planTasks(activePlan);
+        const deliveries = messageDeliveries(messages).filter((artifact) => (
+            !artifact.taskId || !activePlan.tasks?.some((task) => task.id === artifact.taskId && task.status !== "done")
+        ));
         const versionMetadata = (
             <>
                 <span>v{activePlan.version}</span>
@@ -550,7 +612,7 @@ export function MissionControlSidePanel({
             <PlanGate
                 title={decided ? "Plan Decided" : "Plan Review"}
                 state={activePlan.decision || activePlan.state}
-                subtitle={activePlan.error ? activePlan.error : decided ? undefined : "Review the proposed work plan and choose an out-of-band decision."}
+                subtitle={activePlan.failureReason ?? activePlan.error ? (activePlan.failureReason ?? activePlan.error) : decided ? undefined : "Review the proposed work plan and choose an out-of-band decision."}
                 metadata={versionMetadata}
                 actions={
                     canAct ? (
@@ -595,18 +657,83 @@ export function MissionControlSidePanel({
                             <PlanTask
                                 key={idx}
                                 index={idx}
-                                 title={task.title}
-                                 description={task.description}
+                                title={task.title}
+                                description={task.description}
                                 status={task.status}
                             />
                         ))}
                     </div>
                 ) : (
-                    <Suspense fallback={<p className="cm-plan-gate__fallback">{activePlan.markdown || "No checklist provided."}</p>}>
-                        <LazyMarkdownRenderer content={activePlan.markdown || "No checklist provided."} />
-                    </Suspense>
+                    <MarkdownRenderer content={activePlan.markdown || "No checklist provided."} />
+                )}
+                {deliveries.length > 0 && (
+                    <div className="cm-plan-deliveries space-y-1.5 pt-2">
+                        <p className="text-xs font-medium text-muted-foreground">Deliveries</p>
+                        {deliveries.map((artifact) => {
+                            const content = artifact.content ?? artifact.summary ?? "";
+                            const download = () => {
+                                const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+                                const href = URL.createObjectURL(blob);
+                                const anchor = document.createElement("a");
+                                anchor.href = href;
+                                anchor.download = `deliverable-${artifact.taskId ?? "final"}.md`;
+                                document.body.appendChild(anchor);
+                                anchor.click();
+                                anchor.remove();
+                                URL.revokeObjectURL(href);
+                            };
+                            return (
+                                <div key={artifact.deliverableId ?? artifact.id} className="flex items-center justify-between gap-2 rounded-md border px-2.5 py-1.5">
+                                    <div className="min-w-0">
+                                        <p className="truncate text-sm font-medium">{artifact.title ?? "Plan delivery"}</p>
+                                        <p className="text-xs text-muted-foreground">
+                                            {artifact.taskTitle ?? "final delivery"}
+                                            {artifact.bytes ? ` · ${Math.max(1, Math.round(artifact.bytes / 1024))} KB` : ""}
+                                        </p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={download}
+                                        className="shrink-0 rounded-md border px-2 py-1 text-xs hover:bg-accent"
+                                    >
+                                        .md
+                                    </button>
+                                </div>
+                            );
+                        })}
+                    </div>
                 )}
             </PlanGate>
+        );
+    };
+
+    const renderConnectorSection = () => {
+        if (connectorRequests.length === 0) return null;
+        return connectorRequests.map((request: ConnectorRequest) => (
+            <InlineConnectorGate key={request.requestId} request={request} />
+        ));
+    };
+
+    const renderTaskSection = () => {
+        if (taskRows.length === 0) return null;
+        const runningTasks = taskRows.filter((row) => row.task.status === "doing").length;
+        const doneTasks = taskRows.filter((row) => row.task.status === "done").length;
+
+        return (
+            <MissionPocket
+                title="Task Assignments"
+                summary={runningTasks > 0
+                    ? `${runningTasks} of ${taskRows.length} tasks executing`
+                    : doneTasks === taskRows.length
+                        ? `All ${taskRows.length} tasks completed`
+                        : `${taskRows.length} assigned tasks`}
+                status={runningTasks > 0 ? "running" : doneTasks === taskRows.length ? "completed" : "pending"}
+                metadata={<span>{doneTasks}/{taskRows.length} done</span>}
+            >
+                {taskRows.map((row) => (
+                    <TaskFold key={row.task.id} row={row} activity={activity!} />
+                ))}
+            </MissionPocket>
         );
     };
 
@@ -635,6 +762,7 @@ export function MissionControlSidePanel({
                             activity={activity}
                             depth={0}
                             visited={visited}
+                            hiddenIds={claimedIds}
                         />
                     );
                 })}
@@ -651,6 +779,8 @@ export function MissionControlSidePanel({
             className={className}
         >
             {renderPlanSection()}
+            {renderConnectorSection()}
+            {renderTaskSection()}
             {renderActivitySection()}
         </MissionControlPanel>
     );

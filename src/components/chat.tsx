@@ -58,8 +58,13 @@ import {
     CircleAlert,
     Maximize2,
     Download,
+    KeyRound,
+    ExternalLink,
 } from "lucide-react";
 import type { ActivityNode, ActivityState } from "@compose-market/sdk";
+import { sdk } from "@/lib/sdk";
+import { useToast } from "@/hooks/use-toast";
+import { Input } from "@/components/ui/input";
 import {
     SlashCommandPopover,
     SelectedSlashCommandBadges,
@@ -69,7 +74,8 @@ import {
     slashCommandMatches,
     withoutSelectedSlashCommand,
 } from "@/components/slash-commands";
-import type { Artifact, AttachedFile, ChatActivityState, Message, MessageBlock, Plan } from "@/hooks/use-chat";
+import type { Artifact, AttachedFile, ChatActivityState, ConnectorRequest, Message, MessageBlock, Plan } from "@/hooks/use-chat";
+import { DeliveryCard } from "@/components/delivery";
 
 // Re-export for convenience
 export type { Message, AttachedFile };
@@ -213,6 +219,208 @@ function InlinePlanGate({
     );
 }
 
+// Inline Connector Gate — explicit Connect / Discard decision for a
+// credential-gated connector request. Chat text is never a decision;
+// only these buttons act on the request. Fully self-contained: fetches
+// the connector's credential requirements, takes the key paste, stores it
+// via the backpack, and submits the run-owner decision.
+
+const CONNECTORS_CATALOG_URL = (import.meta.env.VITE_CONNECTORS_URL || "https://connectors.compose.market").replace(/\/+$/, "");
+
+export function InlineConnectorGate({ request }: { request: ConnectorRequest }) {
+    const { toast } = useToast();
+    const [localState, setLocalState] = useState<ConnectorRequest["state"] | null>(null);
+    const [pending, setPending] = useState(false);
+    const [dialogOpen, setDialogOpen] = useState(false);
+    const [credentials, setCredentials] = useState<Array<{ varName: string; description?: string; obtainUrl?: string }> | null>(null);
+    const [vars, setVars] = useState<Record<string, string>>({});
+    const [dialogError, setDialogError] = useState<string | null>(null);
+
+    const state = localState ?? request.state;
+    const decided = state === "connected" || state === "discarded";
+    const actionable = Boolean(request.agentWallet && request.runId);
+
+    const submitDecision = useCallback(async (decision: "connected" | "discarded") => {
+        if (!request.agentWallet || !request.runId) return;
+        setPending(true);
+        try {
+            await sdk.agent.decideConnector({
+                agentWallet: request.agentWallet,
+                runId: request.runId,
+                requestId: request.requestId,
+                decision,
+                ...(request.userAddress ? { userAddress: request.userAddress } : {}),
+            });
+            setLocalState(decision);
+            toast({
+                title: decision === "connected" ? "Connector connected" : "Connector discarded",
+            });
+        } catch (error) {
+            toast({
+                title: "Connector decision failed",
+                description: error instanceof Error ? error.message : String(error),
+                variant: "destructive",
+            });
+        } finally {
+            setPending(false);
+        }
+    }, [request.agentWallet, request.runId, request.requestId, request.userAddress, toast]);
+
+    const openConnectDialog = useCallback(async () => {
+        setDialogOpen(true);
+        setDialogError(null);
+        setCredentials(null);
+        try {
+            const response = await fetch(`${CONNECTORS_CATALOG_URL}/mcps/${encodeURIComponent(request.slug)}`, {
+                headers: { Accept: "application/json" },
+                signal: AbortSignal.timeout(8000),
+            });
+            if (!response.ok) {
+                throw new Error(`Connector catalog entry unavailable (${response.status}).`);
+            }
+            const card = await response.json() as {
+                credentials?: Array<{ varName?: string; description?: string; obtainUrl?: string }>;
+            };
+            const parsed = (card.credentials || [])
+                .filter((entry): entry is { varName: string; description?: string; obtainUrl?: string } =>
+                    typeof entry?.varName === "string" && entry.varName.trim().length > 0)
+                .map((entry) => ({
+                    varName: entry.varName.trim(),
+                    ...(entry.description ? { description: entry.description } : {}),
+                    ...(entry.obtainUrl ? { obtainUrl: entry.obtainUrl } : {}),
+                }));
+            setCredentials(parsed);
+            setVars(Object.fromEntries(parsed.map((credential) => [credential.varName, ""])));
+        } catch (error) {
+            setDialogError(error instanceof Error ? error.message : "Could not load connector requirements.");
+        }
+    }, [request.slug]);
+
+    const submitConnect = useCallback(async () => {
+        if (!credentials || !request.agentWallet) return;
+        setPending(true);
+        setDialogError(null);
+        try {
+            const payload: Record<string, string> = {};
+            for (const credential of credentials) {
+                const value = (vars[credential.varName] || "").trim();
+                if (!value) throw new Error(`${credential.varName} is required.`);
+                payload[credential.varName] = value;
+            }
+            await sdk.gated.connect({
+                ...(request.userAddress ? { userAddress: request.userAddress } : {}),
+                slug: request.slug,
+                vars: payload,
+                agentWallet: request.agentWallet,
+            });
+            setDialogOpen(false);
+            await submitDecision("connected");
+        } catch (error) {
+            setDialogError(error instanceof Error ? error.message : "Could not connect connector.");
+        } finally {
+            setPending(false);
+        }
+    }, [credentials, request.agentWallet, request.slug, request.userAddress, submitDecision, vars]);
+
+    const actions = !decided && actionable ? (
+        <SharedPlanActions
+            onApprove={() => void openConnectDialog()}
+            onReject={() => void submitDecision("discarded")}
+            disabled={pending}
+        />
+    ) : decided ? (
+        <SharedPlanActions state={state === "connected" ? "connected" : "discarded"} />
+    ) : undefined;
+
+    return (
+        <>
+            <SharedPlanGate
+                title={`Connector connection requested: ${request.slug}`}
+                state={state === "requested" ? "pending" : state}
+                subtitle={decided
+                    ? undefined
+                    : request.reason || "Connect stores this connector's API key in your backpack and grants it to the run. Discard drops it from the plan."}
+                metadata={
+                    <>
+                        {request.bindingId && <span>{request.bindingId}</span>}
+                        {request.actions?.length ? <span>{request.actions.length} actions</span> : undefined}
+                    </>
+                }
+                actions={actions}
+                defaultOpen={!decided}
+            />
+
+            <Dialog open={dialogOpen} onOpenChange={(nextOpen) => { if (!nextOpen && !pending) setDialogOpen(false); }}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Connect {request.slug}</DialogTitle>
+                        <p className="text-xs text-muted-foreground">
+                            Credentials are encrypted at rest and injected blind at execution time. They are never shown again.
+                        </p>
+                    </DialogHeader>
+
+                    <div className="space-y-3 py-1">
+                        {credentials === null && !dialogError && (
+                            <div className="flex items-center justify-center py-4 text-muted-foreground text-sm">
+                                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                                Loading credential requirements...
+                            </div>
+                        )}
+                        {credentials?.length === 0 && (
+                            <p className="text-sm text-muted-foreground">This connector declares no credential variables.</p>
+                        )}
+                        {credentials?.map((credential) => (
+                            <div key={credential.varName} className="space-y-1">
+                                <div className="flex items-center justify-between">
+                                    <label className="text-xs font-mono text-foreground">{credential.varName}</label>
+                                    {credential.obtainUrl && (
+                                        <a
+                                            href={credential.obtainUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-xs text-fuchsia-400 hover:underline inline-flex items-center gap-1"
+                                        >
+                                            Get key <ExternalLink className="w-3 h-3" />
+                                        </a>
+                                    )}
+                                </div>
+                                {credential.description && (
+                                    <p className="text-xs text-muted-foreground">{credential.description}</p>
+                                )}
+                                <Input
+                                    type="password"
+                                    autoComplete="off"
+                                    value={vars[credential.varName] || ""}
+                                    onChange={(e) => setVars((current) => ({ ...current, [credential.varName]: e.target.value }))}
+                                    placeholder={credential.varName}
+                                    className="h-9 text-sm bg-background/70 font-mono"
+                                />
+                            </div>
+                        ))}
+                        {dialogError && (
+                            <p className="text-xs text-destructive">{dialogError}</p>
+                        )}
+                    </div>
+
+                    <div className="flex justify-end gap-2">
+                        <Button variant="outline" size="sm" onClick={() => setDialogOpen(false)} disabled={pending}>
+                            Cancel
+                        </Button>
+                        <Button
+                            size="sm"
+                            onClick={() => void submitConnect()}
+                            disabled={pending || credentials === null || credentials.some((credential) => !(vars[credential.varName] || "").trim())}
+                        >
+                            {pending ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <KeyRound className="w-4 h-4 mr-1.5" />}
+                            Connect
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
+        </>
+    );
+}
+
 // Inline Activity Chip — compact summary that points to the side panel
 
 function InlineActivityChip({
@@ -225,7 +433,7 @@ function InlineActivityChip({
     if (!activity) return null;
     const nodes = Object.values(activity.nodes);
     const visible = nodes.filter((n) => {
-        if (n.kind === "trace" || n.kind === "plan") return false;
+        if (n.kind === "trace" || n.kind === "plan" || n.kind === "connector") return false;
         if (n.kind === "message" && !n.parentId) return false;
         return true;
     });
@@ -294,6 +502,18 @@ function ArtifactBlock({
                     ? mediaTitle(item, rows, mediaTotal)
                     : `${artifactTitle(item.artifactType)} ${index + 1}`;
                 const actionLabel = title || artifactTitle(item.artifactType);
+
+                // Plan delivery: the plan's FINAL DELIVERY artifact frame —
+                // the complete content rides the artifact (visible inline
+                // like a picture); .md + PDF download icons in the frame.
+                if (item.artifactType === "delivery") {
+                    return (
+                        <DeliveryCard
+                            key={item.id}
+                            artifact={item}
+                        />
+                    );
+                }
 
                 if (mediaKind) {
                     const live = mediaKind === "audio" && item.partial === true && Boolean(liveAudioBase64(item));
@@ -1041,6 +1261,10 @@ function MessageItemInner({
                 )}
 
                 {hasBlocks && message.blocks?.map(renderBlock)}
+
+                {message.connectorRequests?.map((request) => (
+                    <InlineConnectorGate key={request.requestId} request={request} />
+                ))}
 
                 {!hasBlocks && shouldRenderText && message.type === "embedding" ? (
                     <EmbeddingBlock content={message.content || "..."} />
