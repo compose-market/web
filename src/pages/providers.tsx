@@ -350,7 +350,7 @@ export default function ProvidersPage() {
                 GDPR Art. 28 • Sub-Processors
               </Badge>
               <Badge className="bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/30 font-mono text-[9px] uppercase tracking-wider hidden sm:inline-flex">
-                700+ Models • 30+ Providers
+                650+ Models • 30+ Providers
               </Badge>
             </div>
             <h1 className="text-xl md:text-2xl font-display font-bold uppercase tracking-wider text-foreground">

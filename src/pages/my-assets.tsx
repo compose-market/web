@@ -1,8 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useDeferredValue } from "react";
 import { Link, useLocation } from "wouter";
 import { usePostHog } from "@posthog/react";
-import { useInfiniteQuery } from "@tanstack/react-query";
-import type { DirectoryAgent } from "@compose-market/sdk";
 import { Excerpt } from "@compose-market/theme/shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -36,19 +34,18 @@ import { useToast } from "@/hooks/use-toast";
 import { useActiveAccount, useSendTransaction } from "thirdweb/react";
 import { prepareContractCall } from "thirdweb";
 import { useWorkflowsByCreator, useRFAsByPublisher, type OnchainAgent, type OnchainWorkflow, type OnchainRFA } from "@/hooks/use-onchain";
+import { useAgentCatalog } from "@/hooks/use-agents";
+import { agentKey, toOnchainAgent } from "@/lib/agents";
 import { getIpfsUrl } from "@/lib/pinata";
 import { evmChainId, getChainByNetwork, isEvmNetwork } from "@/lib/chains";
 import { formatUsdcPrice, getContractAddress, getRFAContract, weiToUsdc } from "@/lib/contracts";
 import { useTabs } from "@/hooks/use-tabs";
 import { RFADetails } from "@/components/RFADetails";
-import { ShareSuccessDialog } from "@/components/share-dialog";
+import { ShareSuccessDialog } from "@/components/share";
 import { getMintSuccessForShare, clearMintSuccessShare, type MintShareData } from "@/lib/share";
 import { AgentCard as SharedAgentCard, AgentCardSkeleton as SharedAgentCardSkeleton } from "@/components/agent-card";
 import { Ordering, SearchFold, Switcher, type Option } from "@/components/control";
 import { WorkflowCard as WorkflowCardShell, WorkflowCardSkeleton } from "@compose-market/theme/workflows";
-
-const AGENTS_LIMIT = 24;
-const AGENTS_URL = (import.meta.env.VITE_AGENTS_URL || "https://agents.compose.market").replace(/\/+$/, "");
 
 type AgentSort = "newest" | "price-low" | "price-high";
 type WorkflowSort = "newest" | "price-low" | "price-high";
@@ -57,14 +54,6 @@ type AssetTab = "agents" | "workflows" | "rfas";
 type TabStatus = {
   count: string;
   busy: boolean;
-};
-
-type AgentPage = {
-  agents: DirectoryAgent[];
-  total: number;
-  count?: number;
-  nextCursor?: string | null;
-  hasMore?: boolean;
 };
 
 const tabs: Option<AssetTab>[] = [
@@ -78,69 +67,6 @@ const orders: Option<AgentSort>[] = [
   { value: "price-low", label: "Price: Low to High", icon: DollarSign },
   { value: "price-high", label: "Price: High to Low", icon: DollarSign },
 ];
-
-function amount(value: string | undefined): bigint {
-  const raw = value?.trim();
-  if (!raw) return 0n;
-  if (/^\d+$/.test(raw)) return BigInt(raw);
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) ? BigInt(Math.round(parsed * 1_000_000)) : 0n;
-}
-
-function finite(value: unknown): number | null {
-  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function agent(card: DirectoryAgent): OnchainAgent {
-  const cost = amount(card.licensePrice);
-  const licenses = finite(card.licenses) ?? 0;
-  const minted = finite((card as { licensesMinted?: unknown }).licensesMinted) ?? 0;
-  const available = finite(card.licensesAvailable) ?? (licenses === 0 ? Infinity : Math.max(0, licenses - minted));
-  const creatorFee = finite(card.creatorFee) ?? 1;
-  const network = (card as { network?: OnchainAgent["network"] }).network;
-
-  return {
-    id: finite(card.agentId) ?? 0,
-    dnaHash: card.dnaHash || "",
-    walletAddress: card.walletAddress || "",
-    network,
-    licenses,
-    licensesMinted: minted,
-    licensesAvailable: available,
-    licensePrice: weiToUsdc(cost),
-    licensePriceFormatted: formatUsdcPrice(cost),
-    creatorFee,
-    creator: card.creator || "",
-    cloneable: Boolean(card.cloneable),
-    isClone: Boolean(card.isClone),
-    parentAgentId: finite(card.parentAgentId) ?? 0,
-    agentCardUri: card.cid ? `ipfs://${card.cid}` : "",
-    metadata: {
-      ...card,
-      ...(network ? { network } : {}),
-      creatorFee,
-      x402: true,
-    } as unknown as OnchainAgent["metadata"],
-    isWarped: false,
-  };
-}
-
-async function page(input: { creator?: string; cursor?: string; q?: string; sort?: AgentSort; signal?: AbortSignal }): Promise<AgentPage> {
-  const params = new URLSearchParams({ limit: String(AGENTS_LIMIT) });
-  if (input.creator) params.set("creator", input.creator);
-  if (input.cursor) params.set("cursor", input.cursor);
-  if (input.q) params.set("q", input.q);
-  if (!input.q && input.sort) params.set("sort", input.sort);
-  const response = await fetch(`${AGENTS_URL}/agents?${params.toString()}`, {
-    headers: { Accept: "application/json" },
-    signal: input.signal,
-  });
-  if (!response.ok) {
-    throw new Error(`Agent lookup failed with status ${response.status}`);
-  }
-  return await response.json() as AgentPage;
-}
 
 export default function MyAssetsPage() {
   const { toast } = useToast();
@@ -172,44 +98,43 @@ export default function MyAssetsPage() {
     };
   }, []);
 
+  // Cached catalog snapshot (agents-worker /index, models-worker parity);
+  // creator + search + sort filtering happen client-side.
   const {
-    data: agentData,
+    agents: snapshot,
     isLoading: isLoadingAgents,
-    isFetchingNextPage,
-    hasNextPage,
     error: agentError,
-    refetch: refetchAgents,
-    fetchNextPage,
-  } = useInfiniteQuery({
-    queryKey: ["agents", "my-assets", owner || "", q, q ? "relevance" : sort],
-    queryFn: async ({ pageParam, signal }) => {
-      const cursor = typeof pageParam === "string" ? pageParam : undefined;
-      return await page({ creator: owner, cursor, q: q || undefined, sort: q ? undefined : sort, signal });
-    },
-    initialPageParam: null as string | null,
-    getNextPageParam: (page) => page.hasMore ? page.nextCursor ?? undefined : undefined,
-    enabled: Boolean(owner),
-    staleTime: 0,
-    gcTime: 0,
-    retry: 1,
-  });
+    refreshError: agentRefreshError,
+    forceRefresh: refreshAgents,
+  } = useAgentCatalog({ enabled: Boolean(owner) });
 
   const agents = useMemo(() => {
-    const seen = new Set<string>();
-    const out: OnchainAgent[] = [];
-    for (const current of agentData?.pages || []) {
-      for (const card of current.agents || []) {
-        if (!card.walletAddress) continue;
-        const key = card.walletAddress;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        out.push(agent(card));
-      }
+    if (!owner) return [] as OnchainAgent[];
+    const ownerKey = agentKey(owner);
+    let cards = snapshot.filter(
+      (card) => typeof card.creator === "string" && agentKey(card.creator) === ownerKey,
+    );
+    if (q) {
+      const needle = q.toLowerCase();
+      cards = cards.filter((card) =>
+        (card.name || "").toLowerCase().includes(needle)
+        || (card.description || "").toLowerCase().includes(needle)
+        || (card.skills || []).join(" ").toLowerCase().includes(needle)
+        || (card.model || "").toLowerCase().includes(needle)
+      );
+    }
+    const out = cards.map(toOnchainAgent);
+    if (!q && (sort === "price-low" || sort === "price-high")) {
+      out.sort((a, b) => {
+        const left = Number.parseFloat(a.licensePrice) || 0;
+        const right = Number.parseFloat(b.licensePrice) || 0;
+        return sort === "price-low" ? left - right : right - left;
+      });
     }
     return out;
-  }, [agentData]);
+  }, [snapshot, owner, q, sort]);
 
-  const agentCount = agentData?.pages[0]?.total ?? agents.length;
+  const agentCount = agents.length;
   const assetTabs = useMemo<Option<AssetTab>[]>(() => [
     { value: "agents", label: "Agents", icon: Bot, count: status.agents.count },
     { value: "workflows", label: "Workflows", icon: Layers, count: status.workflows.count },
@@ -340,11 +265,8 @@ export default function MyAssetsPage() {
               total={agentCount}
               sort={sort}
               isLoading={isLoadingAgents}
-              isFetchingNextPage={isFetchingNextPage}
-              hasNextPage={Boolean(hasNextPage)}
-              error={agentError instanceof Error ? agentError : null}
-              refetch={() => void refetchAgents()}
-              fetchNextPage={() => void fetchNextPage()}
+              error={(agentError ?? agentRefreshError) instanceof Error ? (agentError ?? agentRefreshError) : null}
+              refetch={() => void refreshAgents()}
               searchQuery={deferredQuery}
               onStatus={onStatus}
             />
@@ -397,11 +319,8 @@ function AssetAgentsTab({
   total,
   sort,
   isLoading,
-  isFetchingNextPage,
-  hasNextPage,
   error,
   refetch,
-  fetchNextPage,
   searchQuery,
   onStatus,
 }: {
@@ -409,11 +328,8 @@ function AssetAgentsTab({
   total: number;
   sort: AgentSort;
   isLoading: boolean;
-  isFetchingNextPage: boolean;
-  hasNextPage: boolean;
   error: Error | null;
   refetch: () => void;
-  fetchNextPage: () => void;
   searchQuery: string;
   onStatus: (tab: AssetTab, status: TabStatus & { refresh?: () => void }) => void;
 }) {
@@ -431,10 +347,10 @@ function AssetAgentsTab({
     const query = searchQuery.trim();
     onStatus("agents", {
       count: query ? String(agents.length) : String(total),
-      busy: isLoading || isFetchingNextPage,
+      busy: isLoading,
       refresh: refetch,
     });
-  }, [agents.length, isFetchingNextPage, isLoading, onStatus, refetch, searchQuery, total]);
+  }, [agents.length, isLoading, onStatus, refetch, searchQuery, total]);
 
   useEffect(() => {
     const root = canvasRef.current;
@@ -444,15 +360,11 @@ function AssetAgentsTab({
       if (!entries.some((entry) => entry.isIntersecting)) return;
       if (canReveal) {
         setShown((value) => Math.min(value + 48, agents.length));
-        return;
-      }
-      if (hasNextPage && !isFetchingNextPage) {
-        fetchNextPage();
       }
     }, { root, rootMargin: "640px 0px" });
     observer.observe(node);
     return () => observer.disconnect();
-  }, [agents.length, canReveal, fetchNextPage, hasNextPage, isFetchingNextPage]);
+  }, [agents.length, canReveal]);
 
   return (
     <div className="cm-market-agents">
@@ -487,21 +399,14 @@ function AssetAgentsTab({
                 <AgentAssetCard agent={agent} />
               </div>
             ))}
-            {(canReveal || hasNextPage) ? (
+            {canReveal ? (
               <div ref={moreRef} className="cm-market-agent-more">
                 <Button
                   variant="outline"
-                  onClick={() => {
-                    if (canReveal) {
-                      setShown((value) => Math.min(value + 48, agents.length));
-                    } else {
-                      fetchNextPage();
-                    }
-                  }}
-                  disabled={isFetchingNextPage}
+                  onClick={() => setShown((value) => Math.min(value + 48, agents.length))}
                   className="border-sidebar-border h-9 text-xs"
                 >
-                  {isFetchingNextPage ? "Loading..." : "Load more"}
+                  Load more
                 </Button>
               </div>
             ) : null}

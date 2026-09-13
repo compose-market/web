@@ -25,6 +25,7 @@ import { SessionBudgetDialog } from "@/components/session";
 import { useOnchainWorkflowByIdentifier } from "@/hooks/use-onchain";
 import { MultimodalCanvas } from "@/components/chat";
 import { toAttachment, useChat } from "@/hooks/use-chat";
+import { useConversationThread, type ThreadKey } from "@/hooks/use-thread";
 import { useStream } from "@/hooks/use-stream";
 import { CostReceiptIndicator } from "@/components/receipt-indicator";
 import { WorkflowCard, WorkflowCardSkeleton } from "@/components/workflow-card";
@@ -62,7 +63,7 @@ export default function ManowarPage() {
         userAddress: selectedUserAddress,
         isResolving: userAddressResolving,
     } = useSelectedUserAddress();
-    const { sessionActive, budgetRemaining, keyToken, ensureKeyToken } = useSession();
+    const { sessionActive, budgetRemaining, keyToken, resolveActiveKeyToken } = useSession();
 
     // Chat state from shared hook (includes messages, attachments, and recording)
     const workflowWallet = workflow?.walletAddress;
@@ -90,8 +91,16 @@ export default function ManowarPage() {
     const [sending, setSending] = useState(false);
     const [chatError, setChatError] = useState<string | null>(null);
     const [continuousEnabled, setContinuousEnabled] = useState(false);
-    const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
+
+    const getWorkflowThreadKey = useCallback((): ThreadKey | null => {
+        if (!workflowWallet || !selectedUserAddress) return null;
+        return {
+            key: `workflow-thread-${selectedUserAddress}-${workflowWallet}`,
+            idPrefix: `workflow-${workflowWallet}-user-${selectedUserAddress}`,
+        };
+    }, [selectedUserAddress, workflowWallet]);
+    const { threadIdRef, ensureConversationThread } = useConversationThread(getWorkflowThreadKey);
 
     // Session dialog
     const [showSessionDialog, setShowSessionDialog] = useState(false);
@@ -162,7 +171,7 @@ export default function ManowarPage() {
         const replayEventIndex = 0;
 
         try {
-            const activeKeyToken = keyToken || sdk.keys.currentToken() || await ensureKeyToken();
+            const activeKeyToken = await resolveActiveKeyToken();
             if (!activeKeyToken) {
                 toast({
                     title: "Session Sync Required",
@@ -177,14 +186,7 @@ export default function ManowarPage() {
             abortControllerRef.current = new AbortController();
 
             // Persistent thread ID scoped to user + workflow
-            const userAddress = selectedUserAddress;
-            const threadKey = `workflow-thread-${userAddress}-${workflowWallet}`;
-            let threadId = sessionStorage.getItem(threadKey);
-            if (!threadId) {
-                threadId = `workflow-${workflowWallet}-user-${userAddress}-${crypto.randomUUID()}`;
-                sessionStorage.setItem(threadKey, threadId);
-            }
-            setActiveThreadId(threadId);
+            const threadId = ensureConversationThread();
 
             const attachmentPart = toAttachment(attached);
             await streamer.runWorkflow({
@@ -199,7 +201,7 @@ export default function ManowarPage() {
                 signal: abortControllerRef.current.signal,
                 options: {
                     key: activeKeyToken,
-                    userAddress,
+                    userAddress: selectedUserAddress,
                     network: paymentNetwork,
                 },
             });
@@ -215,17 +217,17 @@ export default function ManowarPage() {
             setSending(false);
             abortControllerRef.current = null;
         }
-    }, [inputValue, sending, workflow, workflowWallet, wallet, account, toast, attachedFiles, addUserMessage, clearFiles, createAssistantPlaceholder, failAssistant, paymentNetwork, sessionActive, budgetRemaining, keyToken, ensureKeyToken, continuousEnabled, streamer, posthog, selectedUserAddress, userAddressResolving]);
+    }, [inputValue, sending, workflow, workflowWallet, wallet, account, toast, attachedFiles, addUserMessage, clearFiles, createAssistantPlaceholder, failAssistant, paymentNetwork, sessionActive, budgetRemaining, keyToken, resolveActiveKeyToken, continuousEnabled, ensureConversationThread, streamer, posthog, selectedUserAddress, userAddressResolving]);
 
     const handleStopExecution = useCallback(async () => {
-        if (!workflow?.walletAddress || !activeThreadId) return;
+        if (!workflow?.walletAddress || !threadIdRef.current) return;
         try {
             abortControllerRef.current?.abort();
-            await sdk.workflow.stop(workflow.walletAddress, activeThreadId);
+            await sdk.workflow.stop(workflow.walletAddress, threadIdRef.current);
             posthog?.capture("workflow_stopped", {
                 workflow_wallet: workflow.walletAddress,
                 workflow_title: workflow.title,
-                thread_id: activeThreadId,
+                thread_id: threadIdRef.current,
             });
             chat.clearActivityState();
             setSending(false);
@@ -233,7 +235,7 @@ export default function ManowarPage() {
         } catch {
             toast({ title: "Stop failed", description: "Could not stop workflow", variant: "destructive" });
         }
-    }, [workflow?.walletAddress, workflow?.title, activeThreadId, toast, posthog]);
+    }, [workflow?.walletAddress, workflow?.title, threadIdRef, toast, posthog, chat]);
 
     const copyEndpoint = () => {
         toast({

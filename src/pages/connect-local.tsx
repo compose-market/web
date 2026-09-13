@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { WalletConnector, useWalletAccount } from "@/components/connector";
+import { WalletConnector } from "@/components/connector";
+import { useWalletAccount } from "@/hooks/use-wallet";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertTriangle, Check, Monitor, Loader2, Shield, X, Download } from "lucide-react";

@@ -14,6 +14,7 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import { usePostHog } from "@posthog/react";
 import { mpTrack, mpError } from "@/lib/mixpanel";
+import { formatWeiUsd } from "@/lib/format";
 import { useLocation } from "wouter";
 import {
   ReactFlow,
@@ -942,7 +943,7 @@ function Flow() {
       toast({
         title: result.success ? "Workflow Complete" : "Workflow Failed",
         description: result.success
-          ? `Executed ${result.steps.length} steps. Cost: $${(parseInt(result.totalCostWei) / 1_000_000).toFixed(4)}`
+          ? `Executed ${result.steps.length} steps. Cost: ${formatWeiUsd(result.totalCostWei)}`
           : `Failed: ${result.error || "Unknown error"}`,
         variant: result.success ? "default" : "destructive",
       });

@@ -18,8 +18,7 @@ interface ImportMetaEnv {
   // Backend Services
   readonly VITE_CONNECTORS_URL?: string;
 
-  // Storage and knowledge
-  readonly VITE_PINATA_JWT?: string;
+  // Storage and knowledge (pinning is proxied server-side; no JWT in bundle)
   readonly VITE_PINATA_GATEWAY?: string;
   readonly VITE_FILECOIN_PRIVATE_KEY?: string;
   readonly VITE_FILECOIN_RPC_URL?: string;

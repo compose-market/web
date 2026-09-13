@@ -5,9 +5,8 @@
  */
 import { useState, useDeferredValue } from "react";
 import * as React from "react";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { usePostHog } from "@posthog/react";
-import type { DirectoryAgent } from "@compose-market/sdk";
 import { Excerpt } from "@compose-market/theme/shell";
 import { WorkflowCard as WorkflowCardShell, WorkflowCardSkeleton } from "@compose-market/theme/workflows";
 import { mpTrack } from "@/lib/mixpanel";
@@ -16,14 +15,14 @@ import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { OnchainAgent, OnchainWorkflow, OnchainRFA } from "@/hooks/use-onchain";
+import { useAgentCatalog, useSemanticAgentSearch } from "@/hooks/use-agents";
+import { mergeSemanticAgentRanks, rankCatalogAgents, toOnchainAgent } from "@/lib/agents";
 import { useTabs } from "@/hooks/use-tabs";
 import { getIpfsUrl } from "@/lib/pinata";
 import {
   CHAIN_CONFIG,
   RFA_BOUNTY_LIMITS,
-  formatUsdcPrice,
   getContractAddress,
-  weiToUsdc,
 } from "@/lib/performance/chains-data";
 import { AgentCard as SharedAgentCard, AgentCardSkeleton as SharedAgentCardSkeleton } from "@/components/agent-card";
 import { Ordering, SearchFold, Switcher, type Option } from "@/components/control";
@@ -630,82 +629,8 @@ const RFACard = React.memo(function RFACard({
 });
 
 // =============================================================================
-// Agents Tab - Cloudflare-backed native agents, progressively loaded
+// Agents Tab — cached catalog snapshot (models-worker parity) + semantic search
 // =============================================================================
-
-const AGENTS_LIMIT = 72;
-const AGENTS_PATH = "/agents";
-const AGENTS_URL = (import.meta.env.VITE_AGENTS_URL || "https://agents.compose.market").replace(/\/+$/, "");
-
-type AgentPage = {
-  agents: DirectoryAgent[];
-  total: number;
-  count?: number;
-  nextCursor?: string | null;
-  hasMore?: boolean;
-};
-
-function amount(value: string | undefined): bigint {
-  const raw = value?.trim();
-  if (!raw) return 0n;
-  if (/^\d+$/.test(raw)) return BigInt(raw);
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) ? BigInt(Math.round(parsed * 1_000_000)) : 0n;
-}
-
-function finite(value: unknown): number | null {
-  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function agent(card: DirectoryAgent): OnchainAgent {
-  const cost = amount(card.licensePrice);
-  const licenses = finite(card.licenses) ?? 0;
-  const minted = finite((card as { licensesMinted?: unknown }).licensesMinted) ?? 0;
-  const available = finite(card.licensesAvailable) ?? (licenses === 0 ? Infinity : Math.max(0, licenses - minted));
-  const creatorFee = finite(card.creatorFee) ?? 1;
-  const network = (card as { network?: OnchainAgent["network"] }).network;
-
-  return {
-    id: finite(card.agentId) ?? 0,
-    dnaHash: card.dnaHash || "",
-    walletAddress: card.walletAddress || "",
-    network,
-    licenses,
-    licensesMinted: minted,
-    licensesAvailable: available,
-    licensePrice: weiToUsdc(cost),
-    licensePriceFormatted: formatUsdcPrice(cost),
-    creatorFee,
-    creator: card.creator || "",
-    cloneable: Boolean(card.cloneable),
-    isClone: Boolean(card.isClone),
-    parentAgentId: finite(card.parentAgentId) ?? 0,
-    agentCardUri: card.cid ? `ipfs://${card.cid}` : "",
-    metadata: {
-      ...card,
-      ...(network ? { network } : {}),
-      creatorFee,
-      x402: true,
-    } as unknown as OnchainAgent["metadata"],
-    isWarped: false,
-  };
-}
-
-async function page(input: { cursor?: string; q?: string; sort?: AgentSort; signal?: AbortSignal }): Promise<AgentPage> {
-  const params = new URLSearchParams({ limit: String(AGENTS_LIMIT), view: "market" });
-  if (input.cursor) params.set("cursor", input.cursor);
-  if (input.q) params.set("q", input.q);
-  if (!input.q && input.sort) params.set("sort", input.sort);
-  const response = await fetch(`${AGENTS_URL}${AGENTS_PATH}?${params.toString()}`, {
-    headers: { Accept: "application/json" },
-    signal: input.signal,
-  });
-  if (!response.ok) {
-    throw new Error(`Agent lookup failed with status ${response.status}`);
-  }
-  return await response.json() as AgentPage;
-}
 
 function AgentsTab({
   searchQuery,
@@ -721,43 +646,50 @@ function AgentsTab({
   const canvasRef = React.useRef<HTMLDivElement | null>(null);
   const moreRef = React.useRef<HTMLDivElement | null>(null);
   const q = searchQuery.trim();
+
+  // Instant snapshot: version-keyed immutable index, retained across mounts,
+  // persisted to IndexedDB, swapped in the background when the version flips.
   const {
-    data,
+    agents: snapshot,
     isLoading,
-    isFetchingNextPage,
-    hasNextPage,
+    isRefetching,
     error,
-    refetch,
-    fetchNextPage,
-  } = useInfiniteQuery({
-    queryKey: ["agents", "market", q, q ? "relevance" : sort],
-    queryFn: async ({ pageParam, signal }) => {
-      const cursor = typeof pageParam === "string" ? pageParam : undefined;
-      return await page({ cursor, q: q || undefined, sort: q ? undefined : sort, signal });
-    },
-    initialPageParam: null as string | null,
-    getNextPageParam: (page) => page.hasMore ? page.nextCursor ?? undefined : undefined,
-    staleTime: 0,
-    gcTime: 0,
-    retry: 1,
+    forceRefresh,
+    lastUpdated,
+  } = useAgentCatalog();
+
+  // Semantic ranking hints from the agents worker; resolved back to the
+  // canonical snapshot so worker-owned objects are never rendered.
+  const { hits: semanticHits, isLoading: isSearching } = useSemanticAgentSearch(q, {
+    enabled: Boolean(q),
   });
+
+  const cards = React.useMemo(() => {
+    if (!q) return snapshot;
+    return mergeSemanticAgentRanks(snapshot, rankCatalogAgents(snapshot, q), semanticHits)
+      .map((entry) => entry.agent);
+  }, [q, snapshot, semanticHits]);
 
   const agents = React.useMemo(() => {
     const seen = new Set<string>();
     const out: OnchainAgent[] = [];
-    for (const page of data?.pages || []) {
-      for (const card of page.agents || []) {
-        if (!card.walletAddress) continue;
-        const key = card.walletAddress;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        out.push(agent(card));
-      }
+    for (const card of cards) {
+      if (!card.walletAddress) continue;
+      if (seen.has(card.walletAddress)) continue;
+      seen.add(card.walletAddress);
+      out.push(toOnchainAgent(card));
+    }
+    if (!q && (sort === "price-low" || sort === "price-high")) {
+      // Snapshot arrives newest-first; price sorts are client-side.
+      out.sort((a, b) => {
+        const left = Number.parseFloat(a.licensePrice) || 0;
+        const right = Number.parseFloat(b.licensePrice) || 0;
+        return sort === "price-low" ? left - right : right - left;
+      });
     }
     return out;
-  }, [data]);
+  }, [cards, q, sort]);
 
-  const total = data?.pages[0]?.total ?? 0;
   const visibleAgents = agents.length > 120 ? agents.slice(0, shown) : agents;
   const canReveal = visibleAgents.length < agents.length;
 
@@ -766,19 +698,15 @@ function AgentsTab({
   }, [q, sort]);
 
   React.useEffect(() => {
-    const count = data
-      ? q
-        ? String(agents.length)
-        : String(total)
-      : isLoading
-        ? "..."
-        : "0";
+    const count = isLoading
+      ? "..."
+      : String(agents.length);
     onStatus("agents", {
       count,
-      busy: isLoading || isFetchingNextPage,
-      refresh: () => void refetch(),
+      busy: isLoading || isSearching,
+      refresh: () => void forceRefresh(),
     });
-  }, [agents.length, data, isFetchingNextPage, isLoading, onStatus, q, refetch, total]);
+  }, [agents.length, forceRefresh, isLoading, isSearching, onStatus]);
 
   React.useEffect(() => {
     const root = canvasRef.current;
@@ -788,27 +716,15 @@ function AgentsTab({
       if (!entries.some((entry) => entry.isIntersecting)) return;
       if (canReveal) {
         setShown((value) => Math.min(value + 48, agents.length));
-        return;
-      }
-      if (hasNextPage && !isFetchingNextPage) {
-        void fetchNextPage();
       }
     }, { root, rootMargin: "640px 0px" });
     observer.observe(node);
     return () => observer.disconnect();
-  }, [agents.length, canReveal, fetchNextPage, hasNextPage, isFetchingNextPage]);
-
-  React.useEffect(() => {
-    if (q || !data || data.pages.length !== 1 || !hasNextPage || isFetchingNextPage) return;
-    const id = window.setTimeout(() => {
-      void fetchNextPage();
-    }, 250);
-    return () => window.clearTimeout(id);
-  }, [data, fetchNextPage, hasNextPage, isFetchingNextPage, q]);
+  }, [agents.length, canReveal]);
 
   return (
     <div className="cm-market-agents">
-      {/* Loading State */}
+      {/* Loading State — only when no cached snapshot exists at all */}
       {isLoading && (
         <div className="cm-market-agent-canvas cm-market-agent-canvas--loading">
           <div className="cm-market-agent-grid">
@@ -827,7 +743,7 @@ function AgentsTab({
           <Button
             variant="outline"
             className="mt-4"
-            onClick={() => refetch()}
+            onClick={() => forceRefresh()}
           >
             Try Again
           </Button>
@@ -836,7 +752,7 @@ function AgentsTab({
 
       {/* Agents Grid */}
       {!isLoading && visibleAgents.length > 0 && (
-        <div className="cm-market-agent-canvas" ref={canvasRef} aria-label="Agents">
+        <div className="cm-market-agent-canvas" ref={canvasRef} aria-label="Agents" data-refreshing={isRefetching ? "true" : undefined} data-updated={lastUpdated ? lastUpdated.toISOString() : undefined}>
           <div className="cm-market-agent-grid">
             {visibleAgents.map((agent) => {
               const agentPageUrl = agent.walletAddress
@@ -856,21 +772,15 @@ function AgentsTab({
                 </div>
               );
             })}
-            {(canReveal || hasNextPage) ? (
+            {canReveal ? (
               <div ref={moreRef} className="cm-market-agent-more">
                 <Button
                   variant="outline"
-                  onClick={() => {
-                    if (canReveal) {
-                      setShown((value) => Math.min(value + 48, agents.length));
-                    } else {
-                      void fetchNextPage();
-                    }
-                  }}
-                  disabled={isFetchingNextPage}
+                  onClick={() => setShown((value) => Math.min(value + 48, agents.length))}
+                  disabled={isSearching}
                   className="border-sidebar-border h-9 text-xs"
                 >
-                  {isFetchingNextPage ? "Loading..." : "Load more"}
+                  {isSearching ? "Searching..." : "Load more"}
                 </Button>
               </div>
             ) : null}

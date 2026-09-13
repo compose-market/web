@@ -26,9 +26,10 @@ import { useSession } from "@/hooks/use-session.tsx";
 import { useSelectedUserAddress } from "@/hooks/use-address";
 import { SessionBudgetDialog } from "@/components/session";
 import { BackpackDialog } from "@/components/backpack";
-import { useOnchainAgentByIdentifier } from "@/hooks/use-onchain";
+import { useAgentByIdentifier } from "@/hooks/use-agents";
 import { MultimodalCanvas } from "@/components/chat";
 import { toAttachment, useChat, type Plan } from "@/hooks/use-chat";
+import { useConversationThread, type ThreadKey } from "@/hooks/use-thread";
 import { useStream } from "@/hooks/use-stream";
 import { MissionControlSidePanel } from "@/components/mission-control";
 import { CostReceiptIndicator } from "@/components/receipt-indicator";
@@ -61,6 +62,7 @@ import {
   IdCard,
   Backpack,
   Activity,
+  Loader2,
 } from "lucide-react";
 
 export default function AgentDetailPage() {
@@ -68,7 +70,7 @@ export default function AgentDetailPage() {
   const params = useParams<{ id: string }>();
   // id is always the wallet address (preferred)
   const identifier = params.id || null;
-  const { data: agent, isLoading, error } = useOnchainAgentByIdentifier(identifier);
+  const { data: agent, isLoading, error, isIndexing } = useAgentByIdentifier(identifier);
   const { toast } = useToast();
   const wallet = useActiveWallet();
   const account = useActiveAccount();
@@ -77,7 +79,7 @@ export default function AgentDetailPage() {
     userAddress: selectedUserAddress,
     isResolving: userAddressResolving,
   } = useSelectedUserAddress();
-  const { sessionActive, budgetRemaining, keyToken, ensureKeyToken } = useSession();
+  const { sessionActive, budgetRemaining, keyToken, resolveActiveKeyToken } = useSession();
 
   // Build the A2A-compatible endpoint URL using wallet address (canonical identifier)
   const agentWallet = agent?.walletAddress;
@@ -119,20 +121,21 @@ export default function AgentDetailPage() {
   // Side panel tab state — both AgentCard and MissionControl always accessible
   const [activeSideTab, setActiveSideTab] = useState<"agent" | "mission">("agent");
   const [mobileSideOpen, setMobileSideOpen] = useState(false);
-  const threadIdRef = useRef<string | null>(null);
 
-  const showMissionControl = sending || Boolean(latestActivity) || Boolean(latestPlan);
-
-  const getConversationThreadKey = useCallback(() => {
+  const getConversationThreadKey = useCallback((): ThreadKey | null => {
     if (!agentWallet || !selectedUserAddress || userAddressResolving) {
       return null;
     }
     const backpackUserId = resolveBackpackUserId(selectedUserAddress);
     return {
-      backpackUserId,
       key: `agent-thread-${backpackUserId}-${agentWallet}`,
+      idPrefix: `thread-${backpackUserId}-${agentWallet}`,
     };
   }, [agentWallet, selectedUserAddress, userAddressResolving]);
+
+  const { threadIdRef, rootRunIdRef, resetConversationThread, ensureConversationThread, ensureConversationRootRun } = useConversationThread(getConversationThreadKey);
+
+  const showMissionControl = sending || Boolean(latestActivity) || Boolean(latestPlan);
 
   // Auto-switch to mission tab when streaming starts
   const prevSending = useRef(sending);
@@ -142,45 +145,6 @@ export default function AgentDetailPage() {
     }
     prevSending.current = sending;
   }, [sending]);
-
-  const resetConversationThread = useCallback(() => {
-    const thread = getConversationThreadKey();
-    if (!thread) {
-      threadIdRef.current = null;
-      return null;
-    }
-
-    const threadKey = thread.key;
-    sessionStorage.removeItem(threadKey);
-    const nextThreadId = `thread-${thread.backpackUserId}-${agentWallet}-${crypto.randomUUID()}`;
-    sessionStorage.setItem(threadKey, nextThreadId);
-    threadIdRef.current = nextThreadId;
-    return nextThreadId;
-  }, [agentWallet, getConversationThreadKey]);
-
-  const ensureConversationThread = useCallback(() => {
-    const thread = getConversationThreadKey();
-    if (!thread) {
-      throw new Error("Unable to initialize agent conversation thread");
-    }
-
-    const threadKey = thread.key;
-    if (threadIdRef.current && sessionStorage.getItem(threadKey) === threadIdRef.current) {
-      return threadIdRef.current;
-    }
-
-    const storedThreadId = sessionStorage.getItem(threadKey);
-    if (storedThreadId) {
-      threadIdRef.current = storedThreadId;
-      return storedThreadId;
-    }
-
-    const createdThreadId = resetConversationThread();
-    if (!createdThreadId) {
-      throw new Error("Unable to initialize agent conversation thread");
-    }
-    return createdThreadId;
-  }, [getConversationThreadKey, resetConversationThread]);
 
   const handleClearChat = useCallback(() => {
     clearMessages();
@@ -282,10 +246,7 @@ export default function AgentDetailPage() {
       return;
     }
 
-    let activeKeyToken = await ensureKeyToken();
-    if (!activeKeyToken) {
-      activeKeyToken = keyToken;
-    }
+    const activeKeyToken = await resolveActiveKeyToken();
 
     if (!activeKeyToken) {
       toast({
@@ -319,7 +280,7 @@ export default function AgentDetailPage() {
     } finally {
       setWorkspaceUploading(false);
     }
-  }, [account, agentWallet, keyToken, ensureKeyToken, selectedUserAddress, toast, userAddressResolving, workspaceFiles]);
+  }, [account, agentWallet, keyToken, resolveActiveKeyToken, selectedUserAddress, toast, userAddressResolving, workspaceFiles]);
 
   // Send chat message with x402 payment
   const handleSendMessage = useCallback(async (selectedSlashCommands: string[] = []) => {
@@ -396,11 +357,14 @@ export default function AgentDetailPage() {
     });
 
     const assistantId = createAssistantPlaceholder();
-    const runId = crypto.randomUUID();
+    // Stable per-thread root run: every turn of this conversation lands in
+    // one runstate namespace (archive, conclave, watch); the runtime mints
+    // a fresh child runId per turn.
+    const runId = ensureConversationRootRun();
 
     try {
       if (!agent) throw new Error("Agent not loaded");
-      const activeKeyToken = keyToken || sdk.keys.currentToken() || await ensureKeyToken();
+      const activeKeyToken = await resolveActiveKeyToken();
       if (!activeKeyToken) {
         toast({
           title: "Session Sync Required",
@@ -442,7 +406,7 @@ export default function AgentDetailPage() {
       setSending(false);
     }
     return accepted;
-  }, [inputValue, sending, agentWallet, wallet, account, toast, agent, attachedFiles, addUserMessage, clearFiles, createAssistantPlaceholder, failAssistant, paymentNetwork, sessionActive, budgetRemaining, keyToken, ensureKeyToken, ensureConversationThread, streamer, posthog, selectedUserAddress, userAddressResolving]);
+  }, [inputValue, sending, agentWallet, wallet, account, toast, agent, attachedFiles, addUserMessage, clearFiles, createAssistantPlaceholder, failAssistant, paymentNetwork, sessionActive, budgetRemaining, keyToken, resolveActiveKeyToken, ensureConversationThread, ensureConversationRootRun, streamer, posthog, selectedUserAddress, userAddressResolving]);
 
   const handlePlanDecision = useCallback(async (
     messageId: string,
@@ -460,7 +424,7 @@ export default function AgentDetailPage() {
     }
     updateAssistantMessage(messageId, { proposal: { ...plan, pending: true, error: undefined } });
     try {
-      const activeKeyToken = keyToken || sdk.keys.currentToken() || await ensureKeyToken();
+      const activeKeyToken = await resolveActiveKeyToken();
       if (activeKeyToken) sdk.keys.use(activeKeyToken);
       await sdk.agent.decide({
         agentWallet,
@@ -480,9 +444,11 @@ export default function AgentDetailPage() {
           feedback,
         },
       });
+      if (decision === "approved" && threadIdRef.current) {
+        void streamer.watchPlan({ agentWallet, runId, threadId: threadIdRef.current });
+      }
       toast({
         title: decision === "approved" ? "Plan approved" : decision === "changes_requested" ? "Changes requested" : "Plan rejected",
-        description: "Decision submitted without sending a chat message.",
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -495,7 +461,7 @@ export default function AgentDetailPage() {
         variant: "destructive",
       });
     }
-  }, [agentWallet, keyToken, ensureKeyToken, selectedUserAddress, toast, updateAssistantMessage]);
+  }, [agentWallet, keyToken, resolveActiveKeyToken, selectedUserAddress, toast, updateAssistantMessage]);
 
   const copyEndpoint = () => {
     toast({
@@ -526,6 +492,7 @@ export default function AgentDetailPage() {
   }
 
   if (error || !agent) {
+    const notFound = !error && !agent;
     return (
       <div className="cm-chat-workspace">
         <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-fuchsia-400 -ml-2 mb-3" onClick={() => history.back()}>
@@ -533,11 +500,30 @@ export default function AgentDetailPage() {
           Back
         </Button>
 
-        <div className="flex-1 flex items-center justify-center border border-dashed border-red-500/30 rounded-lg">
+        <div className={`flex-1 flex items-center justify-center border border-dashed rounded-lg ${isIndexing ? "border-cyan-500/30" : "border-red-500/30"}`}>
           <div className="text-center">
-            <Shield className="w-10 h-10 mx-auto text-red-400/50 mb-3" />
-            <p className="text-red-400 font-mono">Agent not found</p>
-            <p className="text-muted-foreground text-xs mt-1">This agent may not exist yet.</p>
+            {isIndexing ? (
+              <>
+                <Loader2 className="w-10 h-10 mx-auto text-cyan-400/70 mb-3 animate-spin" />
+                <p className="text-cyan-400 font-mono">Indexing agent…</p>
+                <p className="text-muted-foreground text-xs mt-1">This agent was just created — the catalog is publishing it now.</p>
+              </>
+            ) : notFound ? (
+              <>
+                <Shield className="w-10 h-10 mx-auto text-red-400/50 mb-3" />
+                <p className="text-red-400 font-mono">Agent not found</p>
+                <p className="text-muted-foreground text-xs mt-1">This agent may not exist yet.</p>
+              </>
+            ) : (
+              <>
+                <Shield className="w-10 h-10 mx-auto text-yellow-400/50 mb-3" />
+                <p className="text-yellow-400 font-mono">Agent temporarily unavailable</p>
+                <p className="text-muted-foreground text-xs mt-1">{error instanceof Error ? error.message : "The agents catalog could not be reached."}</p>
+                <Button variant="outline" className="mt-4" onClick={() => window.location.reload()}>
+                  Try Again
+                </Button>
+              </>
+            )}
           </div>
         </div>
       </div>

@@ -6,6 +6,7 @@
 @import "./model-card.css";
 @import "./dashboard.css";
 @import "./benchmarks.css";
+@import "katex/dist/katex.min.css";
 
 
 
@@ -2205,4 +2206,50 @@ body,
   max-width: 100% !important;
   flex: 1 1 100%;
   box-sizing: border-box;
+}
+/* =============================================================================
+   Plan delivery — in-chat artifact card + print-scoped PDF export
+   ============================================================================= */
+
+.cm-delivery-card {
+  max-width: 100%;
+}
+
+.cm-delivery-card .cm-delivery-body {
+  max-height: 65vh;
+  overflow-y: auto;
+}
+
+.cm-delivery-card[data-expanded="true"] .cm-delivery-body {
+  max-height: none;
+}
+
+/* Print / PDF: when a delivery print is requested, print ONLY the delivery
+   (the rest of the app is hidden); the browser's print-to-PDF does the
+   rendering — the runtime stays a content store. */
+@media print {
+  body.cm-print-delivery-only * {
+    visibility: hidden;
+  }
+
+  body.cm-print-delivery-only .cm-delivery-card,
+  body.cm-print-delivery-only .cm-delivery-card * {
+    visibility: visible;
+  }
+
+  body.cm-print-delivery-only .cm-delivery-card {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    margin: 0;
+    border: none;
+    background: #fff;
+    color: #000;
+    box-shadow: none;
+  }
+
+  body.cm-print-delivery-only .cm-delivery-card .cm-delivery-body {
+    max-height: none;
+    overflow: visible;
+  }
 }

@@ -59,6 +59,8 @@ import {
   type AgentCard
 } from "@/lib/pinata";
 import { uploadIdentityFiles } from "@/lib/identity";
+import { indexAgentCard, rememberJustCreatedAgent } from "@/lib/agents";
+import { refreshAgentCatalog } from "@/hooks/use-agents";
 import {
   computeDnaHash,
   deriveAgentWalletAddress,
@@ -566,6 +568,20 @@ export default function CreateAgent() {
       revenue: parseFloat(values.licensePrice),
       currency: "USDC",
     });
+
+    // Index the fresh agent immediately: the worker fetches the pinned card
+    // by CID, publishes it, and bumps the catalog version so Market and
+    // /agent/<wallet> serve it within seconds. Cron remains the fallback.
+    if (txData.agentCardUri) {
+      const cid = txData.agentCardUri.replace(/^ipfs:\/\//, "");
+      rememberJustCreatedAgent(walletAddress);
+      try {
+        await indexAgentCard({ cid, walletAddress }, { timeoutMs: 10_000 });
+        void refreshAgentCatalog();
+      } catch (error) {
+        console.warn("[create-agent] immediate indexing failed; cron will pick it up", error);
+      }
+    }
 
     setLocation("/my-assets");
   };

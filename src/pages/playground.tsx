@@ -66,7 +66,7 @@ const PANE_COLLAPSED_KEY = "playground_pane_collapsed";
 // ── Default model before user selection.
 // If it doesn't exist (e.g., deprecated) in the catalog anymore,
 // the auto-select effect will fall back to the latest frontier model.
-const DEFAULT_MODEL = "gemini-3.7-flash";
+const DEFAULT_MODEL = "gemini-3.8-flash";
 
 type PlaygroundTab = "model" | "connectors";
 
@@ -124,7 +124,7 @@ export default function PlaygroundPage() {
   const wallet = useActiveWallet();
   const account = useActiveAccount();
   const { userAddress, isResolving: userAddressResolving } = useSelectedUserAddress();
-  const { sessionActive, budgetRemaining, formatBudget, keyToken, ensureKeyToken } = useSession();
+  const { sessionActive, budgetRemaining, formatBudget, keyToken, resolveActiveKeyToken } = useSession();
   const { paymentNetwork } = useChain();
   const { toast } = useToast();
 
@@ -148,7 +148,7 @@ export default function PlaygroundPage() {
   }, []);
 
   // ============ Filter State ============
-  const [selectedType, setSelectedType] = useState("text-generation");
+  const [selectedType, setSelectedType] = useState("all");
   const [selectedFamily, setSelectedFamily] = useState("all");
   const { data: registryMeta } = useRegistryMeta({ enabled: activeTab === "connectors" });
 
@@ -239,7 +239,7 @@ export default function PlaygroundPage() {
     conversationId,
     onError: (err) => setInferenceError(err),
   });
-  const { messages, setMessages, scrollContainerRef, messagesEndRef,
+  const { messages, scrollContainerRef, messagesEndRef,
     activityState, clearMessages,
     attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, uploadedCids, cleanupFiles, clearFiles,
     isRecording, recordingSupported, startRecording, stopRecording,
@@ -306,7 +306,19 @@ export default function PlaygroundPage() {
     [models, selectedModel],
   );
   const { data: selectedModelDetails } = useModelDetails(selectedModel);
-  const selectedModelInfo = selectedModelDetails ?? selectedModelIndex;
+  // Display prefers the canonical worker catalog row (name, family, pricing,
+  // frontier flags); the API card only enriches fields the worker index does
+  // not carry (description, capabilities, params).
+  const selectedModelInfo = useMemo(() => {
+    if (selectedModelDetails && selectedModelIndex) {
+      return {
+        ...selectedModelDetails,
+        ...selectedModelIndex,
+        description: selectedModelDetails.description ?? selectedModelIndex.description,
+      };
+    }
+    return selectedModelDetails ?? selectedModelIndex;
+  }, [selectedModelDetails, selectedModelIndex]);
   const { data: rawModelParams } = useModelParams<ModelParamsSchema>(selectedModel);
   const modelParams = useMemo(() => (
     rawModelParams && Object.keys(rawModelParams.params).length > 0 ? rawModelParams : null
@@ -388,21 +400,19 @@ export default function PlaygroundPage() {
       "Prompt Text": currentInputValue.trim().slice(0, 500),
     });
 
-    setMessages((prev) => [...prev, userMessage]);
+    chat.addUserMessage(currentInputValue.trim(), {
+      type: attached?.type ?? "text",
+      ...(attached?.type === "image" ? { imageUrl: attached.url } : {}),
+      ...(attached?.type === "audio" ? { audioUrl: attached.url } : {}),
+      ...(attached?.type === "video" ? { videoUrl: attached.url } : {}),
+    });
     setInputValue("");
     clearFiles();
     setStreaming(true);
     setInferenceError(null);
     chat.clearActivityState();
 
-    const assistantId = crypto.randomUUID();
-    chat.streamedTextRef.current = "";
-    chat.currentAssistantIdRef.current = assistantId;
-
-    setMessages((prev) => [
-      ...prev,
-      { id: assistantId, role: "assistant", content: "", timestamp: Date.now(), type: modelOutputType(currentSelectedModelInfo) },
-    ]);
+    const assistantId = chat.createAssistantPlaceholder(modelOutputType(currentSelectedModelInfo));
 
     try {
       if (!wallet || !account) throw new Error("Connect wallet to use inference");
@@ -410,7 +420,7 @@ export default function PlaygroundPage() {
 
       // Make sure the SDK has the freshly-minted Compose Key JWT cached
       // in-memory before any billable call fires.
-      const activeKeyToken = keyToken || sdk.keys.currentToken() || await ensureKeyToken();
+      const activeKeyToken = await resolveActiveKeyToken();
       if (sessionActive && budgetRemaining > 0 && !activeKeyToken) {
         throw new Error("Compose session key unavailable. Re-open your session and try again.");
       }
@@ -447,7 +457,7 @@ export default function PlaygroundPage() {
     } finally {
       setStreaming(false);
     }
-  }, [wallet, account, budgetRemaining, clearFiles, sessionActive, keyToken, ensureKeyToken, paymentNetwork, toast, posthog, chat, setMessages, streamer, userAddress, userAddressResolving, selectedModelDetails]);
+  }, [wallet, account, budgetRemaining, clearFiles, sessionActive, keyToken, resolveActiveKeyToken, paymentNetwork, toast, posthog, chat, streamer, userAddress, userAddressResolving, selectedModelDetails]);
   const handleClearChat = useCallback(() => {
     streamer.cancelResponses();
     clearMessages();

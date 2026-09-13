@@ -21,11 +21,11 @@ const Providers = lazy(() => import("@/pages/providers"));
 // const Agents = lazy(() => import("@/pages/agents"));
 const AgentDetail = lazy(() => import("@/pages/agent"));
 // const Registry = lazy(() => import("@/pages/registry"));
-// const MyAssets = lazy(() => import("@/pages/my-assets"));
+const MyAssets = lazy(() => import("@/pages/my-assets"));
 const Playground = lazy(() => import("@/pages/playground"));
 const Benchmarks = lazy(() => import("@/pages/benchmarks"));
 // const Workflow = lazy(() => import("@/pages/workflow"));
-// const ConnectLocal = lazy(() => import("@/pages/connect-local"));
+const ConnectLocal = lazy(() => import("@/pages/connect-local"));
 // const InstallLocal = lazy(() => import("@/pages/install-local"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 
@@ -45,24 +45,24 @@ function PageFallback() {
 function AppRouter() {
   const [location] = useLocation();
 
-  // if (isStandaloneAppRoute(location)) {
-  // return (
-  // <Suspense fallback={<PageFallback />}>
-  // <Switch>
-  {/* <Route path="/connect-local/:rest*" component={ConnectLocal} /> */ }
-  {/* <Route path="/connect-local" component={ConnectLocal} /> */ }
-  {/* <Route path="/install-local" component={InstallLocal} /> */ }
-  // </Switch>
-  // </Suspense>
-  // );
-  // }
+  if (isStandaloneAppRoute(location)) {
+    return (
+      <Suspense fallback={<PageFallback />}>
+        <Switch>
+          {<Route path="/connect-local/:rest*" component={ConnectLocal} />}
+          <Route path="/connect-local" component={ConnectLocal} />
+          {/* <Route path="/install-local" component={InstallLocal} /> */}
+        </Switch>
+      </Suspense>
+    );
+  }
 
   return (
     <Layout>
       <Suspense fallback={<PageFallback />}>
         <Switch>
           <Route path="/">
-            <Redirect to="/keys" replace />
+            <Redirect to="/playground" replace />
           </Route>
           <Route path="/dashboard" component={Dashboard} />
           <Route path="/keys" component={Keys} />
@@ -76,7 +76,7 @@ function AppRouter() {
           {/* <Route path="/agents" component={Agents} /> */}
           <Route path="/agent/:id" component={AgentDetail} />
           {/* <Route path="/registry" component={Registry} /> */}
-          {/* <Route path="/my-assets" component={MyAssets} /> */}
+          <Route path="/my-assets" component={MyAssets} />
           {/* <Route path="/workflow/:id" component={Workflow} /> */}
           <Route component={NotFound} />
         </Switch>
