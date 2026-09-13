@@ -9,7 +9,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 
 import type { ActivityNode, ActivityState } from "@compose-market/sdk";
-import { taskFoldRows, taskIdOfNode, TASK_ROW_STATUS } from "../src/lib/task-folds.ts";
+import { taskFoldRows, taskIdOfNode, TASK_ROW_STATUS } from "../src/lib/folds.ts";
 import type { Plan } from "../src/hooks/use-chat.ts";
 
 const here = import.meta.dirname;

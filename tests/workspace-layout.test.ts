@@ -16,7 +16,7 @@ test("root route redirects to keys while home stays outside the app graph", () =
 
   assert.equal(existsSync(resolve(root, "src/pages/home.tsx")), false);
   assert.doesNotMatch(app, /@\/pages\/home/);
-  assert.match(app, /<Redirect\s+to="\/keys"\s+replace\s*\/>/);
+  assert.match(app, /<Redirect\s+to="\/playground"\s+replace\s*\/>/);
   assert.match(app, /const Dashboard = lazy\(\(\) => import\("@\/pages\/dashboard"\)\);/);
   assert.match(app, /<Route path="\/dashboard" component=\{Dashboard\} \/>/);
   assert.match(app, /const Market = lazy\(\(\) => import\("@\/pages\/market"\)\);/);

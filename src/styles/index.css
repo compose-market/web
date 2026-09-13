@@ -506,10 +506,22 @@ body,
   max-width: var(--cm-hud-size);
   padding-inline: 0;
   pointer-events: auto;
+  justify-content: center;
+  gap: 0.12rem;
 }
 
 .cm-app-chrome__navselect .cm-hud-value {
   display: none;
+}
+
+.cm-app-chrome__navselect .cm-network-filter__logo {
+  width: 1.12rem;
+  height: 1.12rem;
+}
+
+.cm-app-chrome__navselect > svg {
+  width: 0.72rem;
+  height: 0.72rem;
 }
 
 .cm-hud-status {
