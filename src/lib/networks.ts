@@ -19,8 +19,41 @@ export const NETWORK_LOGOS: Record<string, string> = {
   "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp": "/networks/solana.jpeg",
 };
 
+import React from "react";
+import { Globe } from "lucide-react";
+import { cn } from "@/lib/utils";
+
 /** Logo URL for a CAIP-2 network id, if we have an asset for it. */
 export function networkLogo(network: string | undefined | null): string | undefined {
   if (!network) return undefined;
   return NETWORK_LOGOS[network];
 }
+
+/** Standardized network visual identity glyph (logo with Globe fallback). */
+export function NetworkGlyph({
+  network,
+  name,
+  className,
+}: {
+  network: string | null | undefined;
+  name?: string;
+  className?: string;
+}): React.ReactElement {
+  const logo = network ? networkLogo(network) : undefined;
+  if (logo) {
+    return React.createElement("img", {
+      src: logo,
+      alt: "",
+      className: cn("cm-network-filter__logo", className),
+      loading: "lazy",
+      decoding: "async",
+    });
+  }
+  return React.createElement(Globe, {
+    className: cn("cm-control-switcher__icon", className),
+    "aria-label": name,
+  });
+}
+
+export { NetworkGlyph as NetworkLogo };
+

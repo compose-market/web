@@ -17,7 +17,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { networkLogo } from "@/lib/networks";
+import { networkLogo, NetworkGlyph } from "@/lib/networks";
 
 export function toggleNetworkSelection(
   selected: readonly string[],
@@ -31,22 +31,6 @@ export function toggleNetworkSelection(
 }
 
 type SupportedChain = FacilitatorChain & { network: NetworkId };
-
-function NetworkGlyph({ network, name }: { network: NetworkId | null; name: string }) {
-  const logo = network ? networkLogo(network) : undefined;
-  if (logo) {
-    return (
-      <img
-        src={logo}
-        alt=""
-        className="cm-network-filter__logo"
-        loading="lazy"
-        decoding="async"
-      />
-    );
-  }
-  return <Globe className="cm-control-switcher__icon" aria-label={name} />;
-}
 
 export function NetworkFilter({
   chains,

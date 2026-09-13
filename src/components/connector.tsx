@@ -17,6 +17,7 @@ import { useTotalBalance } from "@/hooks/use-multichain";
 import { useSelectedUserAddress } from "@/hooks/use-address";
 import { sdk } from "@/lib/sdk";
 import { cn } from "@/lib/utils";
+import { NetworkGlyph } from "@/lib/networks";
 import { mpIdentify, mpReset } from "@/lib/mixpanel";
 import { clearCachedAccount, readCachedAccount, writeCachedAccount } from "@/lib/cache";
 import type { EvmNetworkId } from "@compose-market/sdk/chains";
@@ -132,7 +133,6 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
   }, [thirdwebChainIdValue]);
 
   const chainInfo = getChainByNetworkId(paymentNetwork);
-  const chainColor = chainInfo?.isTestnet ? "bg-red-400" : "bg-blue-400";
 
   const selectedPaymentToken = useMemo(() => {
     if (thirdwebChainIdValue == null) return undefined;
@@ -337,7 +337,7 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
         <DropdownMenuContent align="end" className="cm-hud-menu w-64">
           <div className="px-3 py-3 border-b border-cyan-400/15">
             <div className="flex items-center gap-2 mb-2">
-              <span className={cn("w-2.5 h-2.5 rounded-full", chainColor)} />
+              <NetworkGlyph network={paymentNetwork} name={chainInfo?.name || "Unknown Chain"} />
               <span className="font-mono text-sm font-medium">
                 {chainInfo?.name || "Unknown Chain"}
               </span>

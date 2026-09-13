@@ -8,6 +8,7 @@ import { useChain } from "@/contexts/Network";
 import type { NetworkId } from "@compose-market/sdk/chains";
 import { useMultiChainBalance } from "@/hooks/use-multichain";
 import { useSelectedUserAddress } from "@/hooks/use-address";
+import { NetworkGlyph, NetworkLogo } from "@/lib/networks";
 import {
     Select,
     SelectContent,
@@ -15,6 +16,8 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
+
+export { NetworkGlyph, NetworkLogo };
 
 interface NetworkSelectorProps {
     compact?: boolean;
@@ -55,11 +58,7 @@ export function NetworkSelector({
                     )}
                 >
                     <div className="flex min-w-0 items-center gap-2 truncate">
-                        <span
-                            className="cm-hud-status"
-                            data-tone={currentChain?.isTestnet ? "red" : "blue"}
-                            aria-hidden="true"
-                        />
+                        <NetworkGlyph network={selectedNetwork} name={currentChain?.name} />
                         <span className="cm-hud-value">{currentChain?.name || "Select"}</span>
                     </div>
                 </SelectTrigger>
@@ -70,12 +69,7 @@ export function NetworkSelector({
                             <SelectItem key={network.network} value={network.network} className="font-mono text-xs">
                                 <div className="flex items-center justify-between gap-3 w-full">
                                     <div className="flex items-center gap-2">
-                                        <span
-                                            className={cn(
-                                                "w-2 h-2 rounded-full",
-                                                network.isTestnet ? "bg-red-400" : "bg-blue-400"
-                                            )}
-                                        />
+                                        <NetworkGlyph network={network.network} name={network.name} />
                                         <span>{network.name}</span>
                                     </div>
                                     {showBalance && balance && (
@@ -100,12 +94,7 @@ export function NetworkSelector({
                 )}
             >
                 <div className="flex items-center gap-2">
-                    <span
-                        className={cn(
-                            "w-2.5 h-2.5 rounded-full animate-pulse",
-                            currentChain?.isTestnet ? "bg-red-400" : "bg-blue-400"
-                        )}
-                    />
+                    <NetworkGlyph network={selectedNetwork} name={currentChain?.name} />
                     <SelectValue placeholder="Select network" />
                 </div>
             </SelectTrigger>
@@ -116,12 +105,7 @@ export function NetworkSelector({
                         <SelectItem key={network.network} value={network.network} className="font-mono">
                             <div className="flex items-center justify-between gap-4 w-full min-w-[200px]">
                                 <div className="flex items-center gap-2">
-                                    <span
-                                        className={cn(
-                                            "w-2.5 h-2.5 rounded-full",
-                                            network.isTestnet ? "bg-red-400" : "bg-blue-400"
-                                        )}
-                                    />
+                                    <NetworkGlyph network={network.network} name={network.name} />
                                     <span>{network.name}</span>
                                 </div>
                                 {showBalance && balance && (
@@ -153,12 +137,7 @@ export function NetworkBadge({ network, className }: { network: NetworkId; class
                 className
             )}
         >
-            <span
-                className={cn(
-                    "w-1.5 h-1.5 rounded-full",
-                    config?.isTestnet ? "bg-red-400" : "bg-blue-400"
-                )}
-            />
+            <NetworkGlyph network={network} name={config?.name || network} />
             <span>{config?.name || network}</span>
         </div>
     );
