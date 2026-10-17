@@ -19,7 +19,7 @@ import {
   type Agent,
 } from "@/lib/agents";
 import { CHAIN_CONFIG, getContractAddress } from "@/lib/performance/chains-data";
-import { NETWORK_LOGOS } from "@/lib/networks";
+import { NETWORK_LOGOS } from "@/contexts/Network";
 import { API_BASE_URL } from "@/lib/sdk";
 
 export interface AgentCardProps {

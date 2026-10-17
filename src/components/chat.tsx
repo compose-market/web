@@ -76,6 +76,7 @@ import {
 } from "@/components/slash-commands";
 import type { Artifact, AttachedFile, ChatActivityState, ConnectorRequest, Message, MessageBlock, Plan } from "@/hooks/use-chat";
 import { DeliveryCard } from "@/components/delivery";
+import { SnippetCard } from "@/components/snippet";
 
 // Re-export for convenience
 export type { Message, AttachedFile };
@@ -515,6 +516,18 @@ function ArtifactBlock({
                     );
                 }
 
+                // Snippet: smart-contract source/report artifact frame —
+                // complete content rides the artifact (visible inline);
+                // .sol + .md download icons in the frame.
+                if (item.artifactType === "snippet") {
+                    return (
+                        <SnippetCard
+                            key={item.id}
+                            artifact={item}
+                        />
+                    );
+                }
+
                 if (mediaKind) {
                     const live = mediaKind === "audio" && item.partial === true && Boolean(liveAudioBase64(item));
                     return (
@@ -876,6 +889,7 @@ function artifactTitle(kind: Artifact["artifactType"]): string {
     if (kind === "embedding") return "Embedding";
     if (kind === "realtime") return "Realtime";
     if (kind === "file") return "File";
+    if (kind === "snippet") return "Snippet";
     return "Artifact";
 }
 
@@ -1784,7 +1798,7 @@ export function MultimodalCanvas({
                 </div>
 
                 {fileInputRef && onFileInputChange && (
-                    <input type="file" ref={fileInputRef} onChange={onFileInputChange} accept={imageRequired ? "image/*" : "image/*,audio/*,video/*,application/pdf,.pdf,.txt,.md,.json,.csv,.html,.xml,text/*,application/json"} className="hidden" />
+                    <input type="file" ref={fileInputRef} onChange={onFileInputChange} accept={imageRequired ? "image/*" : "image/*,audio/*,video/*,application/pdf,.pdf,.txt,.md,.json,.csv,.html,.xml,text/*,application/json,.sol"} className="hidden" />
                 )}
             </div>
         </div>

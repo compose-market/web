@@ -37,7 +37,7 @@ test("network selector lives in the nav utility, not the top HUD or overflow", (
 test("market agent cards use root open handlers without nested links", () => {
   const market = read("src/pages/market.tsx");
   const card = read("src/components/agent-card.tsx");
-  const networks = read("src/lib/networks.ts");
+  const networks = read("src/contexts/Network.tsx");
 
   assert.match(market, /cm-market-agent-canvas/);
   assert.match(market, /onOpen=\{\(\) => setLocation\(agentPageUrl\)\}/);
@@ -48,7 +48,7 @@ test("market agent cards use root open handlers without nested links", () => {
   assert.match(card, /cm-agent-card__verified/);
   assert.match(card, /cm-agent-card__network/);
   assert.doesNotMatch(card, /logo\.dev|chainLogoUrl|VITE_PUBLIC_LOGO_DEV_PUBLISHABLE_KEY/);
-  assert.match(card, /@\/lib\/networks/);
+  assert.match(card, /@\/contexts\/Network/);
   // Chain logos live in the shared network module (dashboard filter reuses it).
   assert.match(networks, /"eip155:43113": "\/networks\/avalancheFuji\.jpeg"/);
   assert.match(networks, /"eip155:43114": "\/networks\/avalanche\.jpeg"/);
@@ -56,6 +56,8 @@ test("market agent cards use root open handlers without nested links", () => {
   assert.match(networks, /"eip155:42161": "\/networks\/arbitrum\.png"/);
   assert.match(networks, /"eip155:5042002": "\/networks\/arcTestnet\.jpeg"/);
   assert.match(networks, /"eip155:5042": "\/networks\/arc\.jpeg"/);
+  assert.match(networks, /"eip155:84532": "\/networks\/baseSepolia\.png"/);
+  assert.match(networks, /"eip155:8453": "\/networks\/base\.png"/);
   assert.match(networks, /"eip155:1328": "\/networks\/seiTestnet\.jpeg"/);
   assert.match(networks, /"eip155:1329": "\/networks\/sei\.jpeg"/);
   assert.match(networks, /"solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1": "\/networks\/solanaDevnet\.jpeg"/);
@@ -321,7 +323,7 @@ test("dashboard uses the platform rail, picker stats, and composite mobile grid"
   // (cm-shell-tab pill, centered content), logo-driven, shared menu.
   assert.match(networks, /export function toggleNetworkSelection/);
   assert.match(networks, /export function NetworkFilter/);
-  assert.match(networks, /@\/lib\/networks/);
+  assert.match(networks, /@\/contexts\/Network/);
   assert.match(networks, /cm-shell-tab cm-network-filter/);
   assert.match(networks, /cm-control-switcher__label/);
   assert.match(networks, /cm-control-switcher__chevron/);
@@ -480,4 +482,10 @@ test("published theme sources keep generic primitives separate from product layo
   assert.match(agents, /\.cm-agent-card__model-name\s*\{[\s\S]*text-overflow:\s*ellipsis/);
   assert.match(shell, /\.cm-control-search-fold/);
   assert.doesNotMatch(market, /cm-market-search-fold|cm-search--market/);
+});
+
+test("notifications dialog does not render an in-place trigger icon in layout", () => {
+  const notifications = read("src/components/notifications.tsx");
+  assert.doesNotMatch(notifications, /<DialogTrigger/);
+  assert.doesNotMatch(notifications, /cm-app-chrome__search-toggle/);
 });

@@ -17,8 +17,7 @@ import { useTotalBalance } from "@/hooks/use-multichain";
 import { useSelectedUserAddress } from "@/hooks/use-address";
 import { sdk } from "@/lib/sdk";
 import { cn } from "@/lib/utils";
-import { NetworkGlyph } from "@/lib/networks";
-import { mpIdentify, mpReset } from "@/lib/mixpanel";
+import { NetworkGlyph } from "@/contexts/Network";
 import { clearCachedAccount, readCachedAccount, writeCachedAccount } from "@/lib/cache";
 import type { EvmNetworkId } from "@compose-market/sdk/chains";
 import { DisclaimerModal } from "@/components/disclaimer";
@@ -82,7 +81,6 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
 
   useEffect(() => {
     if (account?.address) {
-      mpIdentify(account.address);
       writeCachedAccount(account.address, paymentNetwork, solanaAddress);
     }
   }, [account?.address, paymentNetwork, solanaAddress]);
@@ -302,7 +300,6 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
 
   const handleDisconnect = () => {
     clearCachedAccount();
-    mpReset();
     wallet?.disconnect();
   };
 

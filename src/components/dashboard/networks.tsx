@@ -17,7 +17,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { networkLogo, NetworkGlyph } from "@/lib/networks";
+import { networkLogo, NetworkGlyph } from "@/contexts/Network";
 
 export function toggleNetworkSelection(
   selected: readonly string[],

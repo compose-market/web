@@ -2,11 +2,14 @@ export const CHAIN_IDS = {
   // avalancheFuji: 43113,
   avalanche: 43114,
   // arbitrumTestnet: 421614,
-  // arbitrum: 42161,
-  arcTestnet: 5042002,
-  // arc: 5042,
+  arbitrum: 42161,
+  arc: 5042,
+  // arcTestnet: 5042002,
+  baseSepolia: 84532,
+  base: 8453,
   // seiTestnet: 1328,
   sei: 1329,
+  tempoModerato: 42431,
 } as const;
 
 export type ChainId = (typeof CHAIN_IDS)[keyof typeof CHAIN_IDS];
@@ -15,11 +18,14 @@ export const USDC_ADDRESSES: Record<number, `0x${string}`> = {
   // [CHAIN_IDS.avalancheFuji]: "0x5425890298aed601595a70AB815c96711a31Bc65",
   [CHAIN_IDS.avalanche]: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
   // [CHAIN_IDS.arbitrumTestnet]: "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
-  // [CHAIN_IDS.arbitrum]: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
-  [CHAIN_IDS.arcTestnet]: "0x3600000000000000000000000000000000000000",
-  // [CHAIN_IDS.arc]: "0x3600000000000000000000000000000000000000",
+  [CHAIN_IDS.arbitrum]: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+  // [CHAIN_IDS.arcTestnet]: "0x3600000000000000000000000000000000000000",
+  [CHAIN_IDS.arc]: "0x3600000000000000000000000000000000000000",
+  [CHAIN_IDS.baseSepolia]: "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
+  [CHAIN_IDS.base]: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
   // [CHAIN_IDS.seiTestnet]: "0x4fCF1784B31630811181f670Aea7A7bEF803eaED",
   [CHAIN_IDS.sei]: "0xe15fC38F6D8c56aF07bbCBe3BAf5708A2Bf42392",
+  [CHAIN_IDS.tempoModerato]: "0x20c0000000000000000000006a37DA5C996874BE",
 };
 
 export const CHAIN_CONFIG: Record<number, {
@@ -36,14 +42,31 @@ export const CHAIN_CONFIG: Record<number, {
     color: "red",
   },
   // [CHAIN_IDS.arbitrumTestnet]: { name: "Arbitrum Sepolia", isTestnet: true, explorer: "https://sepolia.arbiscan.io", color: "cyan", },
-  // [CHAIN_IDS.arbitrum]: { name: "Arbitrum One", isTestnet: false, explorer: "https://arbiscan.io", color: "cyan", },
-  [CHAIN_IDS.arcTestnet]: {
-    name: "Arc Testnet",
-    isTestnet: true,
-    explorer: "https://testnet.arcscan.app",
+  [CHAIN_IDS.arbitrum]: {
+    name: "Arbitrum One",
+    isTestnet: false,
+    explorer: "https://arbiscan.io",
     color: "cyan",
   },
-  // [CHAIN_IDS.arc]: { name: "Arc", isTestnet: false, explorer: "https://arcscan.app", color: "cyan", },
+  // [CHAIN_IDS.arcTestnet]: {    name: "Arc Testnet",    isTestnet: true,    explorer: "https://testnet.arcscan.app",    color: "cyan",  },
+  [CHAIN_IDS.arc]: {
+    name: "Arc",
+    isTestnet: false,
+    explorer: "https://arcscan.app",
+    color: "cyan",
+  },
+  [CHAIN_IDS.baseSepolia]: {
+    name: "Base Sepolia",
+    isTestnet: true,
+    explorer: "https://sepolia.basescan.org",
+    color: "blue",
+  },
+  [CHAIN_IDS.base]: {
+    name: "Base",
+    isTestnet: false,
+    explorer: "https://basescan.org",
+    color: "blue",
+  },
   // [CHAIN_IDS.seiTestnet]: { name: "Sei Testnet", isTestnet: true, explorer: "https://testnet.seistream.app", color: "red", },
   [CHAIN_IDS.sei]: {
     name: "Sei",
@@ -51,15 +74,23 @@ export const CHAIN_CONFIG: Record<number, {
     explorer: "https://seistream.app",
     color: "red",
   },
+  [CHAIN_IDS.tempoModerato]: {
+    name: "Tempo Moderato",
+    isTestnet: true,
+    explorer: "https://explore.testnet.tempo.xyz",
+    color: "black",
+  },
 };
 
 export const SUPPORTED_CHAIN_IDS = [
   // CHAIN_IDS.avalancheFuji,
   CHAIN_IDS.avalanche,
   // CHAIN_IDS.arbitrumTestnet,
-  // CHAIN_IDS.arbitrum,
-  CHAIN_IDS.arcTestnet,
-  // CHAIN_IDS.arc,
+  CHAIN_IDS.arbitrum,
+  // CHAIN_IDS.arcTestnet,
+  CHAIN_IDS.arc,
+  CHAIN_IDS.baseSepolia,
+  CHAIN_IDS.base,
   // CHAIN_IDS.seiTestnet,
   CHAIN_IDS.sei,
 ] as const;
@@ -89,18 +120,21 @@ export const CONTRACT_ADDRESSES = {
   // [CHAIN_IDS.avalancheFuji]: { ...SHARED_COMPOSE_CONTRACTS },
   [CHAIN_IDS.avalanche]: { ...SHARED_COMPOSE_CONTRACTS },
   // [CHAIN_IDS.arbitrumTestnet]: { ...SHARED_COMPOSE_CONTRACTS },
-  // [CHAIN_IDS.arbitrum]: { ...SHARED_COMPOSE_CONTRACTS },
-  [CHAIN_IDS.arcTestnet]: { ...SHARED_COMPOSE_CONTRACTS },
-  // [CHAIN_IDS.arc]: { ...SHARED_COMPOSE_CONTRACTS },
+  [CHAIN_IDS.arbitrum]: { ...SHARED_COMPOSE_CONTRACTS },
+  // [CHAIN_IDS.arcTestnet]: { ...SHARED_COMPOSE_CONTRACTS },
+  [CHAIN_IDS.arc]: { ...SHARED_COMPOSE_CONTRACTS },
+  [CHAIN_IDS.baseSepolia]: { ...SHARED_COMPOSE_CONTRACTS },
+  [CHAIN_IDS.base]: { ...SHARED_COMPOSE_CONTRACTS },
   // [CHAIN_IDS.seiTestnet]: { ...SHARED_COMPOSE_CONTRACTS },
   [CHAIN_IDS.sei]: { ...SHARED_COMPOSE_CONTRACTS },
+  [CHAIN_IDS.tempoModerato]: { ...SHARED_COMPOSE_CONTRACTS },
 } as const;
 
 export type ContractName = keyof typeof SHARED_COMPOSE_CONTRACTS;
 
 export function getContractAddress(
   contract: ContractName,
-  chainId: number = CHAIN_IDS.arcTestnet,
+  chainId: number = CHAIN_IDS.arc,
 ): Address {
   const chainContracts = CONTRACT_ADDRESSES[chainId as keyof typeof CONTRACT_ADDRESSES];
   if (!chainContracts) {

@@ -316,6 +316,21 @@ export default function AgentDetailPage() {
     const userAddress = selectedUserAddress;
     const backpackUserId = resolveBackpackUserId(userAddress);
     const prompt = inputValue.trim();
+    // Smart Contracts: an attached .sol file's SOURCE rides the message as a
+    // solidity code fence (plain input_text — the agent passes it to the
+    // audit tool itself); the file chip + upload URL keep working unchanged.
+    let message = prompt;
+    const attachedSource = attached?.file && /\.sol$/i.test(attached.file.name)
+      ? await attached.file.text().catch(() => "")
+      : "";
+    if (attachedSource && attachedSource.length <= 100_000) {
+      message = [
+        prompt || "Audit the attached smart contract.",
+        "```solidity",
+        attachedSource.trim(),
+        "```",
+      ].join("\n\n");
+    }
     const selected = new Set(selectedSlashCommands);
     const selectedControls = {
       ...(selected.has("plan") ? { plan: true } : {}),
@@ -381,7 +396,7 @@ export default function AgentDetailPage() {
       const attachmentPart = toAttachment(attached);
       await streamer.runAgent({
         agentWallet,
-        message: prompt,
+        message,
         threadId,
         userAddress: backpackUserId,
         runId: runId,

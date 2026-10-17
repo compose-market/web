@@ -115,6 +115,36 @@ function nodeTitle(node: ActivityNode): string {
 // Summary — what the node is actually doing (human-readable)
 // =============================================================================
 
+// Tool answers arrive as payload.output — the runtime's tool Message record
+// ({role: "tool", content: "<result json>"}) or a plain string. Unpack the
+// answer text so a completed tool node shows its answer, not its input.
+function toolOutputText(payload: Record<string, unknown>): string | undefined {
+    const output = payload.output;
+    if (typeof output === "string") return output;
+    if (!output || typeof output !== "object" || Array.isArray(output)) return undefined;
+    const record = output as Record<string, unknown>;
+    const direct = text(record.output) ?? text(record.message) ?? text(record.text);
+    if (direct) return direct;
+    const content = typeof record.content === "string" ? record.content : undefined;
+    if (!content) return undefined;
+    try {
+        const parsed: unknown = JSON.parse(content);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            let value = parsed as Record<string, unknown>;
+            if (
+                value.__compose_tool_result === "compacted_json"
+                && value.value && typeof value.value === "object" && !Array.isArray(value.value)
+            ) {
+                value = value.value as Record<string, unknown>;
+            }
+            return text(value.output) ?? text(value.message) ?? text(value.text) ?? content;
+        }
+        return typeof parsed === "string" ? parsed : content;
+    } catch {
+        return content;
+    }
+}
+
 function nodeSummary(node: ActivityNode): string | undefined {
     const payload = node.payload ?? {};
     const target = node.target;
@@ -135,6 +165,14 @@ function nodeSummary(node: ActivityNode): string | undefined {
         return target?.summary;
     }
 
+    // A completed tool node shows its answer (payload.output / payload.message)
+    // before the generic chain — target.summary carries the tool INPUT, which
+    // would otherwise shadow the answer.
+    if (node.kind === "tool" && node.status === "completed") {
+        const answer = toolOutputText(payload) ?? text(payload.message);
+        if (answer) return truncate(answer, 120);
+    }
+
     const summary = node.text
         || target?.summary
         || text(payload.message)
@@ -149,13 +187,6 @@ function nodeSummary(node: ActivityNode): string | undefined {
             ? payload.input
             : JSON.stringify(payload.input).slice(0, 120);
         return truncate(inputStr, 120);
-    }
-
-    if (node.kind === "tool" && node.status === "completed" && payload.output) {
-        const outputStr = typeof payload.output === "string"
-            ? payload.output
-            : text(payload.message) ?? undefined;
-        if (outputStr) return truncate(outputStr, 120);
     }
 
     return undefined;

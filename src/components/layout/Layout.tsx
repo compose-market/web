@@ -21,6 +21,7 @@ import { useSession } from "@/hooks/use-session";
 import { DispenserButton } from "@/components/dispenser";
 import { NetworkSelector } from "@/components/network-selector";
 import { CostReceiptIndicator } from "@/components/receipt-indicator";
+import { NotificationsDialog } from "@/components/notifications";
 
 interface LayoutProps {
   children: ReactNode;
@@ -41,6 +42,7 @@ export function Layout({ children }: LayoutProps) {
   const [location, setLocation] = useLocation();
   const [searchOpen, setSearchOpen] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
+  const [bellOpen, setBellOpen] = useState(false);
   const hudRef = useRef<HTMLDivElement | null>(null);
   const { isConnected } = useWalletAccount();
   const { sessionActive } = useSession();
@@ -87,6 +89,18 @@ export function Layout({ children }: LayoutProps) {
               }}
             />
 
+            <div className="cm-app-chrome__hud-item" data-priority="medium">
+              <button
+                type="button"
+                className="cm-hud-button cm-hud-button--icon cm-app-chrome__search-toggle"
+                aria-label="Notifications"
+                aria-expanded={bellOpen}
+                onClick={() => setBellOpen(true)}
+              >
+                <Bell className="cm-hud-icon" size={17} />
+              </button>
+            </div>
+
             <div className="cm-app-chrome__hud-item" data-priority="low">
               <CostReceiptIndicator />
             </div>
@@ -113,6 +127,10 @@ export function Layout({ children }: LayoutProps) {
                 setOverflowOpen(false);
                 setLocation("/benchmarks");
               }}
+              onOpenNotifications={() => {
+                setOverflowOpen(false);
+                setBellOpen(true);
+              }}
             />
           </div>
         </div>
@@ -123,6 +141,8 @@ export function Layout({ children }: LayoutProps) {
           </div>
         </main>
       </div>
+
+      <NotificationsDialog open={bellOpen} onOpenChange={setBellOpen} />
     </AppShell>
   );
 }
@@ -212,10 +232,12 @@ function OverflowControl({
   open,
   onOpenChange,
   onOpenBenchmarks,
+  onOpenNotifications,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onOpenBenchmarks: () => void;
+  onOpenNotifications: () => void;
 }) {
   return (
     <div className="cm-app-chrome__hud-fold">
@@ -248,9 +270,13 @@ function OverflowControl({
               <BarChart3 className="cm-hud-icon" size={16} />
               <span className="cm-hud-label">Model Benchmarks</span>
             </button>
-            <button type="button" className="cm-hud-button w-full justify-start mt-1">
+            <button
+              type="button"
+              onClick={onOpenNotifications}
+              className="cm-hud-button w-full justify-start mt-1 text-amber-400 hover:text-amber-300"
+            >
               <Bell className="cm-hud-icon" size={16} />
-              <span className="cm-hud-label">Alerts</span>
+              <span className="cm-hud-label">Notifications</span>
             </button>
           </div>
         </div>

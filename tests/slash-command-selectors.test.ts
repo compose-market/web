@@ -58,5 +58,5 @@ test("agent send maps selector badges into existing stream controls while preser
   assert.match(agent, /selected\.has\("proof"\)/);
   assert.match(agent, /name:\s*"goal"/);
   assert.match(agent, /objective:\s*prompt/);
-  assert.match(agent, /message:\s*prompt/);
+  assert.match(agent, /let message = prompt/);
 });

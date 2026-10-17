@@ -38,7 +38,7 @@ type AppChain = FacilitatorChain & {
 
 let resolvedChains: AppChain[] = [];
 let resolvedChainObjects: Map<number, Chain> = new Map();
-let resolvedDefaultNetwork: NetworkId = "eip155:43113";
+let resolvedDefaultNetwork: NetworkId = "eip155:5042";
 
 export function isEvmNetwork(network: NetworkId | string | null | undefined): network is EvmNetworkId {
     return typeof network === "string" && network.startsWith("eip155:");

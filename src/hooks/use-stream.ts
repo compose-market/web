@@ -1124,6 +1124,22 @@ function artifactFromActivityEvent(event: ActivityEvent): Artifact | null {
     if (!isRecord(payload.artifact) || !str(payload.artifactId)) return null;
     const raw = payload.artifact;
     const kind = artifactKind(raw.type);
+    if (kind === "snippet") {
+        return {
+            id: str(raw.id) ?? str(payload.artifactId) ?? event.id,
+            artifactType: "snippet",
+            title: str(raw.title),
+            content: str(raw.content),
+            code: str(raw.code),
+            bytes: num(raw.bytes),
+            mimeType: str(raw.mimeType) ?? "text/markdown",
+            status: str(raw.status) ?? "completed",
+            sourceTool: event.target?.name ?? str(raw.sourceTool) ?? "connector",
+            source: "agent",
+            runKey: str(raw.runId) ?? event.runId,
+            raw,
+        };
+    }
     if (kind === "delivery") {
         return {
             id: str(raw.id) ?? str(payload.artifactId) ?? event.id,
@@ -1209,6 +1225,7 @@ function artifactKind(value: unknown): Artifact["artifactType"] {
     if (raw === "realtime" || raw === "output_realtime" || raw === "realtime_session") return "realtime";
     if (raw === "file") return "file";
     if (raw === "delivery") return "delivery";
+    if (raw === "snippet") return "snippet";
     return "artifact";
 }
 

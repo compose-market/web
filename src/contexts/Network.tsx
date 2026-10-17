@@ -5,8 +5,64 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { fetchChains, type FacilitatorChain, type NetworkId } from "@compose-market/sdk/chains";
+import { fetchChains, isTestnet, type FacilitatorChain, type NetworkId } from "@compose-market/sdk/chains";
 import { evmChainId, getChainByNetwork, isEvmNetwork, setChainRegistry } from "@/lib/chains";
+
+export const NETWORK_LOGOS: Record<string, string> = {
+  "eip155:43113": "/networks/avalancheFuji.jpeg",
+  "eip155:43114": "/networks/avalanche.jpeg",
+  "eip155:421614": "/networks/arbitrumSepolia.png",
+  "eip155:42161": "/networks/arbitrum.png",
+  "eip155:5042002": "/networks/arcTestnet.jpeg",
+  "eip155:5042": "/networks/arc.jpeg",
+  "eip155:84532": "/networks/baseSepolia.png",
+  "eip155:8453": "/networks/base.png",
+  "eip155:677": "/networks/botchain.jpg",
+  "eip155:1328": "/networks/seiTestnet.jpeg",
+  "eip155:1329": "/networks/sei.jpeg",
+  "eip155:4217": "/networks/tempo.png",
+  "eip155:42431": "/networks/tempoModerato.png",
+  "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1": "/networks/solanaDevnet.jpeg",
+  "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp": "/networks/solana.jpeg",
+};
+
+import React from "react";
+import { Globe } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+/** Logo URL for a CAIP-2 network id, if we have an asset for it. */
+export function networkLogo(network: string | undefined | null): string | undefined {
+  if (!network) return undefined;
+  return NETWORK_LOGOS[network];
+}
+
+/** Standardized network visual identity glyph (logo with Globe fallback). */
+export function NetworkGlyph({
+  network,
+  name,
+  className,
+}: {
+  network: string | null | undefined;
+  name?: string;
+  className?: string;
+}): React.ReactElement {
+  const logo = network ? networkLogo(network) : undefined;
+  if (logo) {
+    return React.createElement("img", {
+      src: logo,
+      alt: "",
+      className: cn("cm-network-filter__logo", className),
+      loading: "lazy",
+      decoding: "async",
+    });
+  }
+  return React.createElement(Globe, {
+    className: cn("cm-control-switcher__icon", className),
+    "aria-label": name,
+  });
+}
+
+export { NetworkGlyph as NetworkLogo };
 
 interface NetworkValue {
   selectedNetwork: NetworkId;
@@ -27,7 +83,16 @@ const STORAGE_KEY = "selected_network";
 const REGISTRY_CACHE_KEY = "chain_registry";
 const FETCH_CHAINS_TIMEOUT_MS = 8_000;
 
-const FIRST_TIME_DEFAULT: NetworkId = "eip155:5042002";
+const FIRST_TIME_DEFAULT: NetworkId = "eip155:5042";
+
+function isAppAllowedChain(c: FacilitatorChain): boolean {
+  return !isTestnet(c) || c.network === "eip155:84532";
+}
+
+function isBlockedAppNetwork(network: string): boolean {
+  if (network === "eip155:84532") return false;
+  return isTestnet(network);
+}
 
 interface CachedChainRegistry {
   chains: FacilitatorChain[];
@@ -50,7 +115,14 @@ function readCachedRegistry(): CachedChainRegistry | null {
     const parsed = JSON.parse(raw) as CachedChainRegistry;
     if (!Array.isArray(parsed?.chains) || parsed.chains.length === 0) return null;
     if (typeof parsed?.defaultNetwork !== "string" || !parsed.defaultNetwork) return null;
-    return parsed;
+    const filteredChains = parsed.chains.filter(isAppAllowedChain);
+    if (filteredChains.length === 0) return null;
+    const defaultAllowed = filteredChains.some((c) => c.network === parsed.defaultNetwork);
+    return {
+      chains: filteredChains,
+      defaultNetwork: defaultAllowed ? parsed.defaultNetwork : FIRST_TIME_DEFAULT,
+      fetchedAt: parsed.fetchedAt,
+    };
   } catch {
     return null;
   }
@@ -70,7 +142,7 @@ function writeCachedRegistry(chains: FacilitatorChain[], defaultNetwork: Network
 function initialNetwork(_defaultNetwork: NetworkId): NetworkId {
   if (typeof window !== "undefined") {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) return stored as NetworkId;
+    if (stored && !isBlockedAppNetwork(stored)) return stored as NetworkId;
   }
   return FIRST_TIME_DEFAULT;
 }
@@ -86,7 +158,7 @@ export function ChainProvider({ children }: { children: ReactNode }) {
   });
   const [chains, setChains] = useState<FacilitatorChain[]>(cachedRegistry?.chains ?? []);
   const [defaultNetwork, setDefaultNetwork] = useState<NetworkId>(
-    cachedRegistry?.defaultNetwork ?? "eip155:43113",
+    cachedRegistry?.defaultNetwork ?? "eip155:5042",
   );
   const [isLoading, setIsLoading] = useState(!cachedRegistry);
   const [error, setError] = useState<Error | null>(null);
@@ -98,10 +170,14 @@ export function ChainProvider({ children }: { children: ReactNode }) {
     fetchChains({ signal: controller.signal }).then(
       (result) => {
         if (!current) return;
-        setChainRegistry(result.chains, result.defaultNetwork);
-        writeCachedRegistry(result.chains, result.defaultNetwork);
-        setChains(result.chains);
-        setDefaultNetwork(result.defaultNetwork);
+        const appChains = result.chains.filter(isAppAllowedChain);
+        const appDefaultNetwork = appChains.some((c) => c.network === result.defaultNetwork)
+          ? result.defaultNetwork
+          : (appChains[0]?.network ?? FIRST_TIME_DEFAULT);
+        setChainRegistry(appChains, appDefaultNetwork);
+        writeCachedRegistry(appChains, appDefaultNetwork);
+        setChains(appChains);
+        setDefaultNetwork(appDefaultNetwork);
         setIsLoading(false);
       },
       (err: unknown) => {
@@ -135,12 +211,13 @@ export function ChainProvider({ children }: { children: ReactNode }) {
     getChainByNetwork(network) ?? chains.find((c) => c.network === network);
 
   const [selectedNetwork, setSelectedNetworkState] = useState<NetworkId>(
-    () => initialNetwork("eip155:5042002"),
+    () => initialNetwork("eip155:5042"),
   );
 
   useEffect(() => {
     if (!isLoading && chains.length > 0) {
       setSelectedNetworkState((prev) => {
+        if (isBlockedAppNetwork(prev)) return defaultNetwork;
         const chain = getChainByNetworkId(prev);
         if (chain) return prev;
         return defaultNetwork;

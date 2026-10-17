@@ -8,7 +8,7 @@ import { useChain } from "@/contexts/Network";
 import type { NetworkId } from "@compose-market/sdk/chains";
 import { useMultiChainBalance } from "@/hooks/use-multichain";
 import { useSelectedUserAddress } from "@/hooks/use-address";
-import { NetworkGlyph, NetworkLogo } from "@/lib/networks";
+import { NetworkGlyph, NetworkLogo } from "@/contexts/Network";
 import {
     Select,
     SelectContent,

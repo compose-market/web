@@ -72,7 +72,7 @@ export interface ConnectorRequest {
 
 export interface Artifact {
     id: string;
-    artifactType: "image" | "audio" | "video" | "embedding" | "realtime" | "file" | "artifact" | "delivery";
+    artifactType: "image" | "audio" | "video" | "embedding" | "realtime" | "file" | "artifact" | "delivery" | "snippet";
     url?: string;
     inline?: boolean;
     partial?: boolean;
@@ -99,6 +99,8 @@ export interface Artifact {
     taskId?: string;
     taskTitle?: string;
     agentWallet?: string;
+    /** Snippet artifacts (smart contracts): the verbatim contract source. */
+    code?: string;
 }
 
 export type MessageBlock =
