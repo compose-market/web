@@ -108,6 +108,30 @@ interface OpeningResponse {
 
 const modelCards = new Map<string, Promise<CatalogModel | null>>();
 
+export function seedModelCards(
+    models: readonly CatalogModel[],
+    options?: { overwrite?: boolean },
+): void {
+    const overwrite = options?.overwrite ?? false;
+    for (const model of models) {
+        if (model?.modelId && (overwrite || !modelCards.has(model.modelId))) {
+            modelCards.set(model.modelId, Promise.resolve(model));
+        }
+    }
+}
+
+export function seedModelCardPromise(
+    model: string,
+    pending: Promise<CatalogModel>,
+): Promise<CatalogModel> {
+    const guarded = pending.catch(() => {
+        modelCards.delete(model);
+        return null;
+    });
+    modelCards.set(model, guarded);
+    return pending;
+}
+
 function modelId(params: ResponsesCreateParams): string | null {
     const value = (params as { model?: unknown }).model;
     return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;

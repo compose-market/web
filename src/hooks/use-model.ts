@@ -17,6 +17,7 @@ import {
     type SemanticModelHit,
 } from "@/lib/models";
 import { sdk } from "@/lib/sdk";
+import { seedModelCardPromise, seedModelCards } from "@/hooks/use-stream";
 import { durableQueryMeta, DURABLE_CACHE_MAX_AGE } from "@/lib/queryClient";
 import { fetchModelCatalogHealth, fetchModelCatalogIndex, modelsOrigin } from "@/lib/models";
 
@@ -154,6 +155,7 @@ export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
     // Manual refresh - named distinctly to avoid collision with query.refetch
     const forceRefresh = useCallback(async () => {
         queryClient.removeQueries({ queryKey: ["model-card"], type: "inactive" });
+        queryClient.removeQueries({ queryKey: ["model-params"], type: "inactive" });
         const health = await fetchModelCatalogHealth(MODELS_ORIGIN);
         queryClient.setQueryData(CATALOG_VERSION_KEY, health);
         await Promise.all([
@@ -163,6 +165,7 @@ export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
                 staleTime: Infinity,
             }),
             queryClient.refetchQueries({ queryKey: ["model-card"], type: "active" }),
+            queryClient.refetchQueries({ queryKey: ["model-params"], type: "active" }),
         ]);
     }, [queryClient]);
 
@@ -204,14 +207,21 @@ async function fetchModelResource<T>(path: string, signal: AbortSignal): Promise
 export function useModelDetails(modelId: string | null): UseModelResourceReturn<CatalogModel> {
     const result = useQuery<CatalogModel, Error>({
         queryKey: ["model-card", modelId],
-        queryFn: ({ signal }) => fetchModelResource<CatalogModel>(
-            `/v1/models/${encodeURIComponent(modelId!)}`,
-            signal,
+        queryFn: ({ signal }) => seedModelCardPromise(
+            modelId!,
+            fetchModelResource<CatalogModel>(
+                `/v1/models/${encodeURIComponent(modelId!)}`,
+                signal,
+            ),
         ),
         enabled: Boolean(modelId),
         staleTime: 5 * 60 * 1000,
         gcTime: DURABLE_CACHE_MAX_AGE,
+        meta: durableQueryMeta,
     });
+    if (result.data) {
+        seedModelCards([result.data], { overwrite: true });
+    }
     return { data: result.data ?? null, isLoading: result.isLoading, error: result.error ?? null };
 }
 
@@ -223,7 +233,7 @@ export function useModelParams<T>(modelId: string | null): UseModelResourceRetur
             signal,
         ),
         enabled: Boolean(modelId),
-        staleTime: STALE_TIME,
+        staleTime: 5 * 60 * 1000,
         gcTime: DURABLE_CACHE_MAX_AGE,
         meta: durableQueryMeta,
     });

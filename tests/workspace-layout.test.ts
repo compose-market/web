@@ -183,10 +183,10 @@ test("model card owns its responsive styles in the theme module", () => {
   assert.match(card, /<ModelPricing key=\{`price-\$\{section\.header\}-\$\{index\}`\} unit=\{section\.unit\}>/);
   assert.match(card, /role="radiogroup"/);
   assert.match(card, /role="radio"/);
-  assert.match(card, /definition\.default \?\? definition\.options\[0\]/);
+  assert.doesNotMatch(card, /definition\.default \?\? definition\.options\[0\]/);
   assert.doesNotMatch(card, /@\/components\/ui\/select|SelectTrigger|SelectContent|SelectItem/);
   assert.match(playground, /definition\.default !== undefined/);
-  assert.match(playground, /definition\.options && definition\.options\.length > 0/);
+  assert.doesNotMatch(playground, /values\[key\] = definition\.options\[0\]/);
   assert.match(card, /lines=\{2\}/);
   assert.doesNotMatch(card, /modelInfo\?\.modelId/);
   assert.doesNotMatch(card, /<FieldValue value=\{entry\.value\} unit=\{section\.unit\}/);

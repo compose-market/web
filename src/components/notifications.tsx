@@ -30,6 +30,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useSelectedUserAddress } from "@/hooks/use-address";
 import { Switcher, type Option } from "@/components/control";
+import { PoweredByChainGpt } from "@/components/chaingpt";
 import { sdk } from "@/lib/sdk";
 import type {
     ChannelName,
@@ -653,12 +654,15 @@ export function NotificationsDialog({
                                 </div>
                             );
                         })}
-
-                        <p className="text-xs text-muted-foreground text-center pt-2 flex-shrink-0">
-                            Commands and digests arrive through your connected channel routes.
-                        </p>
                     </div>
                 )}
+
+                <div className="flex-shrink-0 border-t border-border/40 pt-2.5 mt-1 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-[11px] text-muted-foreground">
+                        Commands and digests arrive through your connected channel routes.
+                    </p>
+                    <PoweredByChainGpt className="ml-auto" />
+                </div>
             </DialogContent>
         </Dialog>
     );

@@ -90,13 +90,14 @@ function renderParamInput(
     const inputType = Array.isArray(definition.type) ? definition.type[0] : definition.type;
     if (definition.options && definition.options.length > 0) {
         const selected = value === undefined
-            ? definition.default ?? definition.options[0]
+            ? definition.default
             : value;
+        const canDeselect = !definition.required && definition.default === undefined;
         return (
             <>
                 <div className="cm-model-card__option-grid cm-model-card__option-grid--desktop" role="radiogroup" aria-label={key}>
                     {definition.options.map((option) => {
-                        const active = String(selected) === String(option);
+                        const active = selected !== undefined && String(selected) === String(option);
                         return (
                             <button
                                 key={`${key}-${option}`}
@@ -105,7 +106,7 @@ function renderParamInput(
                                 aria-checked={active}
                                 className="cm-model-card__option"
                                 data-active={active ? "true" : "false"}
-                                onClick={() => onChange(option)}
+                                onClick={() => onChange(active && canDeselect ? undefined : option)}
                             >
                                 <Hint label={String(option)}>
                                     <span>{String(option)}</span>
@@ -116,10 +117,12 @@ function renderParamInput(
                 </div>
                 <div className="cm-model-card__option-select-container cm-model-card__option-select-container--mobile">
                     <select
-                        value={String(selected)}
+                        value={selected === undefined ? "" : String(selected)}
                         onChange={(e) => {
                             const val = e.target.value;
-                            if (inputType === "integer") {
+                            if (val === "") {
+                                onChange(undefined);
+                            } else if (inputType === "integer") {
                                 onChange(Number.parseInt(val, 10));
                             } else if (inputType === "number") {
                                 onChange(Number.parseFloat(val));
@@ -129,6 +132,9 @@ function renderParamInput(
                         }}
                         className="cm-model-card__option-select"
                     >
+                        {canDeselect && (
+                            <option value="">Default</option>
+                        )}
                         {definition.options.map((option) => (
                             <option key={`${key}-select-${option}`} value={String(option)}>
                                 {String(option)}

@@ -77,6 +77,7 @@ import {
 import type { Artifact, AttachedFile, ChatActivityState, ConnectorRequest, Message, MessageBlock, Plan } from "@/hooks/use-chat";
 import { DeliveryCard } from "@/components/delivery";
 import { SnippetCard } from "@/components/snippet";
+import { PoweredByChainGpt, usedWeb3Chatbot } from "@/components/chaingpt";
 
 // Re-export for convenience
 export type { Message, AttachedFile };
@@ -1128,6 +1129,8 @@ const messageVariantStyles = {
     },
 };
 
+export { usedWeb3Chatbot };
+
 function MessageItemInner({
     message,
     messages,
@@ -1156,6 +1159,8 @@ function MessageItemInner({
         && !hasStreamMedia
         && (message.type === "image" || message.type === "audio" || message.type === "video");
     const hasText = message.content.trim().length > 0;
+    const hasTextBlock = hasBlocks && Boolean(message.blocks?.some((block) => block.type === "text" && block.text.trim().length > 0));
+    const showChainGptAttribution = !isUser && (hasText || hasTextBlock) && usedWeb3Chatbot(message.activity);
     const shouldRenderText = message.type === "embedding"
         || isLoadingMedia
         || (isUser ? hasText || !hasDirectMedia : hasText && !hasBlocks);
@@ -1298,6 +1303,12 @@ function MessageItemInner({
                 {hasDirectMedia && <DirectMedia message={message} />}
 
                 {!hasBlocks && !!message.artifacts?.length && <ArtifactBlock artifacts={message.artifacts} onStopRealtime={onStopRealtime} />}
+
+                {showChainGptAttribution && (
+                    <div className="mt-2 pt-1.5 border-t border-border/30 flex items-center justify-end">
+                        <PoweredByChainGpt />
+                    </div>
+                )}
             </div>
 
             {isUser && (

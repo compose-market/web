@@ -48,7 +48,7 @@ import { useModelDetails, useModelParams, useModels } from "@/hooks/use-model";
 import { CostReceiptIndicator } from "@/components/receipt-indicator";
 import { Switcher, type Option } from "@/components/control";
 import { useToast } from "@/hooks/use-toast";
-import { useStream, type StreamCallOptions } from "@/hooks/use-stream";
+import { seedModelCards, useStream, type StreamCallOptions } from "@/hooks/use-stream";
 import { useRegistryMeta } from "@/hooks/use-registry";
 import { useSelectedUserAddress } from "@/hooks/use-address";
 import {
@@ -86,10 +86,6 @@ function getDefaultParamValues(schema: ModelParamsSchema | null): Record<string,
     if (definition.required === true || values[key] !== undefined) continue;
     if (definition.default !== undefined) {
       values[key] = definition.default;
-      continue;
-    }
-    if (definition.options && definition.options.length > 0) {
-      values[key] = definition.options[0];
     }
   }
   return values;
@@ -319,6 +315,11 @@ export default function PlaygroundPage() {
     }
     return selectedModelDetails ?? selectedModelIndex;
   }, [selectedModelDetails, selectedModelIndex]);
+  useEffect(() => {
+    if (selectedModelDetails && selectedModelInfo) {
+      seedModelCards([selectedModelInfo], { overwrite: true });
+    }
+  }, [selectedModelDetails, selectedModelInfo]);
   const { data: rawModelParams } = useModelParams<ModelParamsSchema>(selectedModel);
   const modelParams = useMemo(() => (
     rawModelParams && Object.keys(rawModelParams.params).length > 0 ? rawModelParams : null

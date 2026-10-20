@@ -14,6 +14,7 @@ import { Download, FileCode2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { MarkdownRenderer } from "@/lib/performance/markdown";
+import { PoweredByChainGpt } from "@/components/chaingpt";
 import type { Artifact } from "@/hooks/use-chat";
 
 export interface SnippetCardProps {
@@ -37,8 +38,11 @@ export function SnippetCard({ artifact, defaultExpanded = false }: SnippetCardPr
     const code = artifact.code ?? "";
 
     const download = useCallback((extension: "md" | "sol") => {
-        const body = extension === "sol" ? code : content;
-        if (!body) return;
+        const rawBody = extension === "sol" ? code : content;
+        if (!rawBody) return;
+        const body = extension === "md" && !rawBody.includes("chaingpt.org")
+            ? `${rawBody.trimEnd()}\n\n---\n_Powered by [ChainGPT](https://www.chaingpt.org)_\n`
+            : rawBody;
         const blob = new Blob([body], {
             type: extension === "sol" ? "text/plain;charset=utf-8" : "text/markdown;charset=utf-8",
         });
@@ -111,6 +115,9 @@ export function SnippetCard({ artifact, defaultExpanded = false }: SnippetCardPr
                         {content.slice(0, 220) || code.slice(0, 220) || "Snippet stored — expand to read, or download the .sol / .md files."}
                     </p>
                 )}
+            </div>
+            <div className="flex items-center justify-end border-t border-border/40 bg-background/40 px-4 py-2">
+                <PoweredByChainGpt />
             </div>
         </div>
     );
