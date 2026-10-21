@@ -232,3 +232,23 @@ export function writeAgentSnapshot(
     catalogMemoryCache.set(key, { version, items: agents, lastUpdated, updatedAt: Date.now() });
     writeCatalogSnapshot(key, version, agents, lastUpdated);
 }
+
+export function readModelSnapshot(origin: string): CatalogSnapshot<CatalogModel> | null {
+    const key = `models:catalog:${origin}`;
+    const mem = catalogMemoryCache.get(key) as CatalogSnapshot<CatalogModel> | undefined;
+    if (mem && isFresh(mem.updatedAt)) return mem;
+    const disk = readCatalogSnapshot(key, isCatalogModel);
+    if (disk) catalogMemoryCache.set(key, disk);
+    return disk;
+}
+
+export function writeModelSnapshot(
+    origin: string,
+    version: string,
+    models: CatalogModel[],
+    lastUpdated: string | null = null,
+): void {
+    const key = `models:catalog:${origin}`;
+    catalogMemoryCache.set(key, { version, items: models, lastUpdated, updatedAt: Date.now() });
+    writeCatalogSnapshot(key, version, models, lastUpdated);
+}
