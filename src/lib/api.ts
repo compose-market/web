@@ -1,6 +1,4 @@
-import { sdk } from "./sdk";
-
-type SdkFetchInit = Parameters<typeof sdk.fetch>[1];
+type SdkFetchInit = Parameters<typeof import("./sdk").sdk.fetch>[1];
 
 export function normalizeSdkFetchInit(init?: RequestInit): SdkFetchInit {
   if (!init) {
@@ -14,5 +12,6 @@ export function normalizeSdkFetchInit(init?: RequestInit): SdkFetchInit {
 }
 
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  const { sdk } = await import("./sdk");
   return sdk.fetch(path, normalizeSdkFetchInit(init));
 }
