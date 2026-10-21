@@ -126,14 +126,44 @@ export function shouldAttachPersistedKey(url: URL): boolean {
     return false;
 }
 
-const env = import.meta.env ?? {};
-const baseUrl = (env.VITE_API_URL ?? "https://api.compose.market").replace(/\/+$/, "");
-const channelsUrl = (env.VITE_CHANNELS_URL ?? "https://services.compose.market").replace(/\/+$/, "");
+const apiAuthenticatedFetch: typeof fetch = (input, init) => {
+    const rawUrl = typeof input === "string"
+        ? input
+        : input instanceof URL
+            ? input.toString()
+            : input.url;
+
+    try {
+        const parsed = new URL(rawUrl, API_BASE_URL);
+        if (shouldAttachPersistedKey(parsed)) {
+            const headers = new Headers(
+                init?.headers ?? (typeof Request !== "undefined" && input instanceof Request ? input.headers : undefined),
+            );
+            if (!headers.has("Authorization")) {
+                const headerOwner = headers.get("x-session-user-address") ?? parsed.searchParams.get("userAddress");
+                const headerNetwork = (headers.get("x-network-id") ?? parsed.searchParams.get("network")) as NetworkId | null;
+                const token = findPersistedSessionKey(headerOwner, headerNetwork);
+                if (token) {
+                    headers.set("Authorization", `Bearer ${token}`);
+                    return globalThis.fetch(input, { ...init, headers });
+                }
+            }
+        }
+    } catch {
+        // Non-URL input falls through untouched.
+    }
+
+    return globalThis.fetch(input, init);
+};
 
 export const sdk = new ComposeSDK({
-    baseUrl,
-    channelsUrl,
+    baseUrl: API_BASE_URL,
+    agentsUrl: AGENTS_BASE_URL,
+    connectorsUrl: CONNECTORS_BASE_URL,
+    runtimeUrl: RUNTIME_BASE_URL,
+    channelsUrl: CHANNELS_BASE_URL,
     userAgent: "compose-market-web",
+    fetch: apiAuthenticatedFetch,
     // The in-app UI does its own retries for non-idempotent mutations, so
     // cap the SDK retries at 2 for safe idempotent paths and 0 for the
     // rest (keys.revoke / keys.create already mark themselves doNotRetry
@@ -141,4 +171,4 @@ export const sdk = new ComposeSDK({
     retry: { maxRetries: 2, initialDelayMs: 400, maxDelayMs: 6_000, jitter: true },
 });
 
-export const API_BASE_URL = sdk.baseUrl;
+export { API_BASE_URL, AGENTS_BASE_URL, CONNECTORS_BASE_URL, RUNTIME_BASE_URL };
