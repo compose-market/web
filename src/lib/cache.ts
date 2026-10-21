@@ -193,3 +193,42 @@ function writeCatalogSnapshot<T>(
         // Quota / private-mode failures are non-fatal.
     }
 }
+
+function isDirectoryAgent(value: unknown): value is DirectoryAgent {
+    return Boolean(
+        value
+        && typeof value === "object"
+        && typeof (value as { walletAddress?: unknown }).walletAddress === "string",
+    );
+}
+
+function isCatalogModel(value: unknown): value is CatalogModel {
+    return Boolean(
+        value
+        && typeof value === "object"
+        && typeof (value as { modelId?: unknown }).modelId === "string"
+        && typeof (value as { provider?: unknown }).provider === "string",
+    );
+}
+
+const catalogMemoryCache = new Map<string, CatalogSnapshot<unknown>>();
+
+export function readAgentSnapshot(origin: string): CatalogSnapshot<DirectoryAgent> | null {
+    const key = `agents:catalog:${origin}`;
+    const mem = catalogMemoryCache.get(key) as CatalogSnapshot<DirectoryAgent> | undefined;
+    if (mem && isFresh(mem.updatedAt)) return mem;
+    const disk = readCatalogSnapshot(key, isDirectoryAgent);
+    if (disk) catalogMemoryCache.set(key, disk);
+    return disk;
+}
+
+export function writeAgentSnapshot(
+    origin: string,
+    version: string,
+    agents: DirectoryAgent[],
+    lastUpdated: string | null = null,
+): void {
+    const key = `agents:catalog:${origin}`;
+    catalogMemoryCache.set(key, { version, items: agents, lastUpdated, updatedAt: Date.now() });
+    writeCatalogSnapshot(key, version, agents, lastUpdated);
+}
