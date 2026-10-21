@@ -39,6 +39,9 @@ export default defineConfig(() => ({
       },
       output: {
         manualChunks(id: string) {
+          if (id.includes("preload-helper")) {
+            return "preload-helper";
+          }
           if (id.includes("node_modules/react-dom/") || id.includes("node_modules/react/")) {
             return "vendor-react";
           }
