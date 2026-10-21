@@ -144,3 +144,52 @@ function isFresh(updatedAt: unknown): updatedAt is number {
         && updatedAt > 0
         && Date.now() - updatedAt < SNAPSHOT_MAX_AGE_MS;
 }
+
+function readCatalogSnapshot<T>(
+    storageKey: string,
+    validate: (item: unknown) => item is T,
+): CatalogSnapshot<T> | null {
+    if (!canUseStorage()) return null;
+    try {
+        const raw = localStorage.getItem(storageKey);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as Partial<CatalogSnapshot<T>>;
+        if (
+            typeof parsed?.version !== "string"
+            || !parsed.version
+            || !Array.isArray(parsed.items)
+            || parsed.items.length === 0
+            || !isFresh(parsed.updatedAt)
+        ) {
+            return null;
+        }
+        if (!parsed.items.every(validate)) return null;
+        return {
+            version: parsed.version,
+            items: parsed.items,
+            lastUpdated: typeof parsed.lastUpdated === "string" ? parsed.lastUpdated : null,
+            updatedAt: parsed.updatedAt,
+        };
+    } catch {
+        return null;
+    }
+}
+
+function writeCatalogSnapshot<T>(
+    storageKey: string,
+    version: string,
+    items: T[],
+    lastUpdated: string | null = null,
+): void {
+    if (!canUseStorage() || !version || items.length === 0) return;
+    try {
+        localStorage.setItem(storageKey, JSON.stringify({
+            version,
+            items,
+            lastUpdated,
+            updatedAt: Date.now(),
+        } satisfies CatalogSnapshot<T>));
+    } catch {
+        // Quota / private-mode failures are non-fatal.
+    }
+}
