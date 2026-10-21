@@ -56,6 +56,49 @@ function isComposeTokenUnexpired(token: string): boolean {
     return true;
 }
 
+/**
+ * Looks up a valid, unexpired persisted Compose Key JWT in `localStorage`
+ * without mutating `sdk`'s active per-network token slot.
+ */
+export function findPersistedSessionKey(
+    owner?: string | null,
+    preferredNetwork?: NetworkId | null,
+): string | null {
+    try {
+        const storage = globalThis.localStorage;
+        if (!storage) return null;
+
+        const candidates: string[] = [];
+        if (owner) {
+            candidates.push(normalizeOwner(owner));
+        } else {
+            const cached = readCachedAccount();
+            if (cached?.address) candidates.push(normalizeOwner(cached.address));
+            if (cached?.solanaAddress) candidates.push(normalizeOwner(cached.solanaAddress));
+        }
+        if (candidates.length === 0) return null;
+
+        if (preferredNetwork) {
+            for (const candidate of candidates) {
+                const exact = storage.getItem(`${TOKEN_PREFIX}${candidate}:${preferredNetwork}`);
+                if (exact && isComposeTokenUnexpired(exact)) return exact;
+            }
+        }
+
+        for (let i = 0; i < storage.length; i += 1) {
+            const key = storage.key(i);
+            if (!key || !key.startsWith(TOKEN_PREFIX)) continue;
+            const matched = candidates.some((candidate) => key.startsWith(`${TOKEN_PREFIX}${candidate}:`));
+            if (!matched) continue;
+            const token = storage.getItem(key);
+            if (token && isComposeTokenUnexpired(token)) return token;
+        }
+    } catch {
+        return null;
+    }
+    return null;
+}
+
 const env = import.meta.env ?? {};
 const baseUrl = (env.VITE_API_URL ?? "https://api.compose.market").replace(/\/+$/, "");
 const channelsUrl = (env.VITE_CHANNELS_URL ?? "https://services.compose.market").replace(/\/+$/, "");
