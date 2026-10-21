@@ -106,6 +106,26 @@ export function hasSessionAuth(
     return Boolean(sdk.keys.currentToken() || findPersistedSessionKey(owner, preferredNetwork));
 }
 
+function matchesAuthPrefix(pathname: string, prefixes: readonly string[]): boolean {
+    return prefixes.some((prefix) =>
+        prefix.endsWith("/")
+            ? pathname.startsWith(prefix)
+            : pathname === prefix || pathname.startsWith(`${prefix}/`),
+    );
+}
+
+export function shouldAttachPersistedKey(url: URL): boolean {
+    const apiOrigin = new URL(API_BASE_URL).origin;
+    if (url.origin === apiOrigin) {
+        return matchesAuthPrefix(url.pathname, API_AUTH_HYDRATED_PATHS);
+    }
+    const runtimeOrigin = new URL(RUNTIME_BASE_URL).origin;
+    if (url.origin === runtimeOrigin) {
+        return matchesAuthPrefix(url.pathname, RUNTIME_AUTH_HYDRATED_PATHS);
+    }
+    return false;
+}
+
 const env = import.meta.env ?? {};
 const baseUrl = (env.VITE_API_URL ?? "https://api.compose.market").replace(/\/+$/, "");
 const channelsUrl = (env.VITE_CHANNELS_URL ?? "https://services.compose.market").replace(/\/+$/, "");
