@@ -1,5 +1,9 @@
+import type { DirectoryAgent, InferenceAnalytics, KeyRecord } from "@compose-market/sdk";
+import type { CatalogModel } from "@/lib/models";
+import type { BenchmarksApiResponse } from "@/types/benchmarks";
+
 /**
- * Last-known wallet identity cache — DISPLAY ONLY.
+ * Last-known wallet identity & synchronous snapshot caches.
  *
  * Thirdweb v5 persists only *identity* (wallet ids, in-app auth JWT), never
  * *derived state*: on every full page reload it re-authenticates the in-app
@@ -105,4 +109,38 @@ export function clearSwigCreated(adminAddress: string, network: string): void {
     } catch {
         // Ignore — nothing else to do.
     }
+}
+
+// =============================================================================
+// Platform Catalog & Owner Snapshots — Synchronous Hard-Reload Hydration
+// =============================================================================
+
+const SNAPSHOT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_ANALYTICS_ENTRIES_PER_OWNER = 4;
+
+export interface Snapshot<T> {
+    data: T;
+    updatedAt: number;
+}
+
+export interface CatalogSnapshot<T> {
+    version: string;
+    items: T[];
+    lastUpdated: string | null;
+    updatedAt: number;
+}
+
+function canUseStorage(): boolean {
+    return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+}
+
+function ownerKey(address: string): string {
+    return /^0x[0-9a-f]{40}$/i.test(address) ? address.toLowerCase() : address;
+}
+
+function isFresh(updatedAt: unknown): updatedAt is number {
+    return typeof updatedAt === "number"
+        && Number.isFinite(updatedAt)
+        && updatedAt > 0
+        && Date.now() - updatedAt < SNAPSHOT_MAX_AGE_MS;
 }
