@@ -99,6 +99,13 @@ export function findPersistedSessionKey(
     return null;
 }
 
+export function hasSessionAuth(
+    owner?: string | null,
+    preferredNetwork?: NetworkId | null,
+): boolean {
+    return Boolean(sdk.keys.currentToken() || findPersistedSessionKey(owner, preferredNetwork));
+}
+
 const env = import.meta.env ?? {};
 const baseUrl = (env.VITE_API_URL ?? "https://api.compose.market").replace(/\/+$/, "");
 const channelsUrl = (env.VITE_CHANNELS_URL ?? "https://services.compose.market").replace(/\/+$/, "");
