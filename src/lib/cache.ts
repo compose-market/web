@@ -293,3 +293,55 @@ export function writeOwnerSnapshot<T>(
         // Quota / private-mode failures are non-fatal.
     }
 }
+
+export function readBenchmarksSnapshot(apiBase: string): Snapshot<BenchmarksApiResponse> | null {
+    if (!canUseStorage()) return null;
+    try {
+        const raw = localStorage.getItem(`benchmarks:index:${apiBase}`);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as Partial<Snapshot<BenchmarksApiResponse>>;
+        if (!parsed?.data || !Array.isArray(parsed.data.data) || !isFresh(parsed.updatedAt)) {
+            return null;
+        }
+        return { data: parsed.data, updatedAt: parsed.updatedAt };
+    } catch {
+        return null;
+    }
+}
+
+export function writeBenchmarksSnapshot(apiBase: string, data: BenchmarksApiResponse): void {
+    if (!canUseStorage() || !Array.isArray(data?.data)) return;
+    try {
+        localStorage.setItem(`benchmarks:index:${apiBase}`, JSON.stringify({
+            data,
+            updatedAt: Date.now(),
+        } satisfies Snapshot<BenchmarksApiResponse>));
+    } catch {
+        // Quota / private-mode failures are non-fatal.
+    }
+}
+
+export function readCachedKeys(owner: string | null | undefined): Snapshot<KeyRecord[]> | null {
+    if (!canUseStorage() || !owner) return null;
+    try {
+        const raw = localStorage.getItem(`keys:${ownerKey(owner)}`);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as Partial<Snapshot<KeyRecord[]>>;
+        if (!Array.isArray(parsed?.data) || !isFresh(parsed.updatedAt)) return null;
+        return { data: parsed.data, updatedAt: parsed.updatedAt };
+    } catch {
+        return null;
+    }
+}
+
+export function writeCachedKeys(owner: string, keys: KeyRecord[]): void {
+    if (!canUseStorage() || !owner) return;
+    try {
+        localStorage.setItem(`keys:${ownerKey(owner)}`, JSON.stringify({
+            data: keys,
+            updatedAt: Date.now(),
+        } satisfies Snapshot<KeyRecord[]>));
+    } catch {
+        // Quota / private-mode failures are non-fatal.
+    }
+}
