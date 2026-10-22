@@ -8,12 +8,13 @@
  */
 
 import type { DirectoryAgent } from "@compose-market/sdk";
-import { sdk } from "./sdk";
-import { formatUsdcPrice, weiToUsdc } from "@/lib/performance/chains-data";
+import { AGENTS_BASE_URL } from "./performance/urls";
+import { formatUsdcPrice, weiToUsdc } from "@/lib/performance/networks";
 import type { OnchainAgent } from "@/hooks/use-onchain";
 
 const env = import.meta.env ?? {};
-const AGENTS_URL = (env.VITE_AGENTS_URL || "https://agents.compose.market").replace(/\/+$/, "");
+
+const AGENTS_URL = AGENTS_BASE_URL;
 
 // =============================================================================
 // Agents Worker catalog — models-worker parity (health -> version -> index)
@@ -76,6 +77,40 @@ export async function fetchAgentsCatalogIndex(
     throw new Error(`Incomplete agent catalog index: expected ${body.total}, received ${body.agents.length}`);
   }
   return body.agents as DirectoryAgent[];
+}
+
+export interface LatestAgentsCatalog {
+  version: string;
+  lastUpdated: string | null;
+  agents: DirectoryAgent[];
+}
+
+export async function fetchAgentsCatalogLatest(
+  origin: string,
+  fetcher: typeof fetch = fetch,
+): Promise<LatestAgentsCatalog> {
+  const response = await fetcher(`${origin}/index`, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw new Error(`Failed to load agent catalog index: ${response.status}`);
+  const body = await response.json() as Partial<{
+    version?: unknown;
+    lastUpdated?: unknown;
+    total?: unknown;
+    agents?: unknown;
+  }>;
+  if (typeof body.version !== "string" || !body.version || !Array.isArray(body.agents)) {
+    throw new Error("Invalid agent catalog index response");
+  }
+  if (typeof body.total === "number" && body.total !== body.agents.length) {
+    throw new Error(`Incomplete agent catalog index: expected ${body.total}, received ${body.agents.length}`);
+  }
+  return {
+    version: body.version,
+    lastUpdated: typeof body.lastUpdated === "string" ? body.lastUpdated : null,
+    agents: body.agents as DirectoryAgent[],
+  };
 }
 
 /**
