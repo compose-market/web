@@ -75,3 +75,14 @@ export async function writeCatalogCache<T>(key: string, value: T): Promise<void>
     // Non-fatal in private browsing or quota pressure.
   }
 }
+
+export async function deleteCatalogCache(key: string): Promise<void> {
+  memory.delete(key);
+  if (!canUseCacheStorage()) return;
+  try {
+    const cache = await caches.open(CATALOG_CACHE_NAME);
+    await cache.delete(cacheUrl(key));
+  } catch {
+    // Ignore storage cleanup failures.
+  }
+}
