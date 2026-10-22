@@ -252,3 +252,44 @@ export function writeModelSnapshot(
     catalogMemoryCache.set(key, { version, items: models, lastUpdated, updatedAt: Date.now() });
     writeCatalogSnapshot(key, version, models, lastUpdated);
 }
+
+const OWNER_SNAPSHOT_PREFIX = "owner_snap";
+
+function ownerSnapshotKey(scope: string, owner: string, suffix?: string | null): string {
+    const base = `${OWNER_SNAPSHOT_PREFIX}:${scope}:${ownerKey(owner)}`;
+    return suffix ? `${base}:${ownerKey(suffix)}` : base;
+}
+
+export function readOwnerSnapshot<T>(
+    scope: string,
+    owner: string | null | undefined,
+    suffix?: string | null,
+): Snapshot<T> | null {
+    if (!canUseStorage() || !owner) return null;
+    try {
+        const raw = localStorage.getItem(ownerSnapshotKey(scope, owner, suffix));
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as Partial<Snapshot<T>>;
+        if (parsed?.data === undefined || !isFresh(parsed.updatedAt)) return null;
+        return { data: parsed.data, updatedAt: parsed.updatedAt };
+    } catch {
+        return null;
+    }
+}
+
+export function writeOwnerSnapshot<T>(
+    scope: string,
+    owner: string | null | undefined,
+    data: T,
+    suffix?: string | null,
+): void {
+    if (!canUseStorage() || !owner) return;
+    try {
+        localStorage.setItem(ownerSnapshotKey(scope, owner, suffix), JSON.stringify({
+            data,
+            updatedAt: Date.now(),
+        } satisfies Snapshot<T>));
+    } catch {
+        // Quota / private-mode failures are non-fatal.
+    }
+}
