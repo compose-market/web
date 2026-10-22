@@ -345,3 +345,58 @@ export function writeCachedKeys(owner: string, keys: KeyRecord[]): void {
         // Quota / private-mode failures are non-fatal.
     }
 }
+
+function analyticsStorageKey(owner: string, filterKey: string): string {
+    return `analytics:${ownerKey(owner)}:${filterKey}`;
+}
+
+export function readCachedAnalytics(
+    owner: string | null | undefined,
+    filterKey: string,
+): Snapshot<InferenceAnalytics.InferenceAnalyticsResponse> | null {
+    if (!canUseStorage() || !owner) return null;
+    try {
+        const raw = localStorage.getItem(analyticsStorageKey(owner, filterKey));
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as Partial<Snapshot<InferenceAnalytics.InferenceAnalyticsResponse>>;
+        if (!parsed?.data || parsed.data.kind !== "inference" || !isFresh(parsed.updatedAt)) {
+            return null;
+        }
+        return { data: parsed.data, updatedAt: parsed.updatedAt };
+    } catch {
+        return null;
+    }
+}
+
+export function writeCachedAnalytics(
+    owner: string,
+    filterKey: string,
+    response: InferenceAnalytics.InferenceAnalyticsResponse,
+): void {
+    if (!canUseStorage() || !owner) return;
+    const prefix = `analytics:${ownerKey(owner)}:`;
+    const targetKey = analyticsStorageKey(owner, filterKey);
+    try {
+        const existing: Array<{ key: string; updatedAt: number }> = [];
+        for (let i = 0; i < localStorage.length; i += 1) {
+            const key = localStorage.key(i);
+            if (!key || !key.startsWith(prefix) || key === targetKey) continue;
+            try {
+                const parsed = JSON.parse(localStorage.getItem(key) || "{}") as { updatedAt?: number };
+                existing.push({ key, updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0 });
+            } catch {
+                existing.push({ key, updatedAt: 0 });
+            }
+        }
+        existing.sort((left, right) => right.updatedAt - left.updatedAt);
+        for (const stale of existing.slice(MAX_ANALYTICS_ENTRIES_PER_OWNER - 1)) {
+            localStorage.removeItem(stale.key);
+        }
+        localStorage.setItem(targetKey, JSON.stringify({
+            data: response,
+            updatedAt: Date.now(),
+        } satisfies Snapshot<InferenceAnalytics.InferenceAnalyticsResponse>));
+    } catch {
+        // Quota / private-mode failures are non-fatal.
+    }
+}
