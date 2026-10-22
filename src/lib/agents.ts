@@ -133,7 +133,7 @@ export async function fetchAgentCardByWallet(
 }
 
 /**
- * Immediate indexing of a freshly minted agent card (create-agent flow).
+ * Immediate indexing of a freshly minted agent card (create flow).
  * The worker fetches the card back from IPFS by CID, projects/embeds/publishes
  * the single document, and bumps the catalog version so pollers see it.
  */
