@@ -58,3 +58,20 @@ export async function readCatalogCache<T>(key: string): Promise<T | null> {
   inflight.set(key, task);
   return task;
 }
+
+export async function writeCatalogCache<T>(key: string, value: T): Promise<void> {
+  memory.set(key, value);
+  if (!canUseCacheStorage()) return;
+  try {
+    const cache = await caches.open(CATALOG_CACHE_NAME);
+    const response = new Response(JSON.stringify(value), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "public, max-age=31536000, immutable",
+      },
+    });
+    await cache.put(cacheUrl(key), response);
+  } catch {
+    // Non-fatal in private browsing or quota pressure.
+  }
+}
