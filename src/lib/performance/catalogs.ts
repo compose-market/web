@@ -29,3 +29,32 @@ export function getCatalogMemory<T>(key: string): T | null {
 export function setCatalogMemory<T>(key: string, value: T): void {
   memory.set(key, value);
 }
+
+export async function readCatalogCache<T>(key: string): Promise<T | null> {
+  const mem = memory.get(key);
+  if (mem !== undefined) return mem as T;
+  if (!canUseCacheStorage()) return null;
+
+  const existing = inflight.get(key);
+  if (existing) return existing as Promise<T | null>;
+
+  const task = (async () => {
+    try {
+      const cache = await caches.open(CATALOG_CACHE_NAME);
+      const hit = await cache.match(cacheUrl(key));
+      if (!hit || !hit.ok) return null;
+      const parsed = (await hit.json()) as T;
+      if (parsed != null) {
+        memory.set(key, parsed);
+      }
+      return parsed;
+    } catch {
+      return null;
+    } finally {
+      inflight.delete(key);
+    }
+  })();
+
+  inflight.set(key, task);
+  return task;
+}
