@@ -400,3 +400,35 @@ export function writeCachedAnalytics(
         // Quota / private-mode failures are non-fatal.
     }
 }
+
+export function purgeOwnerCaches(owner?: string | null): void {
+    if (!canUseStorage()) return;
+    try {
+        const normalized = owner ? ownerKey(owner) : null;
+        const removeKeys: string[] = [];
+        for (let i = 0; i < localStorage.length; i += 1) {
+            const key = localStorage.key(i);
+            if (!key) continue;
+            if (normalized) {
+                if (
+                    key === `keys:${normalized}`
+                    || key.startsWith(`analytics:${normalized}:`)
+                    || (key.startsWith(`${OWNER_SNAPSHOT_PREFIX}:`) && key.includes(`:${normalized}`))
+                ) {
+                    removeKeys.push(key);
+                }
+            } else if (
+                key.startsWith("keys:")
+                || key.startsWith("analytics:")
+                || key.startsWith(`${OWNER_SNAPSHOT_PREFIX}:`)
+            ) {
+                removeKeys.push(key);
+            }
+        }
+        for (const key of removeKeys) {
+            localStorage.removeItem(key);
+        }
+    } catch {
+        // Ignore storage failures during cleanup.
+    }
+}
