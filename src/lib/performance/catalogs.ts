@@ -21,3 +21,11 @@ function cacheUrl(key: string): string {
 function canUseCacheStorage(): boolean {
   return typeof window !== "undefined" && typeof caches !== "undefined";
 }
+
+export function getCatalogMemory<T>(key: string): T | null {
+  return (memory.get(key) as T | undefined) ?? null;
+}
+
+export function setCatalogMemory<T>(key: string, value: T): void {
+  memory.set(key, value);
+}
