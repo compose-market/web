@@ -488,7 +488,14 @@ export function mergeSemanticModelRanks(
     const model = exact ?? (fallback?.length === 1 ? fallback[0] : undefined);
     if (!model) continue;
 
-    const semanticScore = 600 + Math.max(0, Math.min(1, hit.score)) * 260;
+    const baseSemanticScore = 650 + Math.max(0, Math.min(1, hit.score)) * 350;
+    const semanticScore = baseSemanticScore + frontierTieBreakBonus(
+      {
+        isFrontier: model.isFrontier === true || hit.isFrontier === true,
+        isLatest: model.isLatest === true || hit.isLatest === true,
+      },
+      baseSemanticScore,
+    );
     const existing = ranked.get(modelIdentity(model.provider, model.modelId));
     ranked.set(modelIdentity(model.provider, model.modelId), {
       model,
