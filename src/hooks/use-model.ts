@@ -5,20 +5,24 @@
  * versioned Models Worker index; selected full cards and params use the API.
  */
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useCallback } from "react";
+import { type QueryClient, useIsRestoring, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo, useCallback, useEffect, useRef } from "react";
 import {
     buildTypeCategories,
     getModelTypeValues,
+    isSupersededCatalogQueryKey,
     normalizeModelSearchText,
     rankCatalogModels,
     type CatalogModel,
+    type ModelCatalogHealth,
     type ModelCategory,
     type SemanticModelHit,
 } from "@/lib/models";
 import { sdk } from "@/lib/sdk";
-import { seedModelCardPromise, seedModelCards } from "@/hooks/use-stream";
-import { durableQueryMeta, DURABLE_CACHE_MAX_AGE } from "@/lib/queryClient";
+import { clearSeededModelCards, seedModelCardPromise, seedModelCards } from "@/hooks/use-stream";
+import { readModelSnapshot, writeModelSnapshot, type CatalogSnapshot } from "@/lib/cache";
+import { getCatalogMemory, readCatalogCache, writeCatalogCache } from "@/lib/performance/catalogs";
+import { durableQueryMeta, DURABLE_CACHE_MAX_AGE, persistDurableQueries } from "@/lib/queryClient";
 import { fetchModelCatalogHealth, fetchModelCatalogIndex, modelsOrigin } from "@/lib/models";
 
 // =============================================================================
@@ -68,14 +72,39 @@ const CATALOG_VERSION_KEY = ["models-health", MODELS_ORIGIN];
 // Hook
 // =============================================================================
 
-function latestCachedCatalog(queryClient: ReturnType<typeof useQueryClient>): CatalogModel[] {
+export function pruneSupersededCatalogQueries(
+    queryClient: QueryClient,
+    origin: string,
+    activeVersion: string,
+): number {
+    const staleQueries = queryClient.getQueryCache()
+        .findAll({
+            predicate: (query) => isSupersededCatalogQueryKey(query.queryKey, origin, activeVersion),
+        });
+    if (staleQueries.length === 0) return 0;
+
+    queryClient.removeQueries({
+        predicate: (query) => isSupersededCatalogQueryKey(query.queryKey, origin, activeVersion),
+    });
+    return staleQueries.length;
+}
+
+function latestCachedCatalog(
+    queryClient: ReturnType<typeof useQueryClient>,
+    version?: string | null,
+): CatalogModel[] {
+    if (version) {
+        const exact = queryClient.getQueryData<CatalogModel[]>([...CATALOG_CACHE_PREFIX, version]);
+        if (Array.isArray(exact) && exact.length > 0) return exact;
+    }
     const current = queryClient.getQueryCache()
         .findAll({ queryKey: CATALOG_CACHE_PREFIX })
         .filter((query) => Array.isArray(query.state.data))
         .sort((left, right) => right.state.dataUpdatedAt - left.state.dataUpdatedAt)[0]
         ?.state.data;
     if (Array.isArray(current) && current.length > 0) return current as CatalogModel[];
-    return [];
+    const persisted = readModelSnapshot(MODELS_ORIGIN);
+    return persisted?.items ?? [];
 }
 
 export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
