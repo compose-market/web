@@ -137,6 +137,53 @@ function loadColdCatalog(): Promise<{ version: string; lastUpdated: string | nul
 export function useAgentCatalog(options: UseAgentCatalogOptions = {}): UseAgentCatalogReturn {
   const { enabled = true } = options;
   const client = useQueryClient();
+  const initialSnapshot = useMemo(() => {
+    const persisted = readAgentSnapshot(AGENTS_ORIGIN);
+    if (persisted) return persisted;
+    const boot = readBootCatalog();
+    if (boot && boot.agents.length > 0 && boot.version) {
+      writeAgentSnapshot(AGENTS_ORIGIN, boot.version, boot.agents, boot.lastUpdated);
+      return {
+        version: boot.version,
+        items: boot.agents,
+        lastUpdated: boot.lastUpdated,
+        updatedAt: Date.now(),
+      };
+    }
+    return null;
+  }, []);
+  const [coldSeed, setColdSeed] = useState<{
+    version: string;
+    items: DirectoryAgent[];
+    lastUpdated: string | null;
+    updatedAt: number;
+  } | null>(null);
+  const snapshot = initialSnapshot ?? coldSeed;
+
+  // Cold first load: pull single-RTT edge-cached /index (pre-kicked by index.html)
+  // without waiting for PersistQueryClientProvider IndexedDB restore or /health.
+  useEffect(() => {
+    if (!enabled || snapshot) return;
+    let active = true;
+    void loadColdCatalog().then((latest) => {
+      if (!active || !latest || latest.agents.length === 0) return;
+      const now = Date.now();
+      writeAgentSnapshot(AGENTS_ORIGIN, latest.version, latest.agents, latest.lastUpdated);
+      client.setQueryData([...AGENTS_VERSION_KEY], {
+        version: latest.version,
+        lastUpdated: latest.lastUpdated,
+        agents: latest.agents.length,
+      });
+      client.setQueryData([...AGENTS_CACHE_PREFIX, latest.version], latest.agents);
+      setColdSeed({
+        version: latest.version,
+        items: latest.agents,
+        lastUpdated: latest.lastUpdated,
+        updatedAt: now,
+      });
+    });
+    return () => { active = false; };
+  }, [client, enabled, snapshot]);
 
   const healthQuery = useQuery({
     queryKey: [...AGENTS_VERSION_KEY],
@@ -144,16 +191,22 @@ export function useAgentCatalog(options: UseAgentCatalogOptions = {}): UseAgentC
     // Background /health poll: a catalog publish or targeted upsert swaps
     // the snapshot in within one interval, non-blocking, while the old one
     // keeps rendering.
-    staleTime: 5_000,
+    initialData: snapshot
+      ? { version: snapshot.version, lastUpdated: snapshot.lastUpdated, agents: snapshot.items.length }
+      : undefined,
+    initialDataUpdatedAt: snapshot?.updatedAt,
+    staleTime: 30_000,
     gcTime: DURABLE_CACHE_MAX_AGE,
-    refetchInterval: 5_000,
-    refetchOnMount: "always",
+    refetchInterval: 60_000,
+    refetchOnMount: true,
     refetchOnWindowFocus: true,
-    enabled,
+    enabled: enabled && Boolean(snapshot),
     retry: 2,
   });
-  const version = healthQuery.data?.version ?? null;
+  const version = healthQuery.data?.version ?? snapshot?.version ?? null;
+  const lastUpdatedIso = healthQuery.data?.lastUpdated ?? snapshot?.lastUpdated ?? null;
   const cachedAgents = latestCachedAgents(client);
+  const matchingSnapshot = snapshot && version && snapshot.version === version ? snapshot : null;
 
   const {
     data: loadedAgents,
@@ -163,7 +216,15 @@ export function useAgentCatalog(options: UseAgentCatalogOptions = {}): UseAgentC
     dataUpdatedAt,
   } = useQuery<DirectoryAgent[], Error>({
     queryKey: [...AGENTS_CACHE_PREFIX, version],
-    queryFn: () => fetchAgentsCatalogIndex(AGENTS_ORIGIN, version!),
+    queryFn: async () => {
+      const fresh = await fetchAgentsCatalogIndex(AGENTS_ORIGIN, version!);
+      if (fresh.length > 0) {
+        writeAgentSnapshot(AGENTS_ORIGIN, version!, fresh, lastUpdatedIso);
+      }
+      return fresh;
+    },
+    initialData: matchingSnapshot?.items,
+    initialDataUpdatedAt: matchingSnapshot?.updatedAt,
     staleTime: Infinity,
     gcTime: DURABLE_CACHE_MAX_AGE,
     placeholderData: cachedAgents,
@@ -171,12 +232,21 @@ export function useAgentCatalog(options: UseAgentCatalogOptions = {}): UseAgentC
     enabled: enabled && Boolean(version),
     meta: durableQueryMeta,
   });
-  const agents = loadedAgents ?? cachedAgents;
+  const agents = loadedAgents ?? matchingSnapshot?.items ?? cachedAgents;
+
+  useEffect(() => {
+    if (!enabled || agents.length === 0) return;
+    const urls = catalogThumbUrls(agents);
+    if (urls.length > 0) {
+      void warmAvatars(urls, 16);
+    }
+  }, [agents, enabled]);
+
   const error = agents.length === 0 ? (catalogError ?? healthQuery.error ?? null) : null;
   // A refresh failure while cached agents render is surfaced separately so a
   // stale catalog can never silently masquerade as live.
   const refreshError = agents.length > 0 ? (catalogError ?? healthQuery.error ?? null) : null;
-  const isLoading = enabled && agents.length === 0 && (healthQuery.isLoading || isCatalogLoading);
+  const isLoading = enabled && agents.length === 0 && (!snapshot || healthQuery.isLoading || isCatalogLoading);
 
   const forceRefresh = useCallback(() => refreshAgentCatalog(), []);
 
