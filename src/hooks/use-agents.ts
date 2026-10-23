@@ -346,6 +346,40 @@ export class AgentIndexingError extends Error {
   }
 }
 
+const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+function isSolanaAddress(value: string): boolean {
+  if (value.length < 32 || value.length > 44) return false;
+  const bytes = [0];
+  for (let i = 0; i < value.length; i += 1) {
+    const digit = BASE58_ALPHABET.indexOf(value[i]!);
+    if (digit < 0) return false;
+    let carry = digit;
+    for (let j = 0; j < bytes.length; j += 1) {
+      carry += bytes[j]! * 58;
+      bytes[j] = carry & 0xff;
+      carry >>= 8;
+    }
+    while (carry > 0) {
+      bytes.push(carry & 0xff);
+      carry >>= 8;
+    }
+  }
+  let leadingZeros = 0;
+  while (leadingZeros < value.length && value[leadingZeros] === "1") leadingZeros += 1;
+  const decodedLength = leadingZeros + (bytes.length === 1 && bytes[0] === 0 ? 0 : bytes.length);
+  return decodedLength === 32;
+}
+
+function isNearAccountId(value: string): boolean {
+  if (/^coord-[0-9a-f]+\.factory\./iu.test(value)) return false;
+  if (/^0u[0123456789abcdefghjkmnpqrstvwxyz]{51}[0g]$/u.test(value)) return true;
+  if (/^0s[0-9a-fA-F]{40}$/u.test(value)) return true;
+  if (value.length < 2 || value.length > 64) return false;
+  if (/^[0-9a-f]{64}$/u.test(value)) return true;
+  return /^(([a-z\d]+[-_])*[a-z\d]+\.)+([a-z\d]+[-_])*[a-z\d]+$/u.test(value);
+}
+
 function resolveAgentIdentifier(identifier: string | null): string | null {
   const value = identifier ? decodeURIComponent(identifier).trim() : "";
   if (!value) return null;
