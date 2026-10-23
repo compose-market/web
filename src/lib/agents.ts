@@ -193,7 +193,7 @@ export function isAgentIndexing(walletAddress: string): boolean {
   }
 }
 
-// ————— Snapshot -> UI mapping (shared by market, my-assets, creator) ———————
+// ————— Snapshot -> UI mapping (shared by market, profile, creator) ———————
 
 function amount(value: string | undefined): bigint {
   const raw = value?.trim();
@@ -390,6 +390,7 @@ export interface AgentProtocol {
  * - must-warp: External agent that needs to be warped before use
  */
 export type WarpStatus = "native" | "warped" | "must-warp";
+export type AgentRole = "executor" | "coordinator";
 
 /**
  * Unified agent type across all registries
@@ -400,6 +401,7 @@ export interface Agent {
   address: string;
   name: string;
   description: string;
+  role?: AgentRole;
 
   // Registry source
   registry: AgentRegistryId;
@@ -510,6 +512,7 @@ type ManowarAgentCard = {
   schemaVersion?: string;
   name?: string;
   description?: string;
+  role?: AgentRole;
   skills?: string[];
   image?: string;
   avatar?: string;
@@ -690,6 +693,7 @@ function manowarToAgent(card: ManowarAgentCard): Agent {
     ? protocolList
     : [{ name: "x402", version: "1.0" }];
   const tags = Array.from(new Set([
+    ...(card.role ? [card.role] : []),
     ...(card.skills || []),
     ...(card.connectors || []).map((connector) => connector.origin || "").filter(Boolean),
     "onchain",
@@ -705,6 +709,7 @@ function manowarToAgent(card: ManowarAgentCard): Agent {
     address,
     name: card.name || "Unnamed Agent",
     description: card.description || "",
+    role: card.role,
     registry: "manowar",
     readme: card.description || "",
     protocols,
