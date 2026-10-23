@@ -13,7 +13,7 @@
  */
 
 import type { Model } from "@compose-market/sdk";
-import { typeClass } from "@compose-market/theme/icons/react";
+import { typeClass } from "@/lib/modalities";
 
 export type CatalogModel = Model & {
   operations?: unknown[];
@@ -41,6 +41,16 @@ export function modelsOrigin(value: string): string {
   return new URL(value).origin;
 }
 
+export function isSupersededCatalogQueryKey(
+  queryKey: readonly unknown[],
+  origin: string,
+  activeVersion: string,
+): boolean {
+  return queryKey[0] === "models-catalog"
+    && queryKey[1] === origin
+    && queryKey[2] !== activeVersion;
+}
+
 export async function fetchModelCatalogHealth(
   origin: string,
   fetcher: typeof fetch = fetch,
@@ -62,17 +72,24 @@ export async function fetchModelCatalogHealth(
   };
 }
 
+export interface FetchModelCatalogIndexOptions {
+  cache?: RequestCache;
+  signal?: AbortSignal;
+}
+
 export async function fetchModelCatalogIndex(
   origin: string,
   version: string,
   fetcher: typeof fetch = fetch,
+  options?: FetchModelCatalogIndexOptions,
 ): Promise<CatalogModel[]> {
   const target = new URL(`${origin}/index`);
   target.searchParams.set("version", version);
   const response = await fetcher(target, {
     method: "GET",
     headers: { Accept: "application/json" },
-    cache: "force-cache",
+    cache: options?.cache ?? "force-cache",
+    ...(options?.signal ? { signal: options.signal } : {}),
   });
   if (!response.ok) throw new Error(`Failed to load model catalog index: ${response.status}`);
   const body = await response.json() as Partial<ModelCatalogIndex>;
