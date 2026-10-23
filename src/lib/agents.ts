@@ -757,6 +757,7 @@ function deriveCategory(tags: string[]): string {
 async function searchAgentverse(
   options: SearchAgentsOptions
 ): Promise<{ agents: Agent[]; total: number; tags: string[]; categories: string[] }> {
+  const { sdk } = await import("./sdk");
   const data = await sdk.directory.agents.agentverse({
     search: options.search,
     category: options.category,
@@ -788,30 +789,14 @@ function getConnectorBaseUrl(): string {
 }
 
 /**
- * Search onchain connectors from the connectors broker /onchain endpoint
+ * Search onchain connectors via `sdk.connectors.onchain.list`
  */
 async function searchGoat(
   options: SearchAgentsOptions
 ): Promise<{ agents: Agent[]; total: number; tags: string[]; categories: string[] }> {
   try {
-    const response = await fetch(`${getConnectorBaseUrl()}/onchain`);
-
-    if (!response.ok) {
-      console.warn("Failed to fetch onchain connectors:", response.status);
-      return { agents: [], total: 0, tags: [], categories: [] };
-    }
-
-    const data = await response.json() as {
-      connectors?: Array<{
-        id: string;
-        name: string;
-        description: string;
-        toolCount: number;
-        requiresApiKey?: boolean;
-        apiKeyConfigured?: boolean;
-      }>;
-    };
-
+    const { sdk } = await import("./sdk");
+    const data = await sdk.connectors.onchain.list();
     const connectors = data.connectors || [];
 
     const servers: RegistryServer[] = connectors.map((p) => ({
@@ -821,11 +806,11 @@ async function searchGoat(
       namespace: "goat",
       name: p.name,
       slug: p.id,
-      description: p.description,
+      description: p.description || "",
       tags: ["goat", "defi"],
       category: "defi",
       attributes: [],
-      toolCount: p.toolCount,
+      toolCount: p.toolCount ?? p.tools?.length ?? 0,
       tools: [],
       available: true,
       executable: true,
