@@ -719,6 +719,40 @@ export function formatModelContextWindow(model: CatalogModel): string {
   return entries.map((entry) => `${entry.label}: ${entry.value}`).join(" • ");
 }
 
+function humanizePricingUnit(rawUnit: string): string {
+  const trimmed = rawUnit.trim();
+  if (!trimmed) return "";
+  const normalized = trimmed.toUpperCase();
+  const unitMap: Record<string, string> = {
+    PER_1M_TOKENS_USD: "per 1M tokens",
+    PER_1K_TOKENS_USD: "per 1K tokens",
+    PER_TOKEN_USD: "per token",
+    PER_IMAGE_USD: "per image",
+    PER_MEGAPIXEL_USD: "per megapixel",
+    PER_SECOND_USD: "per second",
+    PER_MINUTE_USD: "per minute",
+    PER_HOUR_USD: "per hour",
+    PER_REQUEST_USD: "per request",
+    PER_CALL_USD: "per call",
+    PER_CHARACTER_USD: "per character",
+    PER_1K_CHARACTERS_USD: "per 1K characters",
+    PER_1M_CHARACTERS_USD: "per 1M characters",
+    PER_VIDEO_USD: "per video",
+    PER_AUDIO_USD: "per audio",
+  };
+  if (unitMap[normalized]) {
+    return unitMap[normalized];
+  }
+  if (/^[A-Z0-9_]+$/.test(trimmed)) {
+    const cleaned = trimmed.replace(/_USD$/i, "");
+    return humanizeModelKey(cleaned)
+      .toLowerCase()
+      .replace(/\b1m\b/g, "1M")
+      .replace(/\b1k\b/g, "1K");
+  }
+  return trimmed;
+}
+
 export function getModelPricingSections(model: CatalogModel): ModelPricingSection[] {
   const pricing = asObjectValue(model.pricing);
   if (!pricing) {
@@ -735,9 +769,10 @@ export function getModelPricingSections(model: CatalogModel): ModelPricingSectio
         if (!entries) {
           return null;
         }
+        const rawUnit = typeof section.unit === "string" ? section.unit : typeof section.unitKey === "string" ? section.unitKey : "";
         return {
           header: typeof section.header === "string" ? section.header : "Pricing",
-          unit: typeof section.unit === "string" ? section.unit : typeof section.unitKey === "string" ? section.unitKey : "",
+          unit: humanizePricingUnit(rawUnit),
           default: section.default === true,
           entries: Object.entries(entries).map(([key, value]) => ({
             label: humanizeModelKey(key),
@@ -748,7 +783,7 @@ export function getModelPricingSections(model: CatalogModel): ModelPricingSectio
       .filter((section): section is ModelPricingSection => Boolean(section));
   }
 
-  const unit = typeof pricing.unit === "string" ? pricing.unit : "";
+  const unit = humanizePricingUnit(typeof pricing.unit === "string" ? pricing.unit : "");
   const entries = Object.entries(pricing)
     .filter(([key]) => key !== "unit" && key !== "notes")
     .map(([key, value]) => ({
