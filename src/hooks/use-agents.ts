@@ -434,7 +434,7 @@ export function useAgentByIdentifier(identifier: string | null): UseAgentByIdent
 }
 
 // =============================================================================
-// Creator-owned agents (my assets, RFA submissions) — snapshot + client filter
+// Creator-owned agents (Profile, RFA submissions) — snapshot + client filter
 // =============================================================================
 
 export function useAgentsByCreator(creator: string | undefined) {
