@@ -7,9 +7,8 @@
  * (durableQueryMeta) with the previous version as placeholderData — agents
  * render instantly and never vanish between fetches.
  */
-import { useMemo, useCallback } from "react";
+import { useMemo, useCallback, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { isAddress as isSolanaAddress } from "@solana/kit";
 import type { DirectoryAgent } from "@compose-market/sdk";
 import {
   AGENT_REGISTRIES,
@@ -18,6 +17,7 @@ import {
   fetchAgentCardByWallet,
   fetchAgentsCatalogHealth,
   fetchAgentsCatalogIndex,
+  fetchAgentsCatalogLatest,
   getEnabledRegistries,
   getRelevancyScore,
   isAgentIndexing,
@@ -32,6 +32,8 @@ import {
   type SearchAgentsOptions,
   type SemanticAgentHit,
 } from "@/lib/agents";
+import { readAgentSnapshot, writeAgentSnapshot } from "@/lib/cache";
+import { readBootCatalog, readBootCatalogPromise, warmAvatars } from "@/lib/performance/avatars";
 import { durableQueryMeta, DURABLE_CACHE_MAX_AGE, queryClient } from "@/lib/queryClient";
 import type { OnchainAgent } from "@/hooks/use-onchain";
 
@@ -52,7 +54,8 @@ function latestCachedAgents(client: ReturnType<typeof useQueryClient>): Director
     .sort((left, right) => right.state.dataUpdatedAt - left.state.dataUpdatedAt)[0]
     ?.state.data;
   if (Array.isArray(current) && current.length > 0) return current as DirectoryAgent[];
-  return [];
+  const persisted = readAgentSnapshot(AGENTS_ORIGIN);
+  return persisted?.items ?? [];
 }
 
 /**
@@ -66,11 +69,14 @@ export async function refreshAgentCatalog(): Promise<void> {
     const health = await fetchAgentsCatalogHealth(AGENTS_ORIGIN);
     queryClient.setQueryData([...AGENTS_VERSION_KEY], health);
     if (!health.version) return;
-    await queryClient.fetchQuery({
+    const agents = await queryClient.fetchQuery({
       queryKey: [...AGENTS_CACHE_PREFIX, health.version],
       queryFn: () => fetchAgentsCatalogIndex(AGENTS_ORIGIN, health.version!),
       staleTime: Infinity,
     });
+    if (Array.isArray(agents) && agents.length > 0) {
+      writeAgentSnapshot(AGENTS_ORIGIN, health.version, agents, health.lastUpdated);
+    }
   } catch {
     // Health or index unreachable: the 5s poll and cron sync recover.
   }
