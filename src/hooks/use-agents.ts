@@ -380,10 +380,10 @@ function isNearAccountId(value: string): boolean {
   return /^(([a-z\d]+[-_])*[a-z\d]+\.)+([a-z\d]+[-_])*[a-z\d]+$/u.test(value);
 }
 
-function resolveAgentIdentifier(identifier: string | null): string | null {
+export function resolveAgentIdentifier(identifier: string | null): string | null {
   const value = identifier ? decodeURIComponent(identifier).trim() : "";
   if (!value) return null;
-  return /^0x[a-fA-F0-9]{40}$/.test(value) || isSolanaAddress(value) ? value : null;
+  return /^0x[a-fA-F0-9]{40}$/.test(value) || isSolanaAddress(value) || isNearAccountId(value) ? value : null;
 }
 
 export interface UseAgentByIdentifierReturn {
