@@ -12,8 +12,6 @@ import { AGENTS_BASE_URL } from "./performance/urls";
 import { formatUsdcPrice, weiToUsdc } from "@/lib/performance/networks";
 import type { OnchainAgent } from "@/hooks/use-onchain";
 
-const env = import.meta.env ?? {};
-
 const AGENTS_URL = AGENTS_BASE_URL;
 
 // =============================================================================
@@ -777,18 +775,6 @@ async function searchAgentverse(
 }
 
 /**
- * Get connectors broker base URL
- */
-function getConnectorBaseUrl(): string {
-  const url = import.meta.env.VITE_CONNECTORS_URL;
-  if (url) {
-    return url.replace(/\/$/, "");
-  }
-
-  return "https://connectors.compose.market";
-}
-
-/**
  * Search onchain connectors via `sdk.connectors.onchain.list`
  */
 async function searchGoat(
@@ -1040,6 +1026,7 @@ export async function getAgent(address: string): Promise<Agent> {
     }
   }
 
+  const { sdk } = await import("./sdk");
   const data = await sdk.directory.agents.agentverse({ search: address, limit: 25 }) as unknown as AgentverseSearchResponse;
   const match = data.agents.find((agent) => {
     const full = `${agent.prefix}${agent.address}`;
