@@ -267,6 +267,8 @@ export interface SemanticModelHit {
   provider: string;
   family?: string;
   name?: string | null;
+  isFrontier?: boolean;
+  isLatest?: boolean;
   score: number;
 }
 
@@ -424,6 +426,13 @@ function modelSearchScore(model: CatalogModel, query: SearchProfile): number {
   return Math.max(nameScore, familyScore, typeScore, descriptionScore);
 }
 
+function frontierTieBreakBonus(model: Pick<CatalogModel, "isFrontier" | "isLatest">, baseScore: number): number {
+  if (baseScore >= 1_150) return 0;
+  if (model.isFrontier) return 45;
+  if (model.isLatest) return 15;
+  return 0;
+}
+
 /** Rank a catalog locally. This is intentionally deterministic and fast for 650+ rows. */
 export function rankCatalogModels(models: CatalogModel[], query: string, limit = 50): RankedCatalogModel[] {
   const profile = searchProfile(query);
@@ -432,7 +441,14 @@ export function rankCatalogModels(models: CatalogModel[], query: string, limit =
   }
 
   return models
-    .map((model, index) => ({ model, index, score: modelSearchScore(model, profile) }))
+    .map((model, index) => {
+      const baseScore = modelSearchScore(model, profile);
+      return {
+        model,
+        index,
+        score: baseScore >= 260 ? baseScore + frontierTieBreakBonus(model, baseScore) : 0,
+      };
+    })
     .filter((entry) => entry.score >= 260)
     .sort((left, right) => right.score - left.score || left.index - right.index)
     .slice(0, limit)
