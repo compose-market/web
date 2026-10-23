@@ -97,6 +97,43 @@ export interface UseAgentCatalogReturn {
   lastUpdated: Date | null;
 }
 
+function catalogThumbUrls(agents: DirectoryAgent[]): string[] {
+  const urls: string[] = [];
+  for (const agent of agents) {
+    const raw = (agent as { avatarUrl?: unknown }).avatarUrl;
+    if (typeof raw !== "string" || !/^https?:\/\//i.test(raw)) continue;
+    try {
+      const parsed = new URL(raw);
+      if (!parsed.pathname.endsWith("/avatar")) continue;
+      parsed.searchParams.delete("w");
+      parsed.searchParams.set("size", "thumb");
+      urls.push(parsed.toString());
+    } catch {
+      // Ignore malformed URLs.
+    }
+  }
+  return urls;
+}
+
+let inflightColdCatalog: Promise<{ version: string; lastUpdated: string | null; agents: DirectoryAgent[] } | null> | null = null;
+
+function loadColdCatalog(): Promise<{ version: string; lastUpdated: string | null; agents: DirectoryAgent[] } | null> {
+  if (inflightColdCatalog) return inflightColdCatalog;
+  inflightColdCatalog = (async () => {
+    const bootPromise = readBootCatalogPromise();
+    if (bootPromise) {
+      const resolved = await bootPromise;
+      if (resolved && Array.isArray(resolved.agents) && resolved.agents.length > 0 && resolved.version) {
+        return resolved;
+      }
+    }
+    return fetchAgentsCatalogLatest(AGENTS_ORIGIN);
+  })().catch(() => null).finally(() => {
+    inflightColdCatalog = null;
+  });
+  return inflightColdCatalog;
+}
+
 export function useAgentCatalog(options: UseAgentCatalogOptions = {}): UseAgentCatalogReturn {
   const { enabled = true } = options;
   const client = useQueryClient();
