@@ -1,12 +1,42 @@
 /**
  * Connectors registry hooks.
  *
- * React Query hooks that talk to the connectors broker
- * (https://connectors.compose.market) for tools and onchain connectors.
+ * Backed by the versioned `https://connectors.compose.market/index?version=`
+ * snapshot (persisted in IndexedDB via `durableQueryMeta` like `models` & `agents`)
+ * for 0 ms catalog browsing, filtering, and keystroke search, merged seamlessly
+ * with Voyage `rerank-2.5` semantic hits from `GET /?q=...&compact=1`, and
+ * `sdk.connectors.*` fallbacks for single-connector details and unindexed envs.
  */
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useCallback, useEffect, useState } from "react";
-import { normalizeConnectorBinding, type CanonicalConnectorOrigin } from "@/lib/connectors";
+import type {
+    AccountAuthMode,
+    AccountToolkit,
+    AccountToolkitAction,
+    ConnectorSearchHit,
+    McpServerCard,
+    McpServerSummary,
+    OnchainConnector,
+} from "@compose-market/sdk";
+import { type QueryClient, useIsRestoring, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo, useCallback, useEffect, useRef, useState } from "react";
+import { CONNECTORS_BASE_URL, sdk } from "@/lib/sdk";
+import { getCatalogMemory, readCatalogCache, writeCatalogCache } from "@/lib/performance/catalogs";
+import { durableQueryMeta, DURABLE_CACHE_MAX_AGE, persistDurableQueries } from "@/lib/queryClient";
+import {
+    connectorsOrigin,
+    fetchConnectorCatalogHealth,
+    fetchConnectorCatalogIndex,
+    isSupersededConnectorCatalogQueryKey,
+    mergeSemanticConnectorRanks,
+    normalizeConnectorBinding,
+    normalizeConnectorSearchText,
+    rankCatalogConnectors,
+    type CanonicalConnectorOrigin,
+    type ConnectorCatalogHealth,
+    type ConnectorCatalogIndexPayload,
+    type ConnectorCatalogMcpSummary,
+    type ConnectorCatalogOnchainSummary,
+    type SemanticConnectorHit,
+} from "@/lib/connectors";
 
 /**
  * Build the connectors broker base URL.
@@ -41,6 +71,7 @@ export interface RegistryServer {
     attributes: string[];
     repoUrl?: string;
     uiUrl?: string;
+    logo?: string;
     category?: string;
     tags: string[];
     toolCount: number;
@@ -58,6 +89,8 @@ export interface RegistryServer {
     remoteUrl?: string;
     status?: ServedCatalogStatus;
     credentialGated?: boolean;
+    authMode?: AccountAuthMode;
+    noAuth?: boolean;
 }
 
 export interface RegistryListResponse {
@@ -76,6 +109,7 @@ export interface RegistrySearchResponse {
 export interface RegistryMeta {
     totalServers: number;
     toolsServers: number;
+    accountsServers: number;
     onchainServers: number;
     loadedAt: string | null;
 }
@@ -154,9 +188,19 @@ const DEFAULT_REGISTRY_PAGE_SIZE = 50;
 const MAX_TOOLS_PAGE_SIZE = 200;
 const MAX_SEARCH_RESULTS = 50;
 
-function summaryToRegistryServer(s: BrokerServerSummary): RegistryServer {
-    const binding = normalizeConnectorBinding({ registryId: s.slug, origin: s.origin });
+const CONNECTORS_ORIGIN = connectorsOrigin(CONNECTORS_BASE_URL);
+const CATALOG_CACHE_PREFIX = ["connectors-catalog", CONNECTORS_ORIGIN] as const;
+const CATALOG_VERSION_KEY = ["connectors-health", CONNECTORS_ORIGIN] as const;
+const CONNECTOR_CATALOG_STORAGE_KEY = `connectors:catalog:${CONNECTORS_ORIGIN}`;
+
+// Warm connectors catalog from Cache Storage on module load (survives Cmd+Shift+R).
+void readCatalogCache<ConnectorCatalogIndexPayload>(CONNECTOR_CATALOG_STORAGE_KEY);
+
+function summaryToRegistryServer(s: McpServerSummary | ConnectorCatalogMcpSummary): RegistryServer {
+    const raw = s as McpServerSummary & { repoUrl?: string | null; image?: string | null };
+    const binding = normalizeConnectorBinding({ registryId: s.slug, origin: s.origin || "mcp" });
     const origin: ServerOrigin = binding.origin;
+    const status: ServedCatalogStatus = s.status === "credential_gated" ? "credential_gated" : "live";
     return {
         registryId: binding.registryId,
         origin,
@@ -164,23 +208,29 @@ function summaryToRegistryServer(s: BrokerServerSummary): RegistryServer {
         sources: [origin],
         canonicalKey: s.slug,
         name: s.name,
-        namespace: s.namespace,
+        namespace: s.namespace || origin,
         slug: s.slug,
-        description: s.description,
+        description: s.description || "",
         attributes: [],
+        repoUrl: raw.repoUrl ?? undefined,
+        image: raw.image ?? undefined,
         category: s.category ?? undefined,
-        tags: s.tags,
-        toolCount: 0,
-        available: true,
+        tags: s.tags || [],
+        toolCount: s.toolCount ?? 0,
+        available: (s as McpServerSummary).available ?? true,
         executable: true,
-        status: s.status,
-        credentialGated: s.status === "credential_gated",
+        status,
+        credentialGated: status === "credential_gated",
     };
 }
 
-function cardToRegistryServer(s: BrokerServerCard): RegistryServer {
-    const binding = normalizeConnectorBinding({ registryId: s.slug, origin: s.origin });
+function cardToRegistryServer(s: McpServerCard): RegistryServer {
+    const raw = s as McpServerCard & { repoUrl?: string | null; image?: string | null };
+    const binding = normalizeConnectorBinding({ registryId: s.slug, origin: s.origin || "mcp" });
     const origin: ServerOrigin = binding.origin;
+    const tools = s.tools || [];
+    const credentials = s.credentials || [];
+    const status: ServedCatalogStatus = s.status === "credential_gated" ? "credential_gated" : "live";
     return {
         registryId: binding.registryId,
         origin,
@@ -188,30 +238,31 @@ function cardToRegistryServer(s: BrokerServerCard): RegistryServer {
         sources: [origin],
         canonicalKey: s.slug,
         name: s.name,
-        namespace: s.namespace,
+        namespace: s.namespace || origin,
         slug: s.slug,
-        description: s.description,
+        description: s.description || "",
         attributes: [],
-        repoUrl: s.repoUrl ?? undefined,
+        repoUrl: raw.repoUrl ?? s.repositoryUrl ?? undefined,
         category: s.category ?? undefined,
-        tags: s.tags,
-        toolCount: s.tools.length,
-        tools: s.tools.map((t) => ({
+        tags: s.tags || [],
+        toolCount: s.toolCount ?? tools.length,
+        tools: tools.map((t) => ({
             name: t.name,
             description: t.description ?? undefined,
             inputSchema: t.inputSchema,
         })),
-        available: true,
+        available: s.available ?? true,
         executable: true,
-        image: s.image ?? undefined,
-        missingEnv: s.credentials.map((c) => c.varName),
-        status: s.status,
-        credentialGated: s.status === "credential_gated",
+        image: raw.image ?? undefined,
+        missingEnv: s.missingEnv ?? credentials.map((c) => c.varName),
+        status,
+        credentialGated: status === "credential_gated",
     };
 }
 
-function connectorToRegistryServer(p: BrokerOnchainConnector): RegistryServer {
+function connectorToRegistryServer(p: OnchainConnector | ConnectorCatalogOnchainSummary): RegistryServer {
     const binding = normalizeConnectorBinding({ registryId: p.id, origin: "onchain" });
+    const fullTools = "tools" in p && Array.isArray(p.tools) ? p.tools : undefined;
     return {
         registryId: binding.registryId,
         origin: binding.origin,
@@ -221,18 +272,88 @@ function connectorToRegistryServer(p: BrokerOnchainConnector): RegistryServer {
         name: p.name,
         namespace: "onchain",
         slug: p.id,
-        description: p.description,
+        description: p.description || "",
         attributes: [],
-        category: "defi",
-        tags: ["onchain", "defi"],
-        toolCount: p.toolCount,
-        tools: p.tools.map((t) => ({
-            name: t.name,
-            description: t.description,
-            inputSchema: t.parameters,
+        category: p.category || "defi",
+        tags: "tags" in p && Array.isArray(p.tags) && p.tags.length > 0 ? p.tags : ["onchain", "defi"],
+        toolCount: p.toolCount ?? fullTools?.length ?? 0,
+        ...(fullTools
+            ? {
+                tools: fullTools.map((t) => ({
+                    name: t.name,
+                    description: t.description,
+                    inputSchema: t.parameters ?? t.inputSchema,
+                })),
+            }
+            : {}),
+        available: true,
+        executable: true,
+        status: "live",
+    };
+}
+
+function toolkitToRegistryServer(tk: AccountToolkit, actions?: AccountToolkitAction[]): RegistryServer {
+    const binding = normalizeConnectorBinding({ registryId: tk.slug, origin: "account" });
+    const isNoAuth = Boolean(tk.noAuth || tk.authMode === "no_auth");
+    const status: ServedCatalogStatus = isNoAuth ? "live" : "credential_gated";
+    return {
+        registryId: binding.registryId,
+        origin: binding.origin,
+        type: "connector",
+        sources: [binding.origin],
+        canonicalKey: tk.slug,
+        name: tk.name || tk.slug,
+        namespace: "account",
+        slug: tk.slug,
+        description: tk.description || "",
+        attributes: [],
+        uiUrl: tk.appUrl ?? undefined,
+        logo: tk.logo,
+        category: tk.categories?.[0],
+        tags: tk.categories?.length ? tk.categories : ["account"],
+        toolCount: tk.toolsCount ?? actions?.length ?? 0,
+        tools: actions?.map((action) => ({
+            name: action.slug,
+            description: action.description || action.name,
+            inputSchema: action.inputParameters,
         })),
         available: true,
         executable: true,
+        status,
+        credentialGated: !isNoAuth,
+        authMode: tk.authMode,
+        noAuth: isNoAuth,
+    };
+}
+
+function searchHitToRegistryServer(hit: ConnectorSearchHit): RegistryServer {
+    const binding = normalizeConnectorBinding({
+        registryId: hit.bindingId || hit.registryId || hit.slug,
+        origin: hit.origin,
+    });
+    const isNoAuth = Boolean(hit.noAuth || hit.authMode === "no_auth");
+    const status: ServedCatalogStatus = hit.status === "credential_gated" ? "credential_gated" : "live";
+    return {
+        registryId: binding.registryId,
+        origin: binding.origin,
+        type: "connector",
+        sources: [binding.origin],
+        canonicalKey: binding.slug,
+        name: hit.name || binding.slug,
+        namespace: binding.origin,
+        slug: binding.slug,
+        description: hit.description || "",
+        attributes: [],
+        logo: hit.logo ?? undefined,
+        category: hit.category || undefined,
+        tags: hit.tags?.length ? hit.tags : [binding.origin],
+        toolCount: hit.toolCount ?? 0,
+        available: true,
+        executable: hit.playable !== false,
+        status,
+        credentialGated: Boolean(hit.requiresCredentials),
+        authMode: hit.authMode,
+        noAuth: hit.origin === "account" ? isNoAuth : undefined,
     };
 }
 
