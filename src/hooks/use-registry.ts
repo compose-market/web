@@ -359,7 +359,7 @@ function searchHitToRegistryServer(hit: ConnectorSearchHit): RegistryServer {
 
 async function fetchServers(options: ListServersOptions = {}): Promise<RegistryListResponse> {
     const { enabled: _enabled, ...listOptions } = options;
-    const origins = options.origin ? String(options.origin).split(",") : ["mcp", "onchain"];
+    const origins = options.origin ? String(options.origin).split(",") : ["mcp", "account", "onchain"];
     const requestedLimit = listOptions.limit;
     const offset = listOptions.offset ?? 0;
     const toolsLimit = Math.min(Math.max(1, requestedLimit ?? DEFAULT_REGISTRY_PAGE_SIZE), MAX_TOOLS_PAGE_SIZE);
@@ -369,39 +369,62 @@ async function fetchServers(options: ListServersOptions = {}): Promise<RegistryL
     if (origins.includes("mcp")) {
         tasks.push(
             (async () => {
-                const params = new URLSearchParams({ limit: String(toolsLimit), offset: String(offset) });
-                if (listOptions.category) params.set("category", listOptions.category);
-                const res = await fetch(`${BROKER_BASE}/mcps?${params}`);
-                if (!res.ok) throw new Error(`Failed to fetch tools catalog: ${res.status}`);
-                const data = await res.json() as BrokerToolsListResponse;
+                const data = await sdk.connectors.mcps.list({
+                    limit: toolsLimit,
+                    offset,
+                    category: listOptions.category,
+                });
                 return {
                     total: data.total,
-                    servers: data.servers.map(summaryToRegistryServer),
+                    servers: (data.servers || []).map(summaryToRegistryServer),
                 };
+            })(),
+        );
+    }
+
+    if (origins.includes("account")) {
+        tasks.push(
+            (async () => {
+                try {
+                    const data = await sdk.connectors.accounts.catalog({
+                        limit: toolsLimit,
+                        offset,
+                        category: listOptions.category,
+                    });
+                    const toolkits = data.toolkits || [];
+                    return {
+                        total: data.total ?? toolkits.length,
+                        servers: toolkits.map((tk) => toolkitToRegistryServer(tk)),
+                    };
+                } catch {
+                    return { total: 0, servers: [] };
+                }
             })(),
         );
     }
 
     if (origins.includes("onchain")) {
         tasks.push(
-            fetch(`${BROKER_BASE}/onchain`).then(async (res) => {
-                if (!res.ok) return { total: 0, servers: [] };
-                const data = await res.json() as BrokerOnchainResponse;
-                return {
-                    total: data.connectors.length,
-                    servers: data.connectors.map(connectorToRegistryServer),
-                };
-            }),
+            (async () => {
+                try {
+                    const data = await sdk.connectors.onchain.list();
+                    return {
+                        total: (data.connectors || []).length,
+                        servers: (data.connectors || []).map(connectorToRegistryServer),
+                    };
+                } catch {
+                    return { total: 0, servers: [] };
+                }
+            })(),
         );
     }
 
     const results = await Promise.all(tasks);
+    const catalogTotal = results.reduce((acc, r) => acc + r.total, 0);
 
     let merged: RegistryServer[] = [];
-    let total = 0;
     for (const r of results) {
         merged = merged.concat(r.servers);
-        total += r.total;
     }
 
     merged = merged.filter((s) => origins.includes(s.origin));
@@ -413,11 +436,17 @@ async function fetchServers(options: ListServersOptions = {}): Promise<RegistryL
         merged = merged.filter((s) => s.available === listOptions.available);
     }
 
-    return { total: merged.length, offset, limit: merged.length, servers: merged };
+    return {
+        total: listOptions.available !== undefined ? merged.length : Math.max(catalogTotal, merged.length),
+        offset,
+        limit: merged.length,
+        servers: merged,
+    };
 }
 
 /**
- * Search the catalog across tools and onchain connectors.
+ * Search the unified catalog across MCPs, Accounts, and Onchain connectors
+ * using Cloudflare Vectorize + D1 lexical hybrid + Voyage rerank-2.5 on `GET /?q=`.
  */
 async function searchServers(query: string, limit = DEFAULT_REGISTRY_PAGE_SIZE, options: SearchServersOptions = {}): Promise<RegistrySearchResponse> {
     const normalizedQuery = query.toLowerCase().trim();
@@ -425,67 +454,60 @@ async function searchServers(query: string, limit = DEFAULT_REGISTRY_PAGE_SIZE, 
         return { query: normalizedQuery, total: 0, servers: [] };
     }
     const { enabled: _enabled, ...searchOptions } = options;
-    const origins = searchOptions.origin ? String(searchOptions.origin).split(",") : ["mcp", "onchain"];
+    const origins = (searchOptions.origin
+        ? String(searchOptions.origin).split(",").map((v) => v.trim()).filter(Boolean)
+        : ["mcp", "account", "onchain"]) as CanonicalConnectorOrigin[];
     const boundedLimit = Math.min(Math.max(1, limit), MAX_SEARCH_RESULTS);
-    const params = new URLSearchParams({ q: query });
-    params.set("limit", String(boundedLimit));
-    const [toolsData, onchainData] = await Promise.all([
-        origins.includes("mcp")
-            ? fetch(`${BROKER_BASE}/mcps/search?${params}`).then(async (res) => {
-                if (!res.ok) throw new Error(`Failed to search servers: ${res.status}`);
-                return await res.json() as { query: string; total: number; servers: BrokerServerSummary[] };
-            })
-            : Promise.resolve<{ query: string; total: number; servers: BrokerServerSummary[] }>({ query: normalizedQuery, total: 0, servers: [] }),
-        origins.includes("onchain")
-            ? fetch(`${BROKER_BASE}/onchain`).then(async (res) => {
-                if (!res.ok) return null;
-                return await res.json() as BrokerOnchainResponse;
-            })
-            : Promise.resolve<BrokerOnchainResponse | null>(null),
-    ]);
-    const needle = normalizedQuery;
-    let onchainServers: RegistryServer[] = [];
-    if (onchainData) {
-        onchainServers = onchainData.connectors
-            .map(connectorToRegistryServer)
-            .filter((server) => (
-                server.name.toLowerCase().includes(needle)
-                || server.slug.toLowerCase().includes(needle)
-                || server.description.toLowerCase().includes(needle)
-                || server.tags.some((tag) => tag.toLowerCase().includes(needle))
-            ));
-    }
-    let servers = [
-        ...toolsData.servers.map(summaryToRegistryServer),
-        ...onchainServers,
-    ];
 
-    servers = servers.filter((s) => origins.includes(s.origin));
+    const data = await sdk.connectors.all({
+        q: query,
+        limit: boundedLimit,
+        origin: origins,
+        category: searchOptions.category,
+    });
+
+    let servers = (data.results || [])
+        .map(searchHitToRegistryServer)
+        .filter((s) => origins.includes(s.origin));
 
     if (searchOptions.category) {
         servers = servers.filter((server) => server.category === searchOptions.category);
     }
     servers = servers.slice(0, boundedLimit);
+
     return {
-        query: toolsData.query || normalizedQuery,
-        total: servers.length,
+        query: data.query || normalizedQuery,
+        total: data.total ?? servers.length,
         servers,
     };
 }
 
-async function fetchServer(registryId: string): Promise<RegistryServer> {
-    const binding = normalizeConnectorBinding(registryId, { defaultOrigin: "mcp" });
+async function fetchServer(
+    registryId: string,
+    defaultOrigin: CanonicalConnectorOrigin = "mcp",
+    cachedAccount?: AccountToolkit,
+): Promise<RegistryServer> {
+    const binding = normalizeConnectorBinding(registryId, { defaultOrigin });
     if (binding.origin === "onchain") {
-        const id = binding.slug;
-        const res = await fetch(`${BROKER_BASE}/onchain/${encodeURIComponent(id)}`);
-        if (!res.ok) throw new Error(`Failed to fetch onchain connector: ${res.status}`);
-        const connector = await res.json() as BrokerOnchainConnector;
+        const connector = await sdk.connectors.onchain.get(binding.slug);
         return connectorToRegistryServer(connector);
     }
-    const slug = binding.slug;
-    const res = await fetch(`${BROKER_BASE}/mcps/${encodeURIComponent(slug)}`);
-    if (!res.ok) throw new Error(`Failed to fetch server: ${res.status}`);
-    const card = await res.json() as BrokerServerCard;
+    if (binding.origin === "account") {
+        const [toolkitsRes, actionsRes] = await Promise.all([
+            cachedAccount
+                ? Promise.resolve({ toolkits: [cachedAccount] })
+                : sdk.connectors.accounts.toolkits.list({ q: binding.slug, limit: 20 }).catch(() => ({ toolkits: [] })),
+            sdk.connectors.accounts.toolkits.actions(binding.slug, { limit: 100 }),
+        ]);
+        const matched = (toolkitsRes.toolkits || []).find(
+            (tk) => tk.slug.toLowerCase() === binding.slug.toLowerCase(),
+        ) ?? {
+            slug: binding.slug,
+            name: actionsRes.actions?.[0]?.toolkitName || binding.slug,
+        };
+        return toolkitToRegistryServer(matched, actionsRes.actions || []);
+    }
+    const card = await sdk.connectors.mcps.get(binding.slug);
     return cardToRegistryServer(card);
 }
 
