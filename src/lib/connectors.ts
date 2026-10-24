@@ -246,3 +246,67 @@ export async function fetchConnectorCatalogIndex(
   }
   return body as ConnectorCatalogIndexPayload;
 }
+
+export function normalizeConnectorSearchText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s_-]+/gu, " ")
+    .replace(/[_-]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function localPriorityBoost(item: ConnectorRankableItem): number {
+  if (item.origin === "account") {
+    if (item.authMode === "oauth") return 45;
+    if (item.noAuth || item.authMode === "no_auth") return 40;
+    return 10;
+  }
+  if (item.origin === "onchain") return 42;
+  if (item.status === "live") return 38;
+  return 0;
+}
+
+function scoreConnectorMatch(item: ConnectorRankableItem, normalizedQuery: string, tokens: string[]): number {
+  const slugLower = item.slug.toLowerCase();
+  const slugWords = normalizeConnectorSearchText(item.slug);
+  const nameLower = normalizeConnectorSearchText(item.name);
+  const categoryLower = normalizeConnectorSearchText(item.category || "");
+  const tagsLower = normalizeConnectorSearchText(item.tags.join(" "));
+  const descLower = normalizeConnectorSearchText(item.description || "");
+
+  let base = 0;
+  if (slugLower === normalizedQuery || slugWords === normalizedQuery || nameLower === normalizedQuery) {
+    base = 760;
+  } else if (slugLower.startsWith(normalizedQuery) || slugWords.startsWith(normalizedQuery) || nameLower.startsWith(normalizedQuery)) {
+    base = 640;
+  } else if (slugWords.includes(normalizedQuery) || nameLower.includes(normalizedQuery)) {
+    base = 540;
+  } else if (categoryLower === normalizedQuery || tagsLower.split(" ").includes(normalizedQuery)) {
+    base = 440;
+  } else if (tokens.length > 0) {
+    let matched = 0;
+    let nameHits = 0;
+    for (const token of tokens) {
+      if (token.length < 2) continue;
+      if (slugWords.includes(token) || nameLower.includes(token)) {
+        matched += 1;
+        nameHits += 1;
+      } else if (categoryLower.includes(token) || tagsLower.includes(token) || descLower.includes(token)) {
+        matched += 1;
+      }
+    }
+    const meaningful = tokens.filter((t) => t.length >= 2).length;
+    if (meaningful > 0 && matched === meaningful) {
+      base = 380 + nameHits * 55;
+    } else if (meaningful > 1 && matched >= meaningful - 1 && nameHits > 0) {
+      base = 290 + nameHits * 40;
+    }
+  }
+
+  if (base === 0 && descLower.includes(normalizedQuery)) {
+    base = 320;
+  }
+  if (base === 0) return 0;
+  return base + localPriorityBoost(item);
+}
