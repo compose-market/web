@@ -107,24 +107,56 @@ function latestCachedCatalog(
     return persisted?.items ?? [];
 }
 
+const MODEL_CATALOG_STORAGE_KEY = `models:catalog:${MODELS_ORIGIN}`;
+
+// Warm models catalog from Cache Storage on module load (survives Cmd+Shift+R).
+void readCatalogCache<CatalogSnapshot<CatalogModel>>(MODEL_CATALOG_STORAGE_KEY);
+
 export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
     const { type, family, search, enabled = true } = options;
     const queryClient = useQueryClient();
+    const isRestoring = useIsRestoring();
+    const persisted = useMemo(
+        () => getCatalogMemory<CatalogSnapshot<CatalogModel>>(MODEL_CATALOG_STORAGE_KEY) ?? readModelSnapshot(MODELS_ORIGIN),
+        [],
+    );
+
+    useEffect(() => {
+        if (persisted) return;
+        let active = true;
+        void readCatalogCache<CatalogSnapshot<CatalogModel>>(MODEL_CATALOG_STORAGE_KEY).then((cached) => {
+            if (!active || !cached?.version || !Array.isArray(cached.items) || cached.items.length === 0) return;
+            queryClient.setQueryData(CATALOG_VERSION_KEY, (existing: ModelCatalogHealth | undefined) => existing ?? {
+                version: cached.version,
+                lastUpdated: cached.lastUpdated,
+                models: cached.items.length,
+            });
+            queryClient.setQueryData([...CATALOG_CACHE_PREFIX, cached.version], (existing: CatalogModel[] | undefined) => (
+                Array.isArray(existing) && existing.length > 0 ? existing : cached.items
+            ));
+        });
+        return () => { active = false; };
+    }, [persisted, queryClient]);
+
     const healthQuery = useQuery({
         queryKey: CATALOG_VERSION_KEY,
         queryFn: () => fetchModelCatalogHealth(MODELS_ORIGIN),
-        // Background /health poll: a worker catalog update swaps the catalog
-        // in within one interval, non-blocking, while the old one renders.
-        staleTime: 5_000,
+        initialData: persisted
+            ? { version: persisted.version, lastUpdated: persisted.lastUpdated, models: persisted.items.length }
+            : undefined,
+        initialDataUpdatedAt: persisted?.updatedAt ?? 0,
+        staleTime: 30_000,
         gcTime: DURABLE_CACHE_MAX_AGE,
-        refetchInterval: 5_000,
-        refetchOnMount: "always",
+        refetchInterval: 60_000,
+        refetchOnMount: true,
         refetchOnWindowFocus: true,
         enabled,
         retry: 2,
     });
     const version = healthQuery.data?.version ?? null;
-    const cachedModels = latestCachedCatalog(queryClient);
+    const lastUpdatedIso = healthQuery.data?.lastUpdated ?? null;
+    const cachedModels = latestCachedCatalog(queryClient, version);
+    const matchingPersisted = persisted && version && persisted.version === version ? persisted : null;
 
     const {
         data: loadedModels,
@@ -134,7 +166,25 @@ export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
         dataUpdatedAt,
     } = useQuery<CatalogModel[], Error>({
         queryKey: [...CATALOG_CACHE_PREFIX, version],
-        queryFn: () => fetchModelCatalogIndex(MODELS_ORIGIN, version!),
+        queryFn: async ({ signal }) => {
+            const cacheHit = await readCatalogCache<CatalogSnapshot<CatalogModel>>(MODEL_CATALOG_STORAGE_KEY);
+            if (cacheHit && cacheHit.version === version && cacheHit.items.length > 0) {
+                return cacheHit.items;
+            }
+            const fresh = await fetchModelCatalogIndex(MODELS_ORIGIN, version!, fetch, { signal });
+            if (fresh.length > 0) {
+                writeModelSnapshot(MODELS_ORIGIN, version!, fresh, lastUpdatedIso);
+                void writeCatalogCache(MODEL_CATALOG_STORAGE_KEY, {
+                    version: version!,
+                    items: fresh,
+                    lastUpdated: lastUpdatedIso,
+                    updatedAt: Date.now(),
+                } satisfies CatalogSnapshot<CatalogModel>);
+            }
+            return fresh;
+        },
+        initialData: matchingPersisted?.items,
+        initialDataUpdatedAt: matchingPersisted?.updatedAt,
         staleTime: Infinity,
         gcTime: DURABLE_CACHE_MAX_AGE,
         placeholderData: cachedModels,
@@ -142,6 +192,26 @@ export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
         enabled: enabled && Boolean(version),
         meta: durableQueryMeta,
     });
+
+    const previousVersionRef = useRef<string | null>(null);
+    useEffect(() => {
+        if (isRestoring || !version || !loadedModels || loadedModels.length === 0) return;
+
+        const removedCount = pruneSupersededCatalogQueries(queryClient, MODELS_ORIGIN, version);
+        const versionChanged = previousVersionRef.current !== null && previousVersionRef.current !== version;
+        previousVersionRef.current = version;
+
+        if (removedCount > 0 || versionChanged) {
+            clearSeededModelCards();
+            queryClient.removeQueries({ queryKey: ["model-card"], type: "inactive" });
+            queryClient.removeQueries({ queryKey: ["model-params"], type: "inactive" });
+            queryClient.removeQueries({ queryKey: ["models-semantic-search"] });
+            void queryClient.invalidateQueries({ queryKey: ["model-card"], refetchType: "active" });
+            void queryClient.invalidateQueries({ queryKey: ["model-params"], refetchType: "active" });
+            void persistDurableQueries(queryClient);
+        }
+    }, [isRestoring, loadedModels, queryClient, version]);
+
     const models = loadedModels ?? cachedModels;
     const error = models.length === 0 ? (catalogError ?? healthQuery.error ?? null) : null;
     // A refresh failure while cached catalog data renders is surfaced
@@ -183,18 +253,52 @@ export function useModels(options: UseModelsOptions = {}): UseModelsReturn {
 
     // Manual refresh - named distinctly to avoid collision with query.refetch
     const forceRefresh = useCallback(async () => {
+        clearSeededModelCards();
         queryClient.removeQueries({ queryKey: ["model-card"], type: "inactive" });
         queryClient.removeQueries({ queryKey: ["model-params"], type: "inactive" });
+        queryClient.removeQueries({ queryKey: ["models-semantic-search"] });
+
         const health = await fetchModelCatalogHealth(MODELS_ORIGIN);
+        queryClient.setQueryDefaults(CATALOG_VERSION_KEY, {
+            staleTime: 5_000,
+            gcTime: DURABLE_CACHE_MAX_AGE,
+            meta: durableQueryMeta,
+        });
         queryClient.setQueryData(CATALOG_VERSION_KEY, health);
-        await Promise.all([
-            queryClient.fetchQuery({
-                queryKey: [...CATALOG_CACHE_PREFIX, health.version],
-                queryFn: () => fetchModelCatalogIndex(MODELS_ORIGIN, health.version),
-                staleTime: Infinity,
+
+        const catalogKey = [...CATALOG_CACHE_PREFIX, health.version] as const;
+        queryClient.setQueryDefaults(catalogKey, {
+            staleTime: Infinity,
+            gcTime: DURABLE_CACHE_MAX_AGE,
+            meta: durableQueryMeta,
+        });
+        const freshModels = await queryClient.fetchQuery({
+            queryKey: catalogKey,
+            queryFn: ({ signal }) => fetchModelCatalogIndex(MODELS_ORIGIN, health.version, fetch, {
+                cache: "no-store",
+                signal,
             }),
+            staleTime: 0,
+            gcTime: DURABLE_CACHE_MAX_AGE,
+            meta: durableQueryMeta,
+        });
+        queryClient.setQueryData(catalogKey, freshModels);
+        if (freshModels.length > 0) {
+            writeModelSnapshot(MODELS_ORIGIN, health.version, freshModels, health.lastUpdated);
+            void writeCatalogCache(MODEL_CATALOG_STORAGE_KEY, {
+                version: health.version,
+                items: freshModels,
+                lastUpdated: health.lastUpdated,
+                updatedAt: Date.now(),
+            } satisfies CatalogSnapshot<CatalogModel>);
+        }
+        pruneSupersededCatalogQueries(queryClient, MODELS_ORIGIN, health.version);
+        previousVersionRef.current = health.version;
+
+        await Promise.all([
             queryClient.refetchQueries({ queryKey: ["model-card"], type: "active" }),
             queryClient.refetchQueries({ queryKey: ["model-params"], type: "active" }),
+            persistDurableQueries(queryClient),
         ]);
     }, [queryClient]);
 
