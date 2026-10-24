@@ -222,3 +222,27 @@ export async function fetchConnectorCatalogHealth(
     counts: body.counts,
   };
 }
+
+export async function fetchConnectorCatalogIndex(
+  origin: string,
+  version: string,
+  fetcher: typeof fetch = fetch,
+  options?: { cache?: RequestCache; signal?: AbortSignal },
+): Promise<ConnectorCatalogIndexPayload> {
+  const target = new URL(`${origin}/index`);
+  target.searchParams.set("version", version);
+  const response = await fetcher(target, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+    cache: options?.cache ?? "force-cache",
+    ...(options?.signal ? { signal: options.signal } : {}),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to load connector catalog index: ${response.status}`);
+  }
+  const body = (await response.json()) as Partial<ConnectorCatalogIndexPayload>;
+  if (body.version !== version || !Array.isArray(body.mcps) || !Array.isArray(body.accounts) || !body.onchain) {
+    throw new Error("Invalid connector catalog index response");
+  }
+  return body as ConnectorCatalogIndexPayload;
+}
