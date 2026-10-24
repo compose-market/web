@@ -547,7 +547,7 @@ async function fetchTags(): Promise<string[]> {
 }
 
 // =============================================================================
-// Constants
+// Constants & Snapshot Cache Helpers
 // =============================================================================
 
 const REGISTRY_STALE_TIME = 6 * 60 * 60 * 1000;
@@ -555,6 +555,45 @@ const REGISTRY_GC_TIME = 12 * 60 * 60 * 1000;
 const REGISTRY_SEARCH_GC_TIME = 10 * 60 * 1000;
 const METADATA_STALE_TIME = 5 * 60 * 1000;
 const REGISTRY_CACHE_KEY = ["registry", "servers"] as const;
+const SEMANTIC_DEBOUNCE_MS = 150;
+
+function pruneSupersededConnectorCatalogQueries(
+    queryClient: QueryClient,
+    origin: string,
+    activeVersion: string,
+): number {
+    const staleQueries = queryClient.getQueryCache().findAll({
+        predicate: (query) => isSupersededConnectorCatalogQueryKey(query.queryKey, origin, activeVersion),
+    });
+    if (staleQueries.length === 0) return 0;
+
+    queryClient.removeQueries({
+        predicate: (query) => isSupersededConnectorCatalogQueryKey(query.queryKey, origin, activeVersion),
+    });
+    return staleQueries.length;
+}
+
+function latestCachedConnectorCatalog(
+    queryClient: QueryClient,
+    version?: string | null,
+): ConnectorCatalogIndexPayload | undefined {
+    if (version) {
+        const exact = queryClient.getQueryData<ConnectorCatalogIndexPayload>([...CATALOG_CACHE_PREFIX, version]);
+        if (exact && Array.isArray(exact.mcps) && Array.isArray(exact.accounts)) return exact;
+    }
+    const current = queryClient.getQueryCache()
+        .findAll({ queryKey: CATALOG_CACHE_PREFIX })
+        .filter((query) => {
+            const d = query.state.data as ConnectorCatalogIndexPayload | undefined;
+            return Boolean(d && Array.isArray(d.mcps) && Array.isArray(d.accounts));
+        })
+        .sort((left, right) => right.state.dataUpdatedAt - left.state.dataUpdatedAt)[0]
+        ?.state.data;
+    if (current) return current as ConnectorCatalogIndexPayload;
+    const mem = getCatalogMemory<ConnectorCatalogIndexPayload>(CONNECTOR_CATALOG_STORAGE_KEY);
+    if (mem && Array.isArray(mem.mcps) && Array.isArray(mem.accounts)) return mem;
+    return undefined;
+}
 const SEARCH_DEBOUNCE_MS = 250;
 
 // =============================================================================
