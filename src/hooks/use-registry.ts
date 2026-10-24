@@ -664,6 +664,152 @@ function deriveConnectorCatalog(payload: ConnectorCatalogIndexPayload | undefine
     derivedCatalogCache.set(payload, derived);
     return derived;
 }
+
+export interface HydratedConnectorSnapshot {
+    version: string | null;
+    hasData: boolean;
+    isLoading: boolean;
+    isFetching: boolean;
+    error: Error | null;
+    mcpServers: RegistryServer[];
+    accountServers: RegistryServer[];
+    onchainServers: RegistryServer[];
+    allServers: RegistryServer[];
+    accountBySlug: Map<string, AccountToolkit>;
+    serverByBindingId: Map<string, RegistryServer>;
+    meta: RegistryMeta | undefined;
+    categories: string[] | undefined;
+    tags: string[] | undefined;
+    forceRefresh: () => Promise<void>;
+}
+
+export function useConnectorCatalogSnapshot(enabled = true): HydratedConnectorSnapshot {
+    const queryClient = useQueryClient();
+    const isRestoring = useIsRestoring();
+    const persisted = useMemo(
+        () => getCatalogMemory<ConnectorCatalogIndexPayload>(CONNECTOR_CATALOG_STORAGE_KEY),
+        [],
+    );
+
+    useEffect(() => {
+        if (persisted) return;
+        let active = true;
+        void readCatalogCache<ConnectorCatalogIndexPayload>(CONNECTOR_CATALOG_STORAGE_KEY).then((cached) => {
+            if (!active || !cached?.version || !Array.isArray(cached.mcps) || !Array.isArray(cached.accounts)) return;
+            queryClient.setQueryData(CATALOG_VERSION_KEY, (existing: ConnectorCatalogHealth | undefined) => existing ?? {
+                version: cached.version,
+                lastUpdated: cached.lastUpdated,
+                counts: cached.counts,
+            });
+            queryClient.setQueryData([...CATALOG_CACHE_PREFIX, cached.version], (existing: ConnectorCatalogIndexPayload | undefined) => (
+                existing ?? cached
+            ));
+        });
+        return () => { active = false; };
+    }, [persisted, queryClient]);
+
+    const healthQuery = useQuery<ConnectorCatalogHealth, Error>({
+        queryKey: CATALOG_VERSION_KEY,
+        queryFn: () => fetchConnectorCatalogHealth(CONNECTORS_ORIGIN),
+        initialData: persisted
+            ? { version: persisted.version, lastUpdated: persisted.lastUpdated, counts: persisted.counts }
+            : undefined,
+        initialDataUpdatedAt: 0,
+        staleTime: 30_000,
+        gcTime: DURABLE_CACHE_MAX_AGE,
+        refetchInterval: 60_000,
+        refetchOnMount: true,
+        refetchOnWindowFocus: true,
+        enabled,
+        retry: 1,
+    });
+
+    const version = healthQuery.data?.version ?? null;
+    const cachedPayload = latestCachedConnectorCatalog(queryClient, version);
+    const matchingPersisted = persisted && version && persisted.version === version ? persisted : undefined;
+
+    const catalogQuery = useQuery<ConnectorCatalogIndexPayload, Error>({
+        queryKey: [...CATALOG_CACHE_PREFIX, version],
+        queryFn: async ({ signal }) => {
+            const cacheHit = await readCatalogCache<ConnectorCatalogIndexPayload>(CONNECTOR_CATALOG_STORAGE_KEY);
+            if (cacheHit && cacheHit.version === version && Array.isArray(cacheHit.mcps)) {
+                return cacheHit;
+            }
+            const fresh = await fetchConnectorCatalogIndex(CONNECTORS_ORIGIN, version!, fetch, { signal });
+            if (fresh && Array.isArray(fresh.mcps)) {
+                void writeCatalogCache(CONNECTOR_CATALOG_STORAGE_KEY, fresh);
+            }
+            return fresh;
+        },
+        initialData: matchingPersisted,
+        staleTime: Infinity,
+        gcTime: DURABLE_CACHE_MAX_AGE,
+        placeholderData: cachedPayload,
+        refetchOnMount: false,
+        enabled: enabled && Boolean(version),
+        retry: 1,
+        meta: durableQueryMeta,
+    });
+
+    const payload = catalogQuery.data ?? cachedPayload;
+
+    const previousVersionRef = useRef<string | null>(null);
+    useEffect(() => {
+        if (isRestoring || !version || !catalogQuery.data) return;
+
+        const removedCount = pruneSupersededConnectorCatalogQueries(queryClient, CONNECTORS_ORIGIN, version);
+        const versionChanged = previousVersionRef.current !== null && previousVersionRef.current !== version;
+        previousVersionRef.current = version;
+
+        if (removedCount > 0 || versionChanged) {
+            queryClient.removeQueries({ queryKey: ["connectors-semantic-search"] });
+            void persistDurableQueries(queryClient);
+        }
+    }, [catalogQuery.data, isRestoring, queryClient, version]);
+
+    const derived = useMemo(() => deriveConnectorCatalog(payload), [payload]);
+
+    const forceRefresh = useCallback(async () => {
+        queryClient.removeQueries({ queryKey: ["connectors-semantic-search"] });
+        await queryClient.invalidateQueries({ queryKey: REGISTRY_CACHE_KEY });
+
+        const health = await fetchConnectorCatalogHealth(CONNECTORS_ORIGIN);
+        queryClient.setQueryData(CATALOG_VERSION_KEY, health);
+
+        const catalogKey = [...CATALOG_CACHE_PREFIX, health.version] as const;
+        const fresh = await queryClient.fetchQuery({
+            queryKey: catalogKey,
+            queryFn: ({ signal }) => fetchConnectorCatalogIndex(CONNECTORS_ORIGIN, health.version, fetch, {
+                cache: "no-store",
+                signal,
+            }),
+            staleTime: 0,
+            gcTime: DURABLE_CACHE_MAX_AGE,
+            meta: durableQueryMeta,
+        });
+        if (fresh && Array.isArray(fresh.mcps)) {
+            void writeCatalogCache(CONNECTOR_CATALOG_STORAGE_KEY, fresh);
+        }
+        queryClient.setQueryData(catalogKey, fresh);
+        pruneSupersededConnectorCatalogQueries(queryClient, CONNECTORS_ORIGIN, health.version);
+        previousVersionRef.current = health.version;
+        await persistDurableQueries(queryClient);
+    }, [queryClient]);
+
+    const hasData = Boolean(payload);
+    const error = hasData ? null : (catalogQuery.error ?? healthQuery.error ?? null);
+    const isLoading = enabled && !hasData && (healthQuery.isLoading || catalogQuery.isLoading);
+
+    return {
+        version: payload?.version ?? version,
+        hasData,
+        isLoading,
+        isFetching: healthQuery.isFetching || catalogQuery.isFetching,
+        error,
+        ...derived,
+        forceRefresh,
+    };
+}
 const SEARCH_DEBOUNCE_MS = 250;
 
 // =============================================================================
