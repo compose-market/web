@@ -1,5 +1,7 @@
-export type CanonicalConnectorOrigin = "mcp" | "onchain";
-type ConnectorOriginInput = CanonicalConnectorOrigin | "tools" | "goat";
+import type { AccountAuthMode, AccountToolkit } from "@compose-market/sdk";
+
+export type CanonicalConnectorOrigin = "mcp" | "account" | "onchain";
+type ConnectorOriginInput = CanonicalConnectorOrigin | "tools" | "goat" | "accounts" | "composio";
 
 export interface ConnectorBindingInput {
   registryId?: string;
@@ -18,13 +20,24 @@ export interface NormalizedConnectorBinding {
 const ORIGIN_ALIASES: Record<ConnectorOriginInput, CanonicalConnectorOrigin> = {
   tools: "mcp",
   mcp: "mcp",
+  account: "account",
+  accounts: "account",
+  composio: "account",
   onchain: "onchain",
   goat: "onchain",
 };
 
 function canonicalOrigin(value: string | undefined, defaultOrigin: CanonicalConnectorOrigin): CanonicalConnectorOrigin {
   const normalized = value?.trim().toLowerCase();
-  if (normalized === "tools" || normalized === "onchain" || normalized === "mcp" || normalized === "goat") {
+  if (
+    normalized === "tools"
+    || normalized === "onchain"
+    || normalized === "mcp"
+    || normalized === "goat"
+    || normalized === "account"
+    || normalized === "accounts"
+    || normalized === "composio"
+  ) {
     return ORIGIN_ALIASES[normalized];
   }
   return defaultOrigin;
@@ -34,7 +47,7 @@ function splitPrefixed(value: string): { prefix?: ConnectorOriginInput; slug: st
   let slug = value.trim();
   let prefix: ConnectorOriginInput | undefined;
   while (true) {
-    const match = slug.match(/^(tools|onchain|mcp|goat)([:\-])(.+)$/i);
+    const match = slug.match(/^(tools|onchain|mcp|goat|account|accounts|composio)([:\-])(.+)$/i);
     if (!match) break;
     prefix = match[1].toLowerCase() as ConnectorOriginInput;
     slug = match[3].trim();
