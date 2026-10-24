@@ -348,13 +348,15 @@ export function useModelDetails(modelId: string | null): UseModelResourceReturn<
             ),
         ),
         enabled: Boolean(modelId),
-        staleTime: 5 * 60 * 1000,
+        staleTime: STALE_TIME,
         gcTime: DURABLE_CACHE_MAX_AGE,
         meta: durableQueryMeta,
     });
-    if (result.data) {
-        seedModelCards([result.data], { overwrite: true });
-    }
+    useEffect(() => {
+        if (result.data) {
+            seedModelCards([result.data], { overwrite: true });
+        }
+    }, [result.data]);
     return { data: result.data ?? null, isLoading: result.isLoading, error: result.error ?? null };
 }
 
