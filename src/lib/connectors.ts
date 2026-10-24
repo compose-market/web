@@ -310,3 +310,25 @@ function scoreConnectorMatch(item: ConnectorRankableItem, normalizedQuery: strin
   if (base === 0) return 0;
   return base + localPriorityBoost(item);
 }
+
+export function rankCatalogConnectors<T extends ConnectorRankableItem>(
+  items: T[],
+  query: string,
+  limit = 50,
+): RankedCatalogConnector<T>[] {
+  const normalized = normalizeConnectorSearchText(query);
+  if (!normalized) {
+    return items.slice(0, limit).map((item, idx) => ({
+      item,
+      score: items.length - idx,
+      source: "local" as const,
+    }));
+  }
+  const tokens = normalized.split(" ").filter(Boolean);
+  return items
+    .map((item, index) => ({ item, index, score: scoreConnectorMatch(item, normalized, tokens) }))
+    .filter((entry) => entry.score >= 260)
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .slice(0, limit)
+    .map(({ item, score }) => ({ item, score, source: "local" as const }));
+}
