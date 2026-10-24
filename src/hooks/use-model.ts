@@ -368,7 +368,7 @@ export function useModelParams<T>(modelId: string | null): UseModelResourceRetur
             signal,
         ),
         enabled: Boolean(modelId),
-        staleTime: 5 * 60 * 1000,
+        staleTime: STALE_TIME,
         gcTime: DURABLE_CACHE_MAX_AGE,
         meta: durableQueryMeta,
     });
