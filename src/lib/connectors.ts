@@ -332,3 +332,45 @@ export function rankCatalogConnectors<T extends ConnectorRankableItem>(
     .slice(0, limit)
     .map(({ item, score }) => ({ item, score, source: "local" as const }));
 }
+
+export function mergeSemanticConnectorRanks<T extends ConnectorRankableItem>(
+  catalog: T[],
+  local: RankedCatalogConnector<T>[],
+  semantic: SemanticConnectorHit[],
+  limit = 50,
+): T[] {
+  if (semantic.length === 0) {
+    return local.slice(0, limit).map((entry) => entry.item);
+  }
+
+  const byRegistryId = new Map<string, T>();
+  for (const item of catalog) {
+    byRegistryId.set(item.registryId.toLowerCase(), item);
+  }
+
+  const merged = new Map<string, RankedCatalogConnector<T>>();
+  for (const entry of local) {
+    merged.set(entry.item.registryId.toLowerCase(), entry);
+  }
+
+  for (let i = 0; i < semantic.length; i += 1) {
+    const hit = semantic[i]!;
+    const key = (hit.bindingId || `${hit.origin}:${hit.slug}`).toLowerCase();
+    const resolved = byRegistryId.get(key);
+    if (!resolved) continue;
+
+    const clamped = Math.max(0, Math.min(1.5, hit.score));
+    const semanticScore = 700 + clamped * 240 - i * 1.5;
+    const existing = merged.get(key);
+    merged.set(key, {
+      item: resolved,
+      score: existing ? Math.max(existing.score, semanticScore) + 35 : semanticScore,
+      source: existing ? "hybrid" : "semantic",
+    });
+  }
+
+  return [...merged.values()]
+    .sort((left, right) => right.score - left.score)
+    .slice(0, limit)
+    .map((entry) => entry.item);
+}
