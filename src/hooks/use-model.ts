@@ -394,17 +394,23 @@ export function useSemanticModelSearch(
     query: string,
     options: UseSemanticModelSearchOptions = {},
 ): UseSemanticModelSearchReturn {
+    const queryClient = useQueryClient();
+    const cachedHealth = queryClient.getQueryData<ModelCatalogHealth>(CATALOG_VERSION_KEY);
+    const catalogVersion = cachedHealth?.version ?? null;
     const normalized = normalizeModelSearchText(query);
     const limit = Math.min(Math.max(options.limit ?? 20, 1), 50);
     const enabled = (options.enabled ?? true) && normalized.replace(/\s+/gu, "").length >= 3;
 
     const result = useQuery<SemanticModelHit[], Error>({
-        queryKey: ["models-semantic-search", normalized, limit],
+        queryKey: ["models-semantic-search", catalogVersion ?? "unversioned", normalized, limit],
         queryFn: async ({ signal }) => {
             const target = new URL(`${MODELS_ORIGIN}/search`);
             target.searchParams.set("q", query.trim());
             target.searchParams.set("limit", String(limit));
             target.searchParams.set("compact", "1");
+            if (catalogVersion) {
+                target.searchParams.set("v", catalogVersion);
+            }
             const response = await fetch(target, {
                 method: "GET",
                 headers: { Accept: "application/json" },
@@ -425,6 +431,8 @@ export function useSemanticModelSearch(
                     provider: row.provider,
                     ...(typeof row.family === "string" ? { family: row.family } : {}),
                     ...(typeof row.name === "string" || row.name === null ? { name: row.name as string | null } : {}),
+                    ...(typeof row.isFrontier === "boolean" ? { isFrontier: row.isFrontier } : {}),
+                    ...(typeof row.isLatest === "boolean" ? { isLatest: row.isLatest } : {}),
                     score: typeof row.score === "number" ? row.score : 0,
                 }];
             });
