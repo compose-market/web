@@ -594,6 +594,76 @@ function latestCachedConnectorCatalog(
     if (mem && Array.isArray(mem.mcps) && Array.isArray(mem.accounts)) return mem;
     return undefined;
 }
+
+interface DerivedConnectorCatalog {
+    mcpServers: RegistryServer[];
+    accountServers: RegistryServer[];
+    onchainServers: RegistryServer[];
+    allServers: RegistryServer[];
+    accountBySlug: Map<string, AccountToolkit>;
+    serverByBindingId: Map<string, RegistryServer>;
+    meta: RegistryMeta | undefined;
+    categories: string[] | undefined;
+    tags: string[] | undefined;
+}
+
+const EMPTY_DERIVED_CATALOG: DerivedConnectorCatalog = {
+    mcpServers: [],
+    accountServers: [],
+    onchainServers: [],
+    allServers: [],
+    accountBySlug: new Map<string, AccountToolkit>(),
+    serverByBindingId: new Map<string, RegistryServer>(),
+    meta: undefined,
+    categories: undefined,
+    tags: undefined,
+};
+
+const derivedCatalogCache = new WeakMap<ConnectorCatalogIndexPayload, DerivedConnectorCatalog>();
+
+function deriveConnectorCatalog(payload: ConnectorCatalogIndexPayload | undefined): DerivedConnectorCatalog {
+    if (!payload) return EMPTY_DERIVED_CATALOG;
+    const cached = derivedCatalogCache.get(payload);
+    if (cached) return cached;
+
+    const mcpServers = payload.mcps.map(summaryToRegistryServer);
+    const accountServers = payload.accounts.map((tk) => toolkitToRegistryServer(tk));
+    const onchainServers = payload.onchain.connectors.map(connectorToRegistryServer);
+    const allServers = [...accountServers, ...mcpServers, ...onchainServers];
+
+    const accountBySlug = new Map<string, AccountToolkit>();
+    for (const tk of payload.accounts) {
+        accountBySlug.set(tk.slug.toLowerCase(), tk);
+    }
+
+    const serverByBindingId = new Map<string, RegistryServer>();
+    for (const server of allServers) {
+        serverByBindingId.set(server.registryId.toLowerCase(), server);
+        serverByBindingId.set(`${server.origin}:${server.slug.toLowerCase()}`, server);
+    }
+
+    const meta: RegistryMeta = {
+        totalServers: payload.counts.total,
+        toolsServers: payload.counts.mcp,
+        accountsServers: payload.counts.account,
+        onchainServers: payload.counts.onchain,
+        loadedAt: payload.lastUpdated,
+    };
+
+    const derived: DerivedConnectorCatalog = {
+        mcpServers,
+        accountServers,
+        onchainServers,
+        allServers,
+        accountBySlug,
+        serverByBindingId,
+        meta,
+        categories: payload.categories,
+        tags: payload.tags,
+    };
+    derivedCatalogCache.set(payload, derived);
+    return derived;
+}
 const SEARCH_DEBOUNCE_MS = 250;
 
 // =============================================================================
