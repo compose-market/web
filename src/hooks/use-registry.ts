@@ -512,30 +512,38 @@ async function fetchServer(
 }
 
 async function fetchRegistryMeta(): Promise<RegistryMeta> {
-    const [toolsMeta, onchain] = await Promise.all([
-        fetch(`${BROKER_BASE}/mcps/meta`).then((r) => r.json() as Promise<{ origins: Record<string, number>; total: number }>),
-        fetch(`${BROKER_BASE}/onchain`).then((r) => r.ok ? r.json() as Promise<BrokerOnchainResponse> : Promise.resolve(null)),
+    const [toolsMeta, accounts, onchain] = await Promise.all([
+        sdk.connectors.mcps.meta(),
+        sdk.connectors.accounts.catalog({ limit: 1 }).catch(() => null),
+        sdk.connectors.onchain.list().catch(() => null),
     ]);
+    const origins = (toolsMeta.origins ?? {}) as Record<string, number>;
+    const total = typeof toolsMeta.total === "number" ? toolsMeta.total : 0;
+    const accountsCount = accounts?.total ?? accounts?.toolkits?.length ?? 0;
+    const onchainCount = onchain?.connectors?.length ?? 0;
     return {
-        totalServers: toolsMeta.total + (onchain?.connectors.length ?? 0),
-        toolsServers: toolsMeta.origins["mcp"] ?? 0,
-        onchainServers: onchain?.connectors.length ?? 0,
+        totalServers: total + accountsCount + onchainCount,
+        toolsServers: origins["mcp"] ?? total,
+        accountsServers: accountsCount,
+        onchainServers: onchainCount,
         loadedAt: new Date().toISOString(),
     };
 }
 
 async function fetchCategories(): Promise<string[]> {
-    const res = await fetch(`${BROKER_BASE}/mcps/categories`);
-    if (!res.ok) throw new Error(`Failed to fetch categories: ${res.status}`);
-    const data = await res.json() as { categories: string[] };
-    return data.categories;
+    const data = await sdk.connectors.mcps.categories();
+    const raw = (data.categories ?? []) as Array<string | { category?: string; name?: string; id?: string }>;
+    return raw
+        .map((c) => (typeof c === "string" ? c : (c.category || c.name || c.id || "")))
+        .filter(Boolean);
 }
 
 async function fetchTags(): Promise<string[]> {
-    const res = await fetch(`${BROKER_BASE}/mcps/tags`);
-    if (!res.ok) throw new Error(`Failed to fetch tags: ${res.status}`);
-    const data = await res.json() as { tags: string[] };
-    return data.tags;
+    const data = await sdk.connectors.mcps.tags();
+    const raw = (data.tags ?? []) as Array<string | { tag?: string }>;
+    return raw
+        .map((t) => (typeof t === "string" ? t : (t.tag || "")))
+        .filter(Boolean);
 }
 
 // =============================================================================
