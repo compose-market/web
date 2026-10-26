@@ -253,6 +253,34 @@ export async function fetchBackpackConnectorRows(
   return rows;
 }
 
+export async function fetchAllChannelStatuses(
+  userAddress: string,
+  agentWallet: string,
+  options?: { signal?: AbortSignal },
+): Promise<BackpackChannelStatusMap> {
+  // Single batch GET /channels/status instead of 4 per-channel requests (no custom headers → zero preflight).
+  const url = new URL(`${CHANNELS_BASE_URL}/channels/status`);
+  url.searchParams.set("userAddress", userAddress);
+  url.searchParams.set("agentWallet", agentWallet);
+
+  const response = await fetch(url, { signal: options?.signal });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch channels status: ${response.status}`);
+  }
+  const body = (await response.json()) as {
+    channels?: Array<ChannelStatusResponse & { channel: ChannelName }>;
+  };
+
+  const map: BackpackChannelStatusMap = {};
+  for (const entry of body.channels || []) {
+    if (entry?.channel) {
+      map[entry.channel] = entry;
+    }
+  }
+  writeBackpackChannelsCache(userAddress, agentWallet, map);
+  return map;
+}
+
 export async function fetchBackpackPermissions(userAddress: string, agentWallet: string): Promise<BackpackCloudPermission[]> {
   const payload = await sdk.permissions.list({ userAddress, agentWallet }) as {
     permissions?: Array<{ consentType?: string; granted?: boolean }>;
