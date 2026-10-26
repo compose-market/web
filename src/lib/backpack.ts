@@ -233,6 +233,26 @@ export async function fetchBackpackAccountsMap(
   return connMap;
 }
 
+export async function fetchBackpackConnectorRows(
+  userAddress: string,
+  options?: { signal?: AbortSignal; refresh?: boolean },
+): Promise<BackpackConnectorRow[]> {
+  // Simple GET with includeAccounts=false: skips redundant Composio list call & avoids CORS preflight.
+  const url = new URL(`${RUNTIME_BASE_URL}/connectors/status`);
+  url.searchParams.set("userAddress", userAddress);
+  url.searchParams.set("includeAccounts", "false");
+  if (options?.refresh) url.searchParams.set("refresh", "1");
+
+  const response = await fetch(url, { signal: options?.signal });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch connectors status: ${response.status}`);
+  }
+  const payload = (await response.json()) as { connectors?: BackpackConnectorRow[] };
+  const rows = Array.isArray(payload.connectors) ? payload.connectors : [];
+  writeBackpackConnectorsCache(userAddress, rows);
+  return rows;
+}
+
 export async function fetchBackpackPermissions(userAddress: string, agentWallet: string): Promise<BackpackCloudPermission[]> {
   const payload = await sdk.permissions.list({ userAddress, agentWallet }) as {
     permissions?: Array<{ consentType?: string; granted?: boolean }>;
