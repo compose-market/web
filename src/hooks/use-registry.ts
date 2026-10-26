@@ -1087,31 +1087,92 @@ export function useRegistryServer(registryId: string | null, defaultOrigin: Cano
 }
 
 export function useRegistryMeta(options: { enabled?: boolean } = {}) {
-    return useQuery({
+    const enabled = options.enabled ?? true;
+    const snap = useConnectorCatalogSnapshot(enabled);
+    const fallbackEnabled = enabled && !snap.hasData && Boolean(snap.error);
+
+    const fallbackQuery = useQuery({
         queryKey: ["registry", "meta"],
         queryFn: fetchRegistryMeta,
-        enabled: options.enabled ?? true,
+        enabled: fallbackEnabled,
         staleTime: METADATA_STALE_TIME,
         gcTime: REGISTRY_GC_TIME,
     });
+
+    if (snap.hasData && snap.meta) {
+        return {
+            ...fallbackQuery,
+            data: snap.meta,
+            isLoading: false,
+            isFetching: snap.isFetching,
+            error: null,
+            refetch: async () => {
+                await snap.forceRefresh();
+                return fallbackQuery;
+            },
+        };
+    }
+
+    return {
+        ...fallbackQuery,
+        isLoading: snap.isLoading || (fallbackEnabled && fallbackQuery.isLoading),
+    };
 }
 
 export function useRegistryCategories() {
-    return useQuery({
+    const snap = useConnectorCatalogSnapshot(true);
+    const fallbackEnabled = !snap.hasData && Boolean(snap.error);
+
+    const fallbackQuery = useQuery({
         queryKey: ["registry", "categories"],
         queryFn: fetchCategories,
+        enabled: fallbackEnabled,
         staleTime: REGISTRY_STALE_TIME,
         gcTime: REGISTRY_GC_TIME,
     });
+
+    if (snap.hasData && snap.categories) {
+        return {
+            ...fallbackQuery,
+            data: snap.categories,
+            isLoading: false,
+            isFetching: snap.isFetching,
+            error: null,
+        };
+    }
+
+    return {
+        ...fallbackQuery,
+        isLoading: snap.isLoading || (fallbackEnabled && fallbackQuery.isLoading),
+    };
 }
 
 export function useRegistryTags() {
-    return useQuery({
+    const snap = useConnectorCatalogSnapshot(true);
+    const fallbackEnabled = !snap.hasData && Boolean(snap.error);
+
+    const fallbackQuery = useQuery({
         queryKey: ["registry", "tags"],
         queryFn: fetchTags,
+        enabled: fallbackEnabled,
         staleTime: REGISTRY_STALE_TIME,
         gcTime: REGISTRY_GC_TIME,
     });
+
+    if (snap.hasData && snap.tags) {
+        return {
+            ...fallbackQuery,
+            data: snap.tags,
+            isLoading: false,
+            isFetching: snap.isFetching,
+            error: null,
+        };
+    }
+
+    return {
+        ...fallbackQuery,
+        isLoading: snap.isLoading || (fallbackEnabled && fallbackQuery.isLoading),
+    };
 }
 
 // =============================================================================
