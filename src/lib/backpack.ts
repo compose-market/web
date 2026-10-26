@@ -109,6 +109,30 @@ export function resolveBackpackUserId(preferred?: string | null): string {
   return preferred && preferred.trim().length > 0 ? preferred.trim() : "";
 }
 
+// =============================================================================
+// Query Keys
+// =============================================================================
+
+export function notificationsQueryKey(userAddress: string) {
+  return ["notifications", normalizeWalletKey(userAddress)] as const;
+}
+
+export function backpackAccountsQueryKey(userAddress: string) {
+  return ["backpack", "accounts", normalizeWalletKey(userAddress)] as const;
+}
+
+export function backpackConnectorsQueryKey(userAddress: string) {
+  return ["backpack", "connectors", normalizeWalletKey(userAddress)] as const;
+}
+
+export function backpackChannelsQueryKey(userAddress: string, agentWallet: string) {
+  return ["backpack", "channels", normalizeWalletKey(userAddress), normalizeWalletKey(agentWallet)] as const;
+}
+
+export function backpackPermissionsQueryKey(userAddress: string, agentWallet: string) {
+  return ["backpack", "permissions", normalizeWalletKey(userAddress), normalizeWalletKey(agentWallet)] as const;
+}
+
 export async function fetchBackpackConnections(userAddress: string, agentWallet: string): Promise<BackpackConnectionInfo[]> {
   const payload = await sdk.accounts.list({ userAddress, agentWallet }) as { connections?: BackpackConnectionInfo[] };
   return Array.isArray(payload.connections) ? payload.connections : [];
