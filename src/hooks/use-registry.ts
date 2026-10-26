@@ -38,19 +38,6 @@ import {
     type SemanticConnectorHit,
 } from "@/lib/connectors";
 
-/**
- * Build the connectors broker base URL.
- */
-function getBrokerBaseUrl(): string {
-    const url = import.meta.env.VITE_CONNECTORS_URL;
-    if (url) {
-        return url.replace(/\/$/, "");
-    }
-    return "https://connectors.compose.market";
-}
-
-const BROKER_BASE = getBrokerBaseUrl();
-
 /** Server origin types (user-facing). */
 export type ServerOrigin = CanonicalConnectorOrigin;
 
@@ -131,58 +118,6 @@ export interface SearchServersOptions {
 }
 
 type ServedCatalogStatus = "live" | "credential_gated";
-
-interface BrokerServerSummary {
-    slug: string;
-    origin: CanonicalConnectorOrigin;
-    name: string;
-    namespace: string;
-    description: string;
-    tags: string[];
-    category: string | null;
-    status: ServedCatalogStatus;
-    statefulness: "stateless" | "stateful" | "unknown";
-    cardVersion: string;
-    inspectedAt: string | null;
-}
-
-interface BrokerServerCard extends BrokerServerSummary {
-    repoUrl: string | null;
-    image: string | null;
-    compiledAt: string | null;
-    tools: Array<{ name: string; description?: string | null; inputSchema: Record<string, unknown> }>;
-    credentials: Array<{ varName: string; description?: string | null; obtainUrl?: string | null }>;
-}
-
-interface BrokerOnchainConnector {
-    id: string;
-    name: string;
-    description: string;
-    toolCount: number;
-    tools: Array<{ name: string; description: string; parameters: Record<string, unknown>; connectorId: string }>;
-    requiresApiKey?: boolean;
-    apiKeyConfigured?: boolean;
-}
-
-interface BrokerOnchainResponse {
-    connectors: BrokerOnchainConnector[];
-    status: {
-        initialized: boolean;
-        walletAddress: string | null;
-        chain: string;
-        chainId: number;
-        rpcUrl: string | null;
-        error: string | null;
-        totalTools: number;
-    };
-}
-
-interface BrokerToolsListResponse {
-    total: number;
-    offset: number;
-    limit: number;
-    servers: BrokerServerSummary[];
-}
 
 const DEFAULT_REGISTRY_PAGE_SIZE = 50;
 const MAX_TOOLS_PAGE_SIZE = 200;
@@ -810,7 +745,6 @@ export function useConnectorCatalogSnapshot(enabled = true): HydratedConnectorSn
         forceRefresh,
     };
 }
-const SEARCH_DEBOUNCE_MS = 250;
 
 // =============================================================================
 // Hooks
@@ -1204,6 +1138,7 @@ export function mergeRegistrySearchResults(
 
 export const ORIGIN_COLORS: Record<ServerOrigin, string> = {
     mcp: "purple",
+    account: "cyan",
     onchain: "green",
 };
 
@@ -1220,6 +1155,8 @@ export function getOriginLabel(origin: ServerOrigin): string {
     switch (origin) {
         case "mcp":
             return "MCP";
+        case "account":
+            return "Account";
         case "onchain":
             return "Onchain";
         default:
@@ -1227,8 +1164,10 @@ export function getOriginLabel(origin: ServerOrigin): string {
     }
 }
 
-export function getOriginIcon(origin: ServerOrigin): "server" | "coins" {
+export function getOriginIcon(origin: ServerOrigin): "server" | "link" | "coins" {
     switch (origin) {
+        case "account":
+            return "link";
         case "onchain":
             return "coins";
         default:
