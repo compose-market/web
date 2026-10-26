@@ -830,6 +830,7 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
 export function useRegistryServers(options: ListServersOptions = {}) {
     const queryClient = useQueryClient();
     const { enabled = true, ...listOptions } = options;
+    const snap = useConnectorCatalogSnapshot(enabled);
 
     const serializedOptions = JSON.stringify(listOptions);
     const queryKey = useMemo(
@@ -837,37 +838,217 @@ export function useRegistryServers(options: ListServersOptions = {}) {
         [serializedOptions],
     );
 
-    const query = useQuery({
+    const fallbackEnabled = enabled && !snap.hasData && Boolean(snap.error);
+    const fallbackQuery = useQuery({
         queryKey,
         queryFn: () => fetchServers(listOptions),
-        enabled,
+        enabled: fallbackEnabled,
         staleTime: REGISTRY_STALE_TIME,
         gcTime: REGISTRY_GC_TIME,
     });
 
+    const snapshotListData = useMemo<RegistryListResponse | undefined>(() => {
+        if (!snap.hasData) return undefined;
+
+        const origins = listOptions.origin
+            ? String(listOptions.origin).split(",").map((s) => s.trim()).filter(Boolean)
+            : ["mcp", "account", "onchain"];
+        const offset = listOptions.offset ?? 0;
+        const pageLimit = Math.min(
+            Math.max(1, listOptions.limit ?? DEFAULT_REGISTRY_PAGE_SIZE),
+            MAX_TOOLS_PAGE_SIZE,
+        );
+
+        const filterList = (items: RegistryServer[]) =>
+            items.filter((s) => {
+                if (listOptions.category && s.category !== listOptions.category) return false;
+                if (listOptions.available !== undefined && s.available !== listOptions.available) return false;
+                return true;
+            });
+
+        const combined: RegistryServer[] = [];
+        if (origins.includes("mcp")) {
+            combined.push(...filterList(snap.mcpServers));
+        }
+        if (origins.includes("account")) {
+            combined.push(...filterList(snap.accountServers));
+        }
+        if (origins.includes("onchain")) {
+            combined.push(...filterList(snap.onchainServers));
+        }
+        const merged = combined.slice(offset, offset + pageLimit);
+
+        return {
+            total: combined.length,
+            offset,
+            limit: merged.length,
+            servers: merged,
+        };
+    }, [
+        listOptions.available,
+        listOptions.category,
+        listOptions.limit,
+        listOptions.offset,
+        listOptions.origin,
+        snap.accountServers,
+        snap.hasData,
+        snap.mcpServers,
+        snap.onchainServers,
+    ]);
+
     const forceRefresh = useCallback(async () => {
-        await queryClient.invalidateQueries({ queryKey: REGISTRY_CACHE_KEY });
-    }, [queryClient]);
+        await snap.forceRefresh().catch(() => queryClient.invalidateQueries({ queryKey: REGISTRY_CACHE_KEY }));
+    }, [queryClient, snap]);
+
+    if (snap.hasData && snapshotListData) {
+        return {
+            ...fallbackQuery,
+            data: snapshotListData,
+            isLoading: false,
+            isFetching: snap.isFetching,
+            error: null,
+            forceRefresh,
+        };
+    }
 
     return {
-        ...query,
+        ...fallbackQuery,
+        isLoading: snap.isLoading || (fallbackEnabled && fallbackQuery.isLoading),
+        error: fallbackEnabled ? fallbackQuery.error : snap.error,
         forceRefresh,
     };
 }
 
 export function useRegistrySearch(query: string, limit = DEFAULT_REGISTRY_PAGE_SIZE, options: SearchServersOptions = {}) {
     const trimmedQuery = query.trim();
-    const debouncedQuery = useDebouncedValue(trimmedQuery, SEARCH_DEBOUNCE_MS);
+    const debouncedQuery = useDebouncedValue(trimmedQuery, SEMANTIC_DEBOUNCE_MS);
     const { enabled = true, ...searchOptions } = options;
     const serializedOptions = JSON.stringify(searchOptions);
+    const boundedLimit = Math.min(Math.max(1, limit), MAX_SEARCH_RESULTS);
+    const snap = useConnectorCatalogSnapshot(enabled);
 
-    return useQuery({
+    const originsKey = useMemo(() => {
+        const list = searchOptions.origin
+            ? String(searchOptions.origin).split(",").map((v) => v.trim()).filter(Boolean)
+            : ["mcp", "account", "onchain"];
+        return list.join(",");
+    }, [searchOptions.origin]);
+
+    const normalizedDebounced = normalizeConnectorSearchText(debouncedQuery);
+    const semanticEnabled = enabled && snap.hasData && normalizedDebounced.replace(/\s+/gu, "").length >= 2;
+
+    const semanticQuery = useQuery<SemanticConnectorHit[], Error>({
+        queryKey: [
+            "connectors-semantic-search",
+            snap.version ?? "unversioned",
+            normalizedDebounced,
+            boundedLimit,
+            originsKey,
+            searchOptions.category ?? "",
+        ],
+        queryFn: async ({ signal }) => {
+            const target = new URL(`${CONNECTORS_ORIGIN}/`);
+            target.searchParams.set("q", debouncedQuery);
+            target.searchParams.set("limit", String(boundedLimit));
+            target.searchParams.set("origin", originsKey);
+            target.searchParams.set("compact", "1");
+            if (searchOptions.category) {
+                target.searchParams.set("category", searchOptions.category);
+            }
+            const response = await fetch(target, {
+                method: "GET",
+                headers: { Accept: "application/json" },
+                signal,
+            });
+            if (!response.ok) {
+                throw new Error(`Semantic connector search failed: ${response.status}`);
+            }
+            const body = (await response.json()) as { results?: unknown };
+            if (!Array.isArray(body.results)) return [];
+            return body.results.flatMap((entry): SemanticConnectorHit[] => {
+                if (!entry || typeof entry !== "object") return [];
+                const row = entry as Record<string, unknown>;
+                if (typeof row.bindingId !== "string" || typeof row.origin !== "string" || typeof row.slug !== "string") {
+                    return [];
+                }
+                if (row.origin !== "mcp" && row.origin !== "account" && row.origin !== "onchain") {
+                    return [];
+                }
+                return [{
+                    bindingId: row.bindingId,
+                    origin: row.origin,
+                    slug: row.slug,
+                    score: typeof row.score === "number" ? row.score : 0,
+                }];
+            });
+        },
+        enabled: semanticEnabled,
+        staleTime: METADATA_STALE_TIME,
+        gcTime: REGISTRY_SEARCH_GC_TIME,
+        retry: 1,
+    });
+
+    const fallbackEnabled = enabled && debouncedQuery.length >= 2 && !snap.hasData && Boolean(snap.error);
+    const fallbackQuery = useQuery({
         queryKey: ["registry", "search", debouncedQuery, limit, serializedOptions],
         queryFn: () => searchServers(debouncedQuery, limit, searchOptions),
-        enabled: enabled && debouncedQuery.length >= 2,
+        enabled: fallbackEnabled,
         staleTime: METADATA_STALE_TIME,
         gcTime: REGISTRY_SEARCH_GC_TIME,
     });
+
+    const hybridSearchData = useMemo<RegistrySearchResponse | undefined>(() => {
+        if (!snap.hasData) return undefined;
+        if (trimmedQuery.length < 2) {
+            return { query: trimmedQuery.toLowerCase(), total: 0, servers: [] };
+        }
+        const allowedOrigins = new Set(originsKey.split(","));
+        const pool = snap.allServers.filter((s) => {
+            if (!allowedOrigins.has(s.origin)) return false;
+            if (searchOptions.category && s.category !== searchOptions.category) return false;
+            return true;
+        });
+
+        const localRanked = rankCatalogConnectors(pool, trimmedQuery, boundedLimit);
+        const semanticAligned = normalizeConnectorSearchText(trimmedQuery) === normalizedDebounced
+            ? (semanticQuery.data ?? [])
+            : [];
+        const merged = mergeSemanticConnectorRanks(pool, localRanked, semanticAligned, boundedLimit);
+
+        return {
+            query: trimmedQuery.toLowerCase(),
+            total: merged.length,
+            servers: merged,
+        };
+    }, [
+        boundedLimit,
+        normalizedDebounced,
+        originsKey,
+        searchOptions.category,
+        semanticQuery.data,
+        snap.allServers,
+        snap.hasData,
+        trimmedQuery,
+    ]);
+
+    if (snap.hasData && hybridSearchData) {
+        const waitingForSemanticOnly =
+            trimmedQuery.length >= 2
+            && hybridSearchData.servers.length === 0
+            && (trimmedQuery !== debouncedQuery || semanticQuery.isFetching);
+        return {
+            ...fallbackQuery,
+            data: hybridSearchData,
+            isLoading: waitingForSemanticOnly,
+            isFetching: semanticQuery.isFetching,
+            error: null,
+        };
+    }
+
+    return {
+        ...fallbackQuery,
+        isLoading: (enabled && trimmedQuery.length >= 2 && snap.isLoading) || (fallbackEnabled && fallbackQuery.isLoading),
+    };
 }
 
 export function useRegistryServer(registryId: string | null) {
