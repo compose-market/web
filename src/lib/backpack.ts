@@ -133,6 +133,43 @@ export function backpackPermissionsQueryKey(userAddress: string, agentWallet: st
   return ["backpack", "permissions", normalizeWalletKey(userAddress), normalizeWalletKey(agentWallet)] as const;
 }
 
+// =============================================================================
+// Snapshot Readers / Writers
+// =============================================================================
+
+export function readNotificationsCache(userAddress: string | null | undefined) {
+  return readOwnerSnapshot<NotificationsPayload>("notifications", userAddress);
+}
+
+export function writeNotificationsCache(userAddress: string, data: NotificationsPayload) {
+  writeOwnerSnapshot("notifications", userAddress, data);
+}
+
+export function readBackpackAccountsCache(userAddress: string | null | undefined) {
+  return readOwnerSnapshot<Record<string, BackpackConnectionInfo>>("backpack-accounts", userAddress);
+}
+
+export function writeBackpackAccountsCache(userAddress: string, data: Record<string, BackpackConnectionInfo>) {
+  writeOwnerSnapshot("backpack-accounts", userAddress, data);
+}
+
+export function readBackpackConnectorsCache(userAddress: string | null | undefined) {
+  return readOwnerSnapshot<BackpackConnectorRow[]>("backpack-connectors", userAddress);
+}
+
+export function writeBackpackConnectorsCache(userAddress: string, rows: BackpackConnectorRow[]) {
+  writeOwnerSnapshot("backpack-connectors", userAddress, rows);
+}
+
+export function readBackpackChannelsCache(userAddress: string | null | undefined, agentWallet: string | null | undefined) {
+  if (!agentWallet) return null;
+  return readOwnerSnapshot<BackpackChannelStatusMap>("backpack-channels", userAddress, agentWallet);
+}
+
+export function writeBackpackChannelsCache(userAddress: string, agentWallet: string, map: BackpackChannelStatusMap) {
+  writeOwnerSnapshot("backpack-channels", userAddress, map, agentWallet);
+}
+
 export async function fetchBackpackConnections(userAddress: string, agentWallet: string): Promise<BackpackConnectionInfo[]> {
   const payload = await sdk.accounts.list({ userAddress, agentWallet }) as { connections?: BackpackConnectionInfo[] };
   return Array.isArray(payload.connections) ? payload.connections : [];
