@@ -170,9 +170,67 @@ export function writeBackpackChannelsCache(userAddress: string, agentWallet: str
   writeOwnerSnapshot("backpack-channels", userAddress, map, agentWallet);
 }
 
-export async function fetchBackpackConnections(userAddress: string, agentWallet: string): Promise<BackpackConnectionInfo[]> {
-  const payload = await sdk.accounts.list({ userAddress, agentWallet }) as { connections?: BackpackConnectionInfo[] };
-  return Array.isArray(payload.connections) ? payload.connections : [];
+// =============================================================================
+// Network Fetchers (Write-Through to Owner Snapshots)
+// =============================================================================
+
+export async function fetchNotifications(
+  userAddress: string,
+  options?: { signal?: AbortSignal },
+): Promise<NotificationsPayload> {
+  const data = await sdk.notifications.list({ userAddress }, { signal: options?.signal });
+  if (Array.isArray(data.services) && data.services.length > 0) {
+    writeNotificationsCache(userAddress, data);
+  }
+  return data;
+}
+
+export async function fetchBackpackConnections(userAddress: string, _agentWallet?: string): Promise<BackpackConnectionInfo[]> {
+  const payload = await sdk.connectors.accounts.list({ userAddress });
+  return Array.isArray(payload.connections)
+    ? payload.connections.map((connection) => ({
+      ...connection,
+      name: connection.name || connection.slug,
+      granted: connection.granted ?? connection.connected,
+    }))
+    : [];
+}
+
+export async function fetchBackpackAccountsMap(
+  userAddress: string,
+  options?: { signal?: AbortSignal; refresh?: boolean },
+): Promise<Record<string, BackpackConnectionInfo>> {
+  let connections: BackpackConnectionInfo[];
+  if (options?.refresh) {
+    const url = new URL(`${RUNTIME_BASE_URL}/connectors/accounts`);
+    url.searchParams.set("userAddress", userAddress);
+    url.searchParams.set("refresh", "1");
+    const response = await fetch(url, { signal: options.signal });
+    if (!response.ok) {
+      throw new Error(`Failed to refresh accounts: ${response.status}`);
+    }
+    const payload = (await response.json()) as { connections?: BackpackConnectionInfo[] };
+    connections = Array.isArray(payload.connections) ? payload.connections : [];
+  } else {
+    const payload = await sdk.connectors.accounts.list({ userAddress }, { signal: options?.signal });
+    connections = Array.isArray(payload.connections)
+      ? payload.connections.map((conn) => ({
+        ...conn,
+        name: conn.name || conn.slug,
+      }))
+      : [];
+  }
+
+  const connMap: Record<string, BackpackConnectionInfo> = {};
+  for (const conn of connections) {
+    connMap[conn.slug] = {
+      ...conn,
+      name: conn.name || conn.slug,
+      granted: conn.granted ?? conn.connected,
+    };
+  }
+  writeBackpackAccountsCache(userAddress, connMap);
+  return connMap;
 }
 
 export async function fetchBackpackPermissions(userAddress: string, agentWallet: string): Promise<BackpackCloudPermission[]> {
