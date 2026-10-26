@@ -1051,13 +1051,38 @@ export function useRegistrySearch(query: string, limit = DEFAULT_REGISTRY_PAGE_S
     };
 }
 
-export function useRegistryServer(registryId: string | null) {
+export function useRegistryServer(registryId: string | null, defaultOrigin: CanonicalConnectorOrigin = "mcp") {
+    const queryClient = useQueryClient();
+    const placeholder = useMemo(() => {
+        if (!registryId) return undefined;
+        const cached = latestCachedConnectorCatalog(queryClient);
+        if (!cached) return undefined;
+        const binding = normalizeConnectorBinding(registryId, { defaultOrigin });
+        const derived = deriveConnectorCatalog(cached);
+        return derived.serverByBindingId.get(binding.registryId.toLowerCase())
+            ?? derived.serverByBindingId.get(`${binding.origin}:${binding.slug.toLowerCase()}`);
+    }, [defaultOrigin, queryClient, registryId]);
+
     return useQuery({
-        queryKey: ["registry", "server", registryId],
-        queryFn: () => fetchServer(registryId!),
+        queryKey: ["registry", "server", defaultOrigin, registryId],
+        queryFn: () => {
+            let cachedAccount: AccountToolkit | undefined;
+            if (registryId) {
+                const binding = normalizeConnectorBinding(registryId, { defaultOrigin });
+                if (binding.origin === "account") {
+                    const cached = latestCachedConnectorCatalog(queryClient);
+                    cachedAccount = cached?.accounts.find(
+                        (tk) => tk.slug.toLowerCase() === binding.slug.toLowerCase(),
+                    );
+                }
+            }
+            return fetchServer(registryId!, defaultOrigin, cachedAccount);
+        },
         enabled: !!registryId,
+        placeholderData: placeholder,
         staleTime: REGISTRY_STALE_TIME,
         gcTime: REGISTRY_GC_TIME,
+        meta: durableQueryMeta,
     });
 }
 
