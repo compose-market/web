@@ -281,6 +281,27 @@ export async function fetchAllChannelStatuses(
   return map;
 }
 
+export async function fetchPermissions(userAddress: string, agentWallet: string): Promise<BackpackCloudPermission[]> {
+  const payload = await sdk.permissions.list({ userAddress, agentWallet }) as {
+    permissions?: Array<{ consentType?: string; granted?: boolean }>;
+  };
+
+  const granted = Array.isArray(payload.permissions)
+    ? payload.permissions
+      .filter((permission) => permission.granted && typeof permission.consentType === "string" && isBackpackCloudPermission(permission.consentType))
+      .map((permission) => permission.consentType as BackpackCloudPermission)
+    : [];
+
+  writeOwnerSnapshot("backpack-permissions", userAddress, granted, agentWallet);
+  BACKPACK_CLOUD_PERMISSION_TYPES.forEach((permission) => {
+    const key = permissionStorageKey(agentWallet, permission, userAddress);
+    if (granted.includes(permission)) sessionStorage.setItem(key, "granted");
+    else sessionStorage.removeItem(key);
+  });
+
+  return granted;
+}
+
 export async function fetchBackpackPermissions(userAddress: string, agentWallet: string): Promise<BackpackCloudPermission[]> {
   const payload = await sdk.permissions.list({ userAddress, agentWallet }) as {
     permissions?: Array<{ consentType?: string; granted?: boolean }>;
