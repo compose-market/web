@@ -90,38 +90,10 @@ export function IdentityProvider({ children }: { children: ReactNode }) {
     return createElement(IdentityContext.Provider, { value }, children);
 }
 
-export function useSelectedUserAddress() {
-    const account = useActiveAccount();
-    const { paymentNetwork } = useChain();
-    const {
-        swigAddress,
-        evmSignerAddress,
-        isActivated,
-        isCreating,
-        requiredFundingLamports,
-        currentFundingLamports,
-        error,
-        create,
-    } = useSolanaSmartAccount();
-    const isEvm = isEvmNetwork(paymentNetwork);
-    const evmAddress = account?.address ?? null;
-    const solanaAddress = swigAddress ?? null;
-    const userAddress = isEvm ? evmAddress : solanaAddress;
-    const isResolving = Boolean(evmAddress) && !isEvm && (!solanaAddress || !isActivated || isCreating);
-
-    return {
-        userAddress,
-        evmAddress,
-        solanaAddress,
-        evmSignerAddress,
-        isActivated,
-        isActivating: isCreating,
-        activate: create,
-        requiredFundingLamports,
-        currentFundingLamports,
-        paymentNetwork,
-        isEvm,
-        isResolving,
-        error,
-    };
+export function useSelectedUserAddress(): SelectedUserAddressValue {
+    const shared = useContext(IdentityContext);
+    if (!shared) {
+        throw new Error("useSelectedUserAddress must be used inside IdentityProvider");
+    }
+    return shared;
 }
