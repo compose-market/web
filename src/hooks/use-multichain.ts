@@ -8,13 +8,12 @@
  * Used for cross-chain liquidity detection for x402 payments and
  * for the network-selector balance display.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { EvmNetworkId, NetworkId, SolanaNetworkId, FacilitatorChain } from "@compose-market/sdk/chains";
-import { evmChainId, getUsdcContractForNetwork, isEvmNetwork } from "@/lib/chains";
+import type { EvmNetworkId, NearNetworkId, NetworkId, SolanaNetworkId, FacilitatorChain } from "@compose-market/sdk/chains";
+import { evmChainId, isEvmNetwork, isNearNetwork, isSolanaNetwork } from "@/lib/performance/networks";
 import { useChain } from "@/contexts/Network";
 import { durableQueryMeta } from "@/lib/queryClient";
-import { createSolanaRpcFromNetwork } from "@/lib/svm/swig";
 
 export interface ChainBalance {
     network: NetworkId;
@@ -34,6 +33,7 @@ interface MultiChainBalanceOptions {
 interface MultiChainBalanceAccounts {
     evmAddress?: string | null;
     solanaAddress?: string | null;
+    nearAddress?: string | null;
 }
 
 function useDeferredQueryEnabled(enabled: boolean, deferUntilIdle: boolean): boolean {
@@ -82,7 +82,10 @@ function useDeferredQueryEnabled(enabled: boolean, deferUntilIdle: boolean): boo
 
 async function fetchEvmUsdcBalance(address: string, network: EvmNetworkId): Promise<bigint> {
     try {
-        const { readContract } = await import("thirdweb");
+        const [{ readContract }, { getUsdcContractForNetwork }] = await Promise.all([
+            import("thirdweb"),
+            import("@/lib/chains"),
+        ]);
         const contract = getUsdcContractForNetwork(network);
         const balance = await readContract({
             contract,
