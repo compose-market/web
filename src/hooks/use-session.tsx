@@ -157,7 +157,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const account = useActiveAccount();
     const connectionStatus = useActiveWalletConnectionStatus();
     const adminWallet = useAdminWallet();
-    const { paymentNetwork, solanaChains } = useChain();
+    const queryClient = useQueryClient();
+    const { paymentNetwork, selectedChain, solanaChains } = useChain();
+    const assetSymbol = selectedChain?.asset ?? "USDC";
     const {
         userAddress,
         isResolving: userAddressResolving,
@@ -166,7 +168,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         isActivated: solanaActivated,
         activate: activateSolana,
     } = useSelectedUserAddress();
-    const posthog = usePostHog();
     const [session, setSession] = useState<SessionState>(defaultSession);
     const [isCreating, setIsCreating] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -180,14 +181,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     // an active session, while Thirdweb restores the real signer in parallel.
     const cachedUserAddress = isEvmNetwork(paymentNetwork)
         ? cachedAccount?.address ?? null
-        : cachedAccount?.solanaAddress ?? null;
+        : isSolanaNetwork(paymentNetwork)
+            ? cachedAccount?.solanaAddress ?? null
+            : null;
     const canPreloadSession = !userAddress
         && connectionStatus !== "disconnected"
-        && Boolean(cachedUserAddress);
+        && Boolean(cachedUserAddress)
+        && Boolean(paymentNetwork);
     const { data: preloadedSession } = useQuery<SessionState, globalThis.Error>({
         queryKey: ["session-metadata", cachedUserAddress, paymentNetwork],
         queryFn: async ({ signal }) => {
-            if (!cachedUserAddress) return defaultSession;
+            if (!cachedUserAddress || !paymentNetwork) return defaultSession;
             const response = await sdk.fetch("/api/session", {
                 method: "GET",
                 signal,
@@ -209,6 +213,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 budgetRemaining: toNumberSafe(status.budgetRemaining),
                 expiresAt: typeof status.expiresAt === "number" ? status.expiresAt : null,
                 network: status.network ?? paymentNetwork,
+                keyId: status.keyId ?? null,
                 // The live attach/getActive flow below remains the only token owner.
                 keyToken: null,
             };
@@ -236,7 +241,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             return;
         }
 
-        if (!userAddress) {
+        if (!userAddress || !paymentNetwork) {
             attachedWalletKeyRef.current = null;
             sdk.wallets.clear();
             setSession(defaultSession);
@@ -259,11 +264,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         sessionRef.current = session;
     }, [session]);
 
-    useEffect(() => {
-        if (!account?.address) return;
-        posthog?.identify(account.address, { wallet_address: account.address });
-    }, [account?.address, posthog]);
-
     const syncSessionFromBackend = useCallback(async (): Promise<SessionState | null> => {
         if (!userAddress || userAddressResolving) return null;
 
@@ -282,15 +282,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 budgetRemaining: toNumberSafe(status.budgetRemaining),
                 expiresAt: typeof status.expiresAt === "number" ? status.expiresAt : null,
                 network: status.network ?? paymentNetwork,
+                keyId: status.keyId ?? null,
                 keyToken: sdk.keys.currentToken(),
             };
+            const hadToken = Boolean(sessionRef.current.keyToken);
             setSession(next);
+            if (!hadToken && next.keyToken) {
+                void queryClient.invalidateQueries({ queryKey: ["inference-analytics"] });
+                void queryClient.invalidateQueries({ queryKey: ["backpack", "permissions"] });
+            }
             return next;
         } catch (syncError) {
             console.warn("[session] sdk.keys.getActive failed", syncError);
             return null;
         }
-    }, [paymentNetwork, userAddress, userAddressResolving]);
+    }, [paymentNetwork, queryClient, userAddress, userAddressResolving]);
 
     // On wallet connect: hydrate session metadata from the server (the SDK
     // already re-attached any persisted token via its storage adapter).
@@ -419,8 +425,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             return { success: false, transactions };
         }
 
+        if (!paymentNetwork) {
+            setError("Select a payment network first");
+            return { success: false, transactions };
+        }
+
         if (!userAddress) {
-            setError("Solana account is still resolving");
+            setError(isSolanaNetwork(paymentNetwork) ? "Solana account is still resolving" : "Network account unavailable");
             return { success: false, transactions };
         }
 
@@ -428,7 +439,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         setError(null);
 
         try {
-            if (!isEvmNetwork(paymentNetwork) && !solanaActivated) {
+            if (isSolanaNetwork(paymentNetwork) && !solanaActivated) {
                 const activation = await activateSolana();
                 if (activation) {
                     transactions.push({
@@ -441,17 +452,22 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 }
             }
 
-            const budgetWei = Math.floor(budgetUSDC * 1_000_000);
+            const budgetUsdStr = toBudgetUsdString(budgetUSDC);
+            const budgetAtomic = parseBudgetAtomic(budgetUsdStr);
+            const budgetWei = Number(budgetAtomic);
             let evmNetwork: EvmNetworkId | null = null;
             if (isEvmNetwork(paymentNetwork)) {
                 evmNetwork = requireEvmNetwork(paymentNetwork, "Session payment approval");
+                const [{ getEvmChainObject, thirdwebClient }, { getContract, sendTransaction, allowance, approve, balanceOf }] = await Promise.all([
+                    import("@/lib/chains"),
+                    loadSessionThirdwebDeps(),
+                ]);
                 const activeChain = getEvmChainObject(evmNetwork);
                 const usdcAddress = getUsdcAddressForNetwork(evmNetwork);
                 if (!activeChain || !usdcAddress) {
                     throw new globalThis.Error(`Session payments are not configured for ${paymentNetwork}`);
                 }
 
-                const { getContract, sendTransaction, allowance, approve, balanceOf } = await loadSessionThirdwebDeps();
                 const usdcContract = getContract({
                     address: usdcAddress,
                     chain: activeChain,
@@ -463,14 +479,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                     allowance({ contract: usdcContract, owner: account.address, spender: TREASURY_WALLET }),
                 ]);
 
-                if (currentBalance < BigInt(budgetWei)) {
+                if (currentBalance < budgetAtomic) {
                     const balanceUSDC = Number(currentBalance) / 1_000_000;
                     throw new globalThis.Error(
-                        `Insufficient USDC balance. You have $${balanceUSDC.toFixed(2)} but want to budget $${budgetUSDC.toFixed(2)}`,
+                        `Insufficient ${assetSymbol} balance. You have $${balanceUSDC.toFixed(2)} but want to budget $${budgetUSDC.toFixed(2)}`,
                     );
                 }
 
-                if (currentAllowance < BigInt(budgetWei)) {
+                if (currentAllowance < budgetAtomic) {
                     // Botchain has no Thirdweb bundler: route the session
                     // approval through the merchant relay instead — the
                     // admin signs the UserOperation hash (identity only),
@@ -480,11 +496,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                         if (!adminAccount) {
                             throw new globalThis.Error("Admin account unavailable for Botchain session approval");
                         }
+                        const { submitBotchainSessionApproval } = await import("@/lib/botchain");
                         const approvalResult = await submitBotchainSessionApproval({
                             adminWallet: adminAccount,
                             owner: adminAccount.address,
                             account: account.address,
-                            amount: String(budgetWei),
+                            amount: budgetAtomic.toString(),
                         });
                         if (!approvalResult.success || !approvalResult.txHash) {
                             throw new globalThis.Error(approvalResult.error ?? "Botchain session approval failed");
@@ -492,7 +509,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                         transactions.push({
                             kind: "approval",
                             title: "Session spending approved",
-                            description: `Approved $${budgetUSDC.toFixed(6).replace(/0+$/, "").replace(/\.$/, "")} USDC for this session.`,
+                            description: `Approved $${budgetUsdStr} ${assetSymbol} for this session.`,
                             transactionHash: approvalResult.txHash,
                             network: paymentNetwork,
                         });
@@ -501,20 +518,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                             transaction: approve({
                                 contract: usdcContract,
                                 spender: TREASURY_WALLET,
-                                amountWei: BigInt(budgetWei),
+                                amountWei: budgetAtomic,
                             }),
                             account,
                         });
                         transactions.push({
                             kind: "approval",
                             title: "Session spending approved",
-                            description: `Approved $${budgetUSDC.toFixed(6).replace(/0+$/, "").replace(/\.$/, "")} USDC for this session.`,
+                            description: `Approved $${budgetUsdStr} ${assetSymbol} for this session.`,
                             transactionHash: approval.transactionHash,
                             network: paymentNetwork,
                         });
                     }
                 }
-            } else {
+            } else if (isSolanaNetwork(paymentNetwork)) {
                 // Solana path: build + relay a Swig-signed SPL approve that
                 // delegates USDC spending from the Swig wallet to the
                 // facilitator (SVM_TREASURY_SERVER_WALLET_PUBLIC).
@@ -531,6 +548,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                     throw new globalThis.Error(`No Solana chain configured for ${paymentNetwork}`);
                 }
 
+                const [{ fetchSolanaUsdcBalance }, { deriveSwigConfigAddress }, { buildSwigApproveTransaction }] = await Promise.all([
+                    import("@/hooks/use-multichain"),
+                    import("@/lib/svm/account"),
+                    import("@/lib/svm/swig"),
+                ]);
+
                 const solanaBalance = await fetchSolanaUsdcBalance(
                     solanaAddress,
                     solanaChain.assetAddress,
@@ -538,10 +561,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                     solanaChain.rpcUrl,
                 );
 
-                if (solanaBalance < BigInt(budgetWei)) {
+                if (solanaBalance < budgetAtomic) {
                     const balanceUSDC = Number(solanaBalance) / 1_000_000;
                     throw new globalThis.Error(
-                        `Insufficient USDC balance. You have $${balanceUSDC.toFixed(2)} but want to budget $${budgetUSDC.toFixed(2)}`,
+                        `Insufficient ${assetSymbol} balance. You have $${balanceUSDC.toFixed(2)} but want to budget $${budgetUSDC.toFixed(2)}`,
                     );
                 }
 
@@ -559,7 +582,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                     expectedWalletAddress: solanaAddress,
                     evmSignerAddress,
                     usdcMint: solanaChain.assetAddress,
-                    amount: BigInt(budgetWei),
+                    amount: budgetAtomic,
                     feePayer: feePayer as any,
                     network: paymentNetwork,
                     rpcUrl: solanaChain.rpcUrl,
@@ -575,10 +598,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 transactions.push({
                     kind: "approval",
                     title: "Session spending approved",
-                    description: `Approved $${budgetUSDC.toFixed(6).replace(/0+$/, "").replace(/\.$/, "")} USDC for this session.`,
+                    description: `Approved $${budgetUsdStr} ${assetSymbol} for this session.`,
                     transactionHash: approval.signature,
                     network: paymentNetwork,
                 });
+            } else {
+                throw new globalThis.Error(`Unsupported payment network: ${paymentNetwork}`);
             }
 
             // Guarantee the SDK has the right wallet context in case the user
@@ -590,7 +615,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
             const created = await sdk.keys.create({
                 purpose: "session",
-                budgetUsd: toBudgetUsdString(budgetUSDC),
+                budgetUsd: budgetUsdStr,
                 durationHours,
                 network: paymentNetwork,
                 name: getSessionName(),
@@ -604,41 +629,22 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 budgetRemaining: toNumberSafe(created.budgetRemaining, budgetWei),
                 expiresAt: created.expiresAt,
                 network: created.network,
+                keyId: created.keyId ?? null,
                 keyToken: created.token,
             };
             setSession(next);
-
-            posthog?.capture("session_created", {
-                network: paymentNetwork,
-                ...(evmNetwork ? { evm_chain_id: evmChainId(evmNetwork) } : {}),
-                budget_usdc: budgetUSDC,
-                duration_hours: durationHours,
-                path: "thirdweb",
-            });
-
-            mpTrack("Purchase", {
-                revenue: budgetUSDC,
-                currency: "USDC",
-            });
+            void queryClient.invalidateQueries({ queryKey: ["inference-analytics"] });
+            void queryClient.invalidateQueries({ queryKey: ["backpack", "permissions"] });
 
             return { success: true, transactions };
         } catch (createError) {
-            const errorMessage = createError instanceof Error
+            const errorMessage = createError instanceof ComposeSDKError || createError instanceof Error
                 ? createError.message
                 : typeof createError === "string"
                     ? createError
                     : createError && typeof createError === "object" && "message" in createError
                         ? String((createError as { message: unknown }).message)
                         : "Failed to create session";
-            posthog?.captureException(
-                createError instanceof Error ? createError : new globalThis.Error(String(createError)),
-                {
-                    $exception_message: "session_create_failed",
-                    network: paymentNetwork,
-                    budget_usdc: budgetUSDC,
-                },
-            );
-            mpError("session_create", errorMessage);
             setError(errorMessage);
             return { success: false, transactions };
         } finally {
@@ -647,8 +653,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }, [
         account,
         adminWallet,
+        assetSymbol,
         paymentNetwork,
-        posthog,
+        queryClient,
         userAddress,
         evmSignerAddress,
         solanaAddress,
@@ -658,14 +665,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     ]);
 
     const endSession = useCallback(() => {
-        posthog?.capture("session_ended", {
-            network: session.network,
-            budget_remaining: session.budgetRemaining,
-            budget_used: session.budgetUsed,
-        });
-        sdk.keys.clearToken();
+        const activeKeyId = sessionRef.current.keyId;
+        const activeToken = sdk.keys.currentToken() ?? sessionRef.current.keyToken;
+        const activeNetwork = sessionRef.current.network ?? paymentNetwork;
         setSession(defaultSession);
-    }, [posthog, session.budgetRemaining, session.budgetUsed, session.network]);
+        // Clear token synchronously BEFORE kicking off the background revoke
+        // so starting a new session immediately afterwards can never be wiped
+        // by an older revoke's .finally() callback.
+        sdk.keys.clearToken();
+        if (activeKeyId && activeToken) {
+            void sdk.fetch(`/api/keys/${encodeURIComponent(activeKeyId)}`, {
+                method: "DELETE",
+                key: activeToken,
+                ...(userAddress ? { userAddress } : {}),
+                ...(activeNetwork ? { network: activeNetwork } : {}),
+            }).catch(() => undefined);
+        }
+    }, [paymentNetwork, userAddress]);
 
     const hasBudget = useCallback((requiredWei: number = inferencePriceWei) => (
         session.isActive && session.budgetRemaining >= requiredWei
