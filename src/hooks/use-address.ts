@@ -80,6 +80,16 @@ function useSelectedUserAddressInternal(): SelectedUserAddressValue {
     ]);
 }
 
+/**
+ * Single shared Solana Swig + EVM identity provider so HUD, SessionProvider,
+ * NetworkSelector, and dialogs share one derivation & status check instead of
+ * duplicating Solana RPC pollers per mounted component.
+ */
+export function IdentityProvider({ children }: { children: ReactNode }) {
+    const value = useSelectedUserAddressInternal();
+    return createElement(IdentityContext.Provider, { value }, children);
+}
+
 export function useSelectedUserAddress() {
     const account = useActiveAccount();
     const { paymentNetwork } = useChain();
