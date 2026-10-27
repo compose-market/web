@@ -108,6 +108,15 @@ function decodeBase64(value: string): Uint8Array {
     return Uint8Array.from(binary, (char) => char.charCodeAt(0));
 }
 
+function encodeBase64(value: string): string {
+    const bytes = new TextEncoder().encode(value);
+    let binary = "";
+    for (const byte of bytes) {
+        binary += String.fromCharCode(byte);
+    }
+    return globalThis.btoa(binary);
+}
+
 function readBigUInt64LE(data: Uint8Array, offset: number): bigint {
     let value = BigInt(0);
     for (let index = 0; index < 8; index += 1) {
@@ -117,7 +126,7 @@ function readBigUInt64LE(data: Uint8Array, offset: number): bigint {
 }
 
 async function readSolanaTokenProgram(
-    rpc: ReturnType<typeof createSolanaRpcFromNetwork>,
+    rpc: { getAccountInfo: (addr: any) => { send: () => Promise<{ value?: { owner?: string } | null }> } },
     usdcMint: string,
 ): Promise<string> {
     const { address } = await import("@solana/kit");
