@@ -7,12 +7,11 @@ import {
     useState,
     type ReactNode,
 } from "react";
-import { usePostHog } from "@posthog/react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useActiveAccount, useActiveWalletConnectionStatus, useAdminWallet } from "thirdweb/react";
 import { useSelectedUserAddress } from "@/hooks/use-address";
 import {
-    Error,
+    Error as ComposeSDKError,
     type ActiveSessionMetadata,
     type BudgetEvent,
     type SessionActiveEvent,
@@ -22,25 +21,18 @@ import {
 import type { EvmNetworkId, NetworkId } from "@compose-market/sdk/chains";
 
 import { useChain } from "@/contexts/Network";
-import { mpError, mpTrack } from "@/lib/mixpanel";
 import {
     SESSION_BUDGET_PRESETS,
     TREASURY_WALLET,
-    evmChainId,
-    getEvmChainObject,
     getUsdcAddressForNetwork,
     inferencePriceWei,
     isEvmNetwork,
+    isSolanaNetwork,
     requireEvmNetwork,
-    thirdwebClient,
-} from "@/lib/chains";
+} from "@/lib/performance/networks";
 import { sdk } from "@/lib/sdk";
 import { readCachedAccount } from "@/lib/cache";
 import { durableQueryMeta, DURABLE_CACHE_MAX_AGE } from "@/lib/queryClient";
-import { buildSwigApproveTransaction } from "@/lib/svm/swig";
-import { deriveSwigConfigAddress } from "@/lib/svm/account";
-import { fetchSolanaUsdcBalance } from "@/hooks/use-multichain";
-import { submitBotchainSessionApproval } from "@/lib/botchain";
 import type { SolanaNetworkId } from "@compose-market/sdk/chains";
 
 type SessionThirdwebDeps = {
@@ -61,6 +53,7 @@ export interface SessionState {
     budgetRemaining: number;
     expiresAt: number | null;
     network: NetworkId | null;
+    keyId: string | null;
     keyToken: string | null;
 }
 
@@ -103,6 +96,7 @@ const defaultSession: SessionState = {
     budgetRemaining: 0,
     expiresAt: null,
     network: null,
+    keyId: null,
     keyToken: null,
 };
 
@@ -119,9 +113,24 @@ function toNumberSafe(value: string | number | null | undefined, fallback = 0): 
 
 function toBudgetUsdString(value: number): string {
     if (!Number.isFinite(value) || value <= 0) {
-        throw new globalThis.Error("Session budget must be a positive USDC amount");
+        throw new globalThis.Error("Session budget must be a positive amount");
     }
     return value.toFixed(6).replace(/\.?0+$/, "");
+}
+
+function parseBudgetAtomic(value: number | string): bigint {
+    const normalized = typeof value === "number" ? toBudgetUsdString(value) : value.trim();
+    const match = /^(0|[1-9]\d*)(?:\.(\d{1,6}))?$/u.exec(normalized);
+    if (!match) {
+        throw new globalThis.Error("Session budget must be a positive decimal amount with up to 6 decimals");
+    }
+    const whole = BigInt(match[1]);
+    const frac = (match[2] ?? "").padEnd(6, "0");
+    const atomic = whole * 1_000_000n + BigInt(frac || "0");
+    if (atomic <= 0n) {
+        throw new globalThis.Error("Session budget must be a positive amount");
+    }
+    return atomic;
 }
 
 function getSessionName(): string {
