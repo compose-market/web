@@ -322,7 +322,7 @@ export async function fetchBackpackPermissions(userAddress: string, agentWallet:
 
 export async function grantBackpackPermission(userAddress: string, agentWallet: string, consentType: BackpackCloudPermission): Promise<void> {
   await sdk.permissions.grant({ userAddress, agentWallet, consentType });
-  cacheBackpackPermission(agentWallet, consentType, true);
+  cacheBackpackPermission(agentWallet, consentType, true, userAddress);
 }
 
 export async function revokeBackpackPermission(userAddress: string, agentWallet: string, consentType: BackpackCloudPermission): Promise<void> {
