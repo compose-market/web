@@ -78,13 +78,6 @@ export function getCachedPermissions(agentWallet?: string | null, userAddress?: 
   ));
 }
 
-export function getCachedBackpackPermissions(agentWallet?: string | null): BackpackCloudPermission[] {
-  if (!agentWallet) return [];
-  return BACKPACK_CLOUD_PERMISSION_TYPES.filter((permission) => (
-    sessionStorage.getItem(permissionStorageKey(agentWallet, permission)) === "granted"
-  ));
-}
-
 export function cacheBackpackPermission(
   agentWallet: string,
   permission: BackpackCloudPermission,
@@ -302,24 +295,6 @@ export async function fetchPermissions(userAddress: string, agentWallet: string)
   return granted;
 }
 
-export async function fetchBackpackPermissions(userAddress: string, agentWallet: string): Promise<BackpackCloudPermission[]> {
-  const payload = await sdk.permissions.list({ userAddress, agentWallet }) as {
-    permissions?: Array<{ consentType?: string; granted?: boolean }>;
-  };
-
-  const granted = Array.isArray(payload.permissions)
-    ? payload.permissions
-      .filter((permission) => permission.granted && typeof permission.consentType === "string" && isBackpackCloudPermission(permission.consentType))
-      .map((permission) => permission.consentType as BackpackCloudPermission)
-    : [];
-
-  BACKPACK_CLOUD_PERMISSION_TYPES.forEach((permission) => {
-    cacheBackpackPermission(agentWallet, permission, granted.includes(permission));
-  });
-
-  return granted;
-}
-
 export async function grantBackpackPermission(userAddress: string, agentWallet: string, consentType: BackpackCloudPermission): Promise<void> {
   await sdk.permissions.grant({ userAddress, agentWallet, consentType });
   cacheBackpackPermission(agentWallet, consentType, true, userAddress);
@@ -341,4 +316,36 @@ export function prefetchNotifications(queryClient: QueryClient, userAddress: str
     queryFn: ({ signal }) => fetchNotifications(userAddress, { signal }),
     staleTime: BACKPACK_STALE_TIME,
   });
+}
+
+export function prefetchBackpack(
+  queryClient: QueryClient,
+  userAddress: string | null | undefined,
+  agentWallet?: string | null,
+): void {
+  if (!userAddress) return;
+  void queryClient.prefetchQuery({
+    queryKey: backpackAccountsQueryKey(userAddress),
+    queryFn: ({ signal }) => fetchBackpackAccountsMap(userAddress, { signal }),
+    staleTime: BACKPACK_STALE_TIME,
+  });
+  void queryClient.prefetchQuery({
+    queryKey: backpackConnectorsQueryKey(userAddress),
+    queryFn: ({ signal }) => fetchBackpackConnectorRows(userAddress, { signal }),
+    staleTime: BACKPACK_STALE_TIME,
+  });
+  if (agentWallet) {
+    void queryClient.prefetchQuery({
+      queryKey: backpackChannelsQueryKey(userAddress, agentWallet),
+      queryFn: ({ signal }) => fetchAllChannelStatuses(userAddress, agentWallet, { signal }),
+      staleTime: BACKPACK_STALE_TIME,
+    });
+    if (hasSessionAuth(userAddress)) {
+      void queryClient.prefetchQuery({
+        queryKey: backpackPermissionsQueryKey(userAddress, agentWallet),
+        queryFn: () => fetchPermissions(userAddress, agentWallet),
+        staleTime: BACKPACK_STALE_TIME,
+      });
+    }
+  }
 }
