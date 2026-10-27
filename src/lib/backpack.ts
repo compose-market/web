@@ -329,3 +329,16 @@ export async function revokeBackpackPermission(userAddress: string, agentWallet:
   await sdk.permissions.revoke({ userAddress, agentWallet, consentType });
   cacheBackpackPermission(agentWallet, consentType, false, userAddress);
 }
+
+// =============================================================================
+// Idle / Hover Prefetchers
+// =============================================================================
+
+export function prefetchNotifications(queryClient: QueryClient, userAddress: string | null | undefined): void {
+  if (!userAddress) return;
+  void queryClient.prefetchQuery({
+    queryKey: notificationsQueryKey(userAddress),
+    queryFn: ({ signal }) => fetchNotifications(userAddress, { signal }),
+    staleTime: BACKPACK_STALE_TIME,
+  });
+}
