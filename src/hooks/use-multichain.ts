@@ -175,6 +175,54 @@ export async function fetchSolanaUsdcBalance(
     }
 }
 
+export async function fetchNearUsdcBalance(
+    accountId: string,
+    tokenContract: string,
+    network: NearNetworkId,
+    rpcUrl: string,
+): Promise<bigint> {
+    try {
+        const response = await fetch(rpcUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                jsonrpc: "2.0",
+                id: "multichain-balance",
+                method: "query",
+                params: {
+                    request_type: "call_function",
+                    finality: "final",
+                    account_id: tokenContract,
+                    method_name: "ft_balance_of",
+                    args_base64: encodeBase64(JSON.stringify({ account_id: accountId })),
+                },
+            }),
+        });
+        if (!response.ok) {
+            throw new Error(`NEAR RPC returned HTTP ${response.status}`);
+        }
+        const payload = await response.json() as {
+            result?: { result?: number[] };
+            error?: { message?: string };
+        };
+        if (payload.error) {
+            throw new Error(payload.error.message || "NEAR RPC error");
+        }
+        const rawBytes = payload.result?.result;
+        if (!Array.isArray(rawBytes) || rawBytes.length === 0) {
+            return BigInt(0);
+        }
+        const decoded = JSON.parse(new TextDecoder().decode(Uint8Array.from(rawBytes))) as unknown;
+        if (typeof decoded !== "string" || decoded.length === 0) {
+            throw new Error(`Unexpected ft_balance_of result from ${tokenContract}`);
+        }
+        return BigInt(decoded);
+    } catch (error) {
+        console.warn(`Failed to fetch NEAR USDC balance on ${network}:`, error);
+        return BigInt(0);
+    }
+}
+
 function formatUsdcBalance(balance: bigint): string {
     const num = Number(balance) / 1_000_000;
     return num.toFixed(2);
