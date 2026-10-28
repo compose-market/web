@@ -145,7 +145,10 @@ export async function fetchSolanaUsdcBalance(
     rpcUrl: string,
 ): Promise<bigint> {
     try {
-        const { getProgramDerivedAddress, getAddressEncoder, address } = await import("@solana/kit");
+        const [{ getProgramDerivedAddress, getAddressEncoder, address }, { createSolanaRpcFromNetwork }] = await Promise.all([
+            import("@solana/kit"),
+            import("@/lib/svm/swig"),
+        ]);
         const rpc = createSolanaRpcFromNetwork(network, rpcUrl);
         const tokenProgram = await readSolanaTokenProgram(rpc, usdcMint);
         const encoder = getAddressEncoder();
