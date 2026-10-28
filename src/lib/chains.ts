@@ -1,19 +1,23 @@
 /**
- * Chain Configuration
+ * Thirdweb Chain & Contract Helpers
  *
- * Frontend chain configuration. Chain objects are built dynamically
- * from data fetched via GET /api/x402/facilitator/chains.
- *
- * The ChainConfigProvider populates the registry on app startup.
- * All functions below read from the registry at call time.
+ * Re-exports the pure network registry (`@/lib/performance/networks`) and adds
+ * Thirdweb `Chain` / `getContract` bindings built lazily from the live registry
+ * without statically importing `thirdweb/chains` preset tables or binding any
+ * single-chain default.
  */
 
 import { createThirdwebClient, defineChain, getContract } from "thirdweb";
-import { arcTestnet, avalancheFuji, avalanche, arbitrumSepolia, arbitrum } from "thirdweb/chains";
 import type { Chain } from "thirdweb/chains";
-import type { SmartWalletOptions } from "thirdweb/wallets";
-import type { EvmNetworkId, FacilitatorChain, NetworkId } from "@compose-market/sdk/chains";
-import { CONTRACT_ADDRESSES, getContractAddress, getContractAddressForChain, type ContractName } from "./performance/chains-data";
+import type { EvmNetworkId, FacilitatorChain } from "@compose-market/sdk/chains";
+import {
+    evmChainId,
+    getChainConfig,
+    getEvmChains,
+    getUsdcAddress,
+    setNetworkRegistry,
+    subscribeNetworkRegistry,
+} from "./performance/networks";
 
 const THIRDWEB_PRESETS: Record<number, Chain> = {
     5042002: arcTestnet,
@@ -23,7 +27,7 @@ export { CONTRACT_ADDRESSES, getContractAddress, getContractAddressForChain } fr
 export { formatUsdcPrice, RFA_BOUNTY_LIMITS, weiToUsdc } from "./performance/chains-data";
 export type { ContractName } from "./performance/chains-data";
 
-const env = (import.meta as ImportMeta & { env?: ImportMetaEnv }).env ?? {} as ImportMetaEnv;
+const env = (import.meta as ImportMeta & { env?: ImportMetaEnv }).env ?? ({} as ImportMetaEnv);
 
 // =============================================================================
 // Dynamic Chain Registry (populated by ChainConfigProvider)
@@ -37,7 +41,12 @@ type AppChain = FacilitatorChain & {
 };
 
 let resolvedChains: AppChain[] = [];
+
 let resolvedChainObjects: Map<number, Chain> = new Map();
+
+subscribeNetworkRegistry(() => {
+    resolvedChainObjects = new Map();
+});
 let resolvedDefaultNetwork: NetworkId = "eip155:5042";
 
 export function isEvmNetwork(network: NetworkId | string | null | undefined): network is EvmNetworkId {
@@ -66,28 +75,8 @@ function normalizeChain(chain: FacilitatorChain): AppChain {
     };
 }
 
-export function setChainRegistry(chains: FacilitatorChain[], defaultNetwork: NetworkId): void {
-    resolvedChains = chains.map(normalizeChain);
-    resolvedDefaultNetwork = defaultNetwork;
-    resolvedChainObjects = new Map();
-    for (const c of resolvedChains) {
-        if (c.chainId == null) continue;
-        const isEvm = c.namespace === "eip155" || (c.network ?? "").startsWith("eip155:");
-        if (!isEvm) continue;
-        const preset = THIRDWEB_PRESETS[c.chainId];
-        if (preset && !c.rpcUrl) {
-            resolvedChainObjects.set(c.chainId, preset);
-        } else {
-            resolvedChainObjects.set(c.chainId, defineChain({
-                id: c.chainId,
-                rpc: c.rpcUrl,
-                name: c.name,
-                nativeCurrency: { decimals: 18, name: c.asset, symbol: c.asset },
-                ...(c.isTestnet ? { testnet: true as const } : {}),
-                blockExplorers: [{ name: "Explorer", url: c.explorer }],
-            }));
-        }
-    }
+export function setChainRegistry(chains: FacilitatorChain[]): void {
+    setNetworkRegistry(chains);
 }
 
 export function getChains(): AppChain[] {
