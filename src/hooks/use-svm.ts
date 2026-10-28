@@ -77,7 +77,7 @@ export function useSolanaSmartAccount(): SolanaSmartAccountState & {
 
     const selectedSolanaChain = useMemo(() => {
         const defaultSolanaChain = solanaChains.at(0) ?? null;
-        if (!isEvmNetwork(paymentNetwork)) {
+        if (isSolanaNetwork(paymentNetwork)) {
             return solanaChains.find((chain) => chain.network === paymentNetwork) ?? defaultSolanaChain;
         }
         return defaultSolanaChain;
@@ -95,8 +95,9 @@ export function useSolanaSmartAccount(): SolanaSmartAccountState & {
             throw new Error("Solana network configuration is not available");
         }
 
-        const swigId = deriveSwigId(adminAddress);
-        const configPda = await deriveSwigConfigAddress(adminAddress);
+        const { account: svmAccount, swig: svmSwig } = await loadSvmModules();
+        const swigId = svmAccount.deriveSwigId(adminAddress);
+        const configPda = await svmAccount.deriveSwigConfigAddress(adminAddress);
         const checkedKey = `${adminAddress.toLowerCase()}:${selectedSolanaNetwork}:${configPda}`;
         const sharedActivation = activationPromises.get(checkedKey);
         if (sharedActivation) {
@@ -124,9 +125,9 @@ export function useSolanaSmartAccount(): SolanaSmartAccountState & {
         setIsCreating(true);
         setError(null);
         try {
-            const rpc = createSolanaRpcFromNetwork(selectedSolanaNetwork, selectedSolanaRpcUrl);
+            const rpc = svmSwig.createSolanaRpcFromNetwork(selectedSolanaNetwork, selectedSolanaRpcUrl);
 
-            const existing = await fetchSwigAccount(rpc, configPda);
+            const existing = await svmSwig.fetchSwigAccount(rpc, configPda);
             if (existing) {
                 writeSwigCreated(adminAddress, selectedSolanaNetwork);
                 checkedKeyRef.current = checkedKey;
@@ -139,20 +140,20 @@ export function useSolanaSmartAccount(): SolanaSmartAccountState & {
             setIsActivated(false);
 
             const walletBalance = await rpc.getBalance(swigAddress as any).send();
-            setRequiredFundingLamports(SVM_ACTIVATION_MINIMUM_LAMPORTS);
+            setRequiredFundingLamports(svmSwig.SVM_ACTIVATION_MINIMUM_LAMPORTS);
             setCurrentFundingLamports(walletBalance.value);
-            const useUsdcFallback = walletBalance.value < SVM_ACTIVATION_MINIMUM_LAMPORTS
+            const useUsdcFallback = walletBalance.value < svmSwig.SVM_ACTIVATION_MINIMUM_LAMPORTS
                 && selectedSolanaNetwork === SOLANA_MAINNET;
             const availableUsdc = useUsdcFallback
-                ? await readSvmTokenBalance({
+                ? await svmSwig.readSvmTokenBalance({
                     owner: swigAddress as any,
                     mint: selectedSolanaChain.assetAddress,
                     rpc,
                 })
                 : 0n;
-            if (walletBalance.value < SVM_ACTIVATION_MINIMUM_LAMPORTS && availableUsdc === 0n) {
+            if (walletBalance.value < svmSwig.SVM_ACTIVATION_MINIMUM_LAMPORTS && availableUsdc === 0n) {
                 throw new Error(
-                    `Fund Solana account ${swigAddress} with at least ${SVM_ACTIVATION_MINIMUM_LAMPORTS} lamports before activation`,
+                    `Fund Solana account ${swigAddress} with at least ${svmSwig.SVM_ACTIVATION_MINIMUM_LAMPORTS} lamports before activation`,
                 );
             }
 
@@ -162,14 +163,14 @@ export function useSolanaSmartAccount(): SolanaSmartAccountState & {
 
                 const { feePayer } = await sdk.svm.feePayer();
                 const signature = await account.signMessage({
-                    message: SWIG_AUTH_SIGN_MESSAGE,
+                    message: svmAccount.SWIG_AUTH_SIGN_MESSAGE,
                 });
-                const evmPubkey = await recoverEvmSecp256k1Pubkey(signature, SWIG_AUTH_SIGN_MESSAGE);
+                const evmPubkey = await svmAccount.recoverEvmSecp256k1Pubkey(signature, svmAccount.SWIG_AUTH_SIGN_MESSAGE);
                 const signMessage = async (message: Uint8Array) => {
                     return account.signMessage({ message: { raw: message } as any });
                 };
                 const activation = useUsdcFallback
-                    ? await buildUsdcFundedCreateSwigTransaction({
+                    ? await svmSwig.buildUsdcFundedCreateSwigTransaction({
                         swigId,
                         evmPubkey,
                         feePayer: feePayer as any,
@@ -179,7 +180,7 @@ export function useSolanaSmartAccount(): SolanaSmartAccountState & {
                         rpc,
                         signMessage,
                     })
-                    : await buildSelfFundedCreateSwigTransaction({
+                    : await svmSwig.buildSelfFundedCreateSwigTransaction({
                         swigId,
                         evmPubkey,
                         feePayer: feePayer as any,
@@ -204,7 +205,7 @@ export function useSolanaSmartAccount(): SolanaSmartAccountState & {
             }).catch(() => undefined);
             const activationResult = await activationPromise;
 
-            const created = await fetchSwigAccount(rpc, configPda);
+            const created = await svmSwig.fetchSwigAccount(rpc, configPda);
             if (!created) {
                 throw new Error("Solana account creation relayed but Swig account was not found");
             }
@@ -252,7 +253,8 @@ export function useSolanaSmartAccount(): SolanaSmartAccountState & {
         checkedKeyRef.current = null;
         (async () => {
             try {
-                const walletPda = await deriveSwigWalletAddress(adminAddress);
+                const { account: svmAccount } = await loadSvmModules();
+                const walletPda = await svmAccount.deriveSwigWalletAddress(adminAddress);
                 if (cancelled) return;
                 setSwigAddress(walletPda);
             } catch (err) {
@@ -269,17 +271,24 @@ export function useSolanaSmartAccount(): SolanaSmartAccountState & {
 
         let cancelled = false;
         const configKey = `${adminAddress.toLowerCase()}:${selectedSolanaNetwork}`;
-        if (readSwigCreated(adminAddress, selectedSolanaNetwork)) {
+        const alreadyKnownCreated = readSwigCreated(adminAddress, selectedSolanaNetwork);
+        if (alreadyKnownCreated) {
             setIsActivated(true);
             setRequiredFundingLamports(null);
             setCurrentFundingLamports(null);
+            // Swig account existence is permanent on-chain; skip periodic RPC
+            // polling when already verified unless the user is actively on Solana.
+            if (!isSolanaNetwork(paymentNetwork)) {
+                return;
+            }
         }
 
         const refresh = async () => {
             try {
-                const rpc = createSolanaRpcFromNetwork(selectedSolanaNetwork, selectedSolanaRpcUrl);
-                const configPda = await deriveSwigConfigAddress(adminAddress);
-                const existing = await fetchSwigAccount(rpc, configPda);
+                const { account: svmAccount, swig: svmSwig } = await loadSvmModules();
+                const rpc = svmSwig.createSolanaRpcFromNetwork(selectedSolanaNetwork, selectedSolanaRpcUrl);
+                const configPda = await svmAccount.deriveSwigConfigAddress(adminAddress);
+                const existing = await svmSwig.fetchSwigAccount(rpc, configPda);
                 if (cancelled) return;
 
                 checkedKeyRef.current = `${configKey}:${configPda}`;
@@ -288,6 +297,10 @@ export function useSolanaSmartAccount(): SolanaSmartAccountState & {
                     setIsActivated(true);
                     setRequiredFundingLamports(null);
                     setCurrentFundingLamports(null);
+                    if (poll !== null) {
+                        globalThis.clearInterval(poll);
+                        poll = null;
+                    }
                     return;
                 }
 
@@ -295,7 +308,7 @@ export function useSolanaSmartAccount(): SolanaSmartAccountState & {
                 setIsActivated(false);
                 const walletBalance = await rpc.getBalance(swigAddress as any).send();
                 if (cancelled) return;
-                setRequiredFundingLamports(SVM_ACTIVATION_MINIMUM_LAMPORTS);
+                setRequiredFundingLamports(svmSwig.SVM_ACTIVATION_MINIMUM_LAMPORTS);
                 setCurrentFundingLamports(walletBalance.value);
             } catch (err) {
                 if (!cancelled) {
@@ -304,13 +317,18 @@ export function useSolanaSmartAccount(): SolanaSmartAccountState & {
             }
         };
 
+        let poll: ReturnType<typeof globalThis.setInterval> | null = !isSolanaNetwork(paymentNetwork)
+            ? null
+            : globalThis.setInterval(() => void refresh(), ACTIVATION_POLL_MS);
         void refresh();
-        const poll = globalThis.setInterval(() => void refresh(), ACTIVATION_POLL_MS);
         return () => {
             cancelled = true;
-            globalThis.clearInterval(poll);
+            if (poll !== null) {
+                globalThis.clearInterval(poll);
+                poll = null;
+            }
         };
-    }, [adminAddress, selectedSolanaNetwork, selectedSolanaRpcUrl, swigAddress]);
+    }, [adminAddress, paymentNetwork, selectedSolanaNetwork, selectedSolanaRpcUrl, swigAddress]);
 
     return {
         swigAddress,
