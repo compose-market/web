@@ -231,17 +231,19 @@ function formatUsdcBalance(balance: bigint): string {
 export function useMultiChainBalance(accounts: MultiChainBalanceAccounts, options: MultiChainBalanceOptions = {}) {
     const evmAddress = accounts.evmAddress ?? null;
     const solanaAddress = accounts.solanaAddress ?? null;
+    const nearAddress = accounts.nearAddress ?? null;
     const queryEnabled = useDeferredQueryEnabled(
-        Boolean(evmAddress || solanaAddress) && (options.enabled ?? true),
+        Boolean(evmAddress || solanaAddress || nearAddress) && (options.enabled ?? true),
         options.deferUntilIdle ?? false,
     );
 
     const { chains } = useChain();
+    const chainsKey = useMemo(() => chains.map((c) => c.network).join(","), [chains]);
 
     return useQuery({
-        queryKey: ["multichain-balance", evmAddress, solanaAddress, chains],
+        queryKey: ["multichain-balance", evmAddress, solanaAddress, nearAddress, chainsKey],
         queryFn: async (): Promise<ChainBalance[]> => {
-            if (!evmAddress && !solanaAddress) {
+            if (!evmAddress && !solanaAddress && !nearAddress) {
                 return [];
             }
 
@@ -262,20 +264,49 @@ export function useMultiChainBalance(accounts: MultiChainBalanceAccounts, option
                         };
                     }
 
-                    const balance = solanaAddress
-                        ? await fetchSolanaUsdcBalance(
-                            solanaAddress,
-                            chain.assetAddress,
-                            network as SolanaNetworkId,
-                            chain.rpcUrl,
-                        )
-                        : BigInt(0);
+                    if (isSolanaNetwork(network)) {
+                        const balance = solanaAddress
+                            ? await fetchSolanaUsdcBalance(
+                                solanaAddress,
+                                chain.assetAddress,
+                                network,
+                                chain.rpcUrl,
+                            )
+                            : BigInt(0);
+
+                        return {
+                            network,
+                            chainName: chain.name || network,
+                            balance,
+                            formatted: formatUsdcBalance(balance),
+                            color: chain.isTestnet ? "red" : "cyan",
+                        };
+                    }
+
+                    if (isNearNetwork(network)) {
+                        const balance = nearAddress
+                            ? await fetchNearUsdcBalance(
+                                nearAddress,
+                                chain.assetAddress,
+                                network,
+                                chain.rpcUrl,
+                            )
+                            : BigInt(0);
+
+                        return {
+                            network,
+                            chainName: chain.name || network,
+                            balance,
+                            formatted: formatUsdcBalance(balance),
+                            color: chain.isTestnet ? "red" : "cyan",
+                        };
+                    }
 
                     return {
                         network,
                         chainName: chain.name || network,
-                        balance,
-                        formatted: formatUsdcBalance(balance),
+                        balance: BigInt(0),
+                        formatted: formatUsdcBalance(BigInt(0)),
                         color: chain.isTestnet ? "red" : "cyan",
                     };
                 }),
