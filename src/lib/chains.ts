@@ -79,6 +79,25 @@ export function setChainRegistry(chains: FacilitatorChain[]): void {
     setNetworkRegistry(chains);
 }
 
+function buildChainObject(chainId: number): Chain | undefined {
+    const existing = resolvedChainObjects.get(chainId);
+    if (existing) return existing;
+    const config = getChainConfig(chainId);
+    if (!config) return undefined;
+    const isEvm = config.namespace === "eip155" || (config.network ?? "").startsWith("eip155:");
+    if (!isEvm) return undefined;
+    const built = defineChain({
+        id: chainId,
+        rpc: config.rpcUrl,
+        name: config.name,
+        nativeCurrency: { decimals: 18, name: config.asset, symbol: config.asset },
+        ...(config.isTestnet ? { testnet: true as const } : {}),
+        blockExplorers: [{ name: "Explorer", url: config.explorer }],
+    });
+    resolvedChainObjects.set(chainId, built);
+    return built;
+}
+
 export function getChains(): AppChain[] {
     return resolvedChains;
 }
