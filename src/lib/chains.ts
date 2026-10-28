@@ -140,14 +140,12 @@ export function getChainConfig(chainId: number) {
     return resolvedChains.find((c) => c.chainId === chainId);
 }
 
-// Backward-compatible CHAIN_OBJECTS (dynamic proxy)
 export const CHAIN_OBJECTS = new Proxy({} as Record<number, Chain>, {
     get(_target, prop: string) {
-        const id = Number(prop);
-        return resolvedChainObjects.get(id);
+        return getChainObject(Number(prop));
     },
     ownKeys() {
-        return Array.from(resolvedChainObjects.keys()).map(String);
+        return getEvmChains().map((c) => String(c.chainId));
     },
     getOwnPropertyDescriptor() {
         return { enumerable: true, configurable: true };
@@ -166,12 +164,11 @@ export function getChainConfigByNetwork(network: NetworkId | string) {
     return getChainByNetwork(network);
 }
 
-// Backward-compatible SUPPORTED_CHAINS (computed from registry)
 export function getSupportedChains(): Array<{ id: number; chain: Chain }> {
     return getEvmChains()
         .filter((c) => c.chainId != null)
-        .map((c) => ({ id: c.chainId!, chain: resolvedChainObjects.get(c.chainId!)! }))
-        .filter((entry) => entry.chain);
+        .map((c) => ({ id: c.chainId!, chain: getChainObject(c.chainId!)! }))
+        .filter((entry) => Boolean(entry.chain));
 }
 
 // Lazy proxy for SUPPORTED_CHAINS - allows array indexing and iteration
