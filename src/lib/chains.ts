@@ -155,7 +155,7 @@ export const CHAIN_OBJECTS = new Proxy({} as Record<number, Chain>, {
 });
 
 export function getChainObject(chainId: number): Chain | undefined {
-    return resolvedChainObjects.get(chainId);
+    return buildChainObject(chainId);
 }
 
 export function getEvmChainObject(network: EvmNetworkId): Chain | undefined {
