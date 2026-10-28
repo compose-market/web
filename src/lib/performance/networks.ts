@@ -69,3 +69,12 @@ export function requireEvmNetwork(network: NetworkId | null | undefined, action 
   }
   return network;
 }
+
+function normalizeChain(chain: FacilitatorChain): AppChain {
+  const chainId = isEvmNetwork(chain.network) ? evmChainId(chain.network) : undefined;
+  return {
+    ...chain,
+    ...(chainId ? { chainId } : {}),
+    usdcAddress: chain.assetAddress as `0x${string}`,
+  };
+}
