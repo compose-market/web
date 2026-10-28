@@ -21,23 +21,23 @@ import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useAdminWallet } from "thirdweb/react";
 import { sdk } from "@/lib/sdk";
 import { useChain } from "@/contexts/Network";
-import { isEvmNetwork } from "@/lib/chains";
+import { isSolanaNetwork } from "@/lib/performance/networks";
 import { clearSwigCreated, readSwigCreated, writeSwigCreated } from "@/lib/cache";
-import {
-    deriveSwigId,
-    deriveSwigConfigAddress,
-    deriveSwigWalletAddress,
-    recoverEvmSecp256k1Pubkey,
-    SWIG_AUTH_SIGN_MESSAGE,
-} from "@/lib/svm/account";
-import {
-    createSolanaRpcFromNetwork,
-    fetchSwigAccount,
-    buildSelfFundedCreateSwigTransaction,
-    buildUsdcFundedCreateSwigTransaction,
-    readSvmTokenBalance,
-    SVM_ACTIVATION_MINIMUM_LAMPORTS,
-} from "@/lib/svm/swig";
+
+type SvmAccountModule = typeof import("@/lib/svm/account");
+type SvmSwigModule = typeof import("@/lib/svm/swig");
+
+let svmModulesPromise: Promise<{ account: SvmAccountModule; swig: SvmSwigModule }> | null = null;
+
+function loadSvmModules(): Promise<{ account: SvmAccountModule; swig: SvmSwigModule }> {
+    if (!svmModulesPromise) {
+        svmModulesPromise = Promise.all([
+            import("@/lib/svm/account"),
+            import("@/lib/svm/swig"),
+        ]).then(([account, swig]) => ({ account, swig }));
+    }
+    return svmModulesPromise;
+}
 
 const ACTIVATION_POLL_MS = 5_000;
 const SOLANA_MAINNET = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
