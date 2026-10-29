@@ -243,3 +243,48 @@ export function formatUsdcPrice(wei: bigint): string {
   const usdc = Number(wei) / 1_000_000;
   return usdc < 0.01 ? `$${usdc.toFixed(4)}` : `$${usdc.toFixed(2)}`;
 }
+
+export const RFA_BOUNTY_LIMITS = {
+  MIN_BOUNTY: 0.10,
+  MAX_BOUNTY: 1.00,
+  DEFAULT_BOUNTY: 0.50,
+  BASIC_BOUNTY: 0.10,
+  README_BONUS_MAX: 0.90,
+} as const;
+
+export const inferencePriceWei = 5_000;
+export const PRICE_PER_TOKEN_WEI = 1;
+export const MAX_TOKENS_PER_CALL = 100_000;
+
+export const SESSION_BUDGET_PRESETS = [
+  { label: "$1", value: 1_000_000 },
+  { label: "$10", value: 10_000_000 },
+  { label: "$50", value: 50_000_000 },
+  { label: "$100", value: 100_000_000 },
+] as const;
+
+export const TREASURY_WALLET = env.VITE_MERCHANT_WALLET_ADDRESS as `0x${string}`;
+export const SERVER_WALLET = env.VITE_THIRDWEB_SERVER_WALLET_ADDRESS as `0x${string}`;
+
+export type ExplorerItemType = "tx" | "address" | "block" | "token";
+
+export function getExplorerUrl(network: NetworkId, type: ExplorerItemType, value: string): string {
+  const chain = getChainByNetwork(network);
+  if (!chain?.explorer) return "#";
+  const baseUrl = chain.explorer.replace(/\/$/, "");
+  const segment = isNearNetwork(network) && type === "tx" ? "txns" : type;
+  const fallbackQuery = network === "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1"
+    ? "cluster=devnet"
+    : undefined;
+  const query = chain.explorerQuery ?? fallbackQuery;
+  return `${baseUrl}/${segment}/${value}${query ? `?${query}` : ""}`;
+}
+
+export function getExplorerTxUrl(network: NetworkId, txHash: string): string {
+  return getExplorerUrl(network, "tx", txHash);
+}
+
+export function calculateCostUSDC(tokens: number): string {
+  const cost = (PRICE_PER_TOKEN_WEI * tokens) / 10 ** 6;
+  return cost.toFixed(6);
+}
