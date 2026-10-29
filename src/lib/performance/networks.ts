@@ -97,3 +97,16 @@ export function subscribeNetworkRegistry(listener: () => void): () => void {
     registryListeners.delete(listener);
   };
 }
+
+export function getChains(): AppChain[] {
+  return resolvedChains;
+}
+
+export function getEvmChains(): AppChain[] {
+  return resolvedChains.filter((c) => c.namespace === "eip155" || (c.network ?? "").startsWith("eip155:"));
+}
+
+export function getChainByNetwork(network: NetworkId | string | null | undefined): AppChain | undefined {
+  if (!network) return undefined;
+  return resolvedChains.find((c) => c.network === network);
+}
