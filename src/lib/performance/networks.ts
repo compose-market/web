@@ -78,3 +78,22 @@ function normalizeChain(chain: FacilitatorChain): AppChain {
     usdcAddress: chain.assetAddress as `0x${string}`,
   };
 }
+
+export function setNetworkRegistry(chains: FacilitatorChain[]): void {
+  resolvedChains = chains.map(normalizeChain);
+  const nextIds = resolvedChains
+    .filter((c) => c.namespace === "eip155" || (c.network ?? "").startsWith("eip155:"))
+    .map((c) => c.chainId!)
+    .filter(Boolean);
+  supportedChainIds.splice(0, supportedChainIds.length, ...nextIds);
+  for (const listener of registryListeners) {
+    listener();
+  }
+}
+
+export function subscribeNetworkRegistry(listener: () => void): () => void {
+  registryListeners.add(listener);
+  return () => {
+    registryListeners.delete(listener);
+  };
+}
