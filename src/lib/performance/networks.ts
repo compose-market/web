@@ -110,3 +110,24 @@ export function getChainByNetwork(network: NetworkId | string | null | undefined
   if (!network) return undefined;
   return resolvedChains.find((c) => c.network === network);
 }
+
+export function getAssetSymbol(network: NetworkId | string | null | undefined): string {
+  return getChainByNetwork(network)?.asset ?? "USDC";
+}
+
+export function networkFromChainId(chainId: number): EvmNetworkId {
+  return `eip155:${chainId}` as EvmNetworkId;
+}
+
+export function getChainIds(): number[] {
+  return getEvmChains().map((c) => c.chainId!).filter(Boolean);
+}
+
+export function getUsdcAddress(chainId: number): `0x${string}` | undefined {
+  const chain = resolvedChains.find((c) => c.chainId === chainId);
+  return chain?.usdcAddress ?? (chain?.assetAddress as `0x${string}` | undefined);
+}
+
+export function getUsdcAddressForNetwork(network: EvmNetworkId): `0x${string}` | undefined {
+  return getUsdcAddress(evmChainId(network));
+}
