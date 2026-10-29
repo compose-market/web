@@ -154,3 +154,92 @@ export function getContractAddress(contract: ContractName, chainId: number): Add
 export function getContractAddressForChain(contract: ContractName, chainId: number): Address {
   return getContractAddress(contract, chainId);
 }
+
+export const CONTRACT_ADDRESSES = new Proxy(
+  {} as Record<number, typeof SHARED_COMPOSE_CONTRACTS>,
+  {
+    get(_target, prop: string) {
+      const id = Number(prop);
+      if (!Number.isInteger(id) || id <= 0) return undefined;
+      if (resolvedChains.length > 0 && !resolvedChains.some((c) => c.chainId === id)) {
+        return undefined;
+      }
+      return SHARED_COMPOSE_CONTRACTS;
+    },
+    ownKeys() {
+      return getEvmChains().map((c) => String(c.chainId));
+    },
+    getOwnPropertyDescriptor() {
+      return { enumerable: true, configurable: true };
+    },
+  },
+);
+
+export const CHAIN_CONFIG = new Proxy({} as Record<number, {
+  name: string;
+  isTestnet: boolean;
+  explorer: string;
+  color: string;
+}>, {
+  get(_target, prop: string) {
+    const id = Number(prop);
+    const chain = resolvedChains.find((c) => c.chainId === id);
+    if (!chain) return undefined;
+    return {
+      name: chain.name,
+      isTestnet: chain.isTestnet,
+      explorer: chain.explorer,
+      color: chain.isTestnet ? "red" : "cyan",
+    };
+  },
+  ownKeys() {
+    return getEvmChains().map((c) => String(c.chainId));
+  },
+  getOwnPropertyDescriptor() {
+    return { enumerable: true, configurable: true };
+  },
+});
+
+export const USDC_ADDRESSES = new Proxy({} as Record<number, `0x${string}`>, {
+  get(_target, prop: string) {
+    const id = Number(prop);
+    return getUsdcAddress(id);
+  },
+  ownKeys() {
+    return getEvmChains().map((c) => String(c.chainId));
+  },
+  getOwnPropertyDescriptor() {
+    return { enumerable: true, configurable: true };
+  },
+});
+
+export const CHAIN_IDS = new Proxy({} as Record<string, number>, {
+  get(_target, prop: string) {
+    if (typeof prop !== "string") return undefined;
+    const key = prop.replace(/[\s-]+/g, "").toLowerCase();
+    const chain = getEvmChains().find(
+      (c) =>
+        c.shortName?.replace(/[\s-]+/g, "").toLowerCase() === key
+        || c.name.replace(/[\s-]+/g, "").toLowerCase() === key,
+    );
+    return chain?.chainId;
+  },
+  ownKeys() {
+    return getEvmChains().map((c) => c.shortName ?? c.name);
+  },
+  getOwnPropertyDescriptor() {
+    return { enumerable: true, configurable: true };
+  },
+});
+
+export type ChainId = number;
+export const SUPPORTED_CHAIN_IDS: readonly number[] = supportedChainIds;
+
+export function weiToUsdc(wei: bigint): string {
+  return (Number(wei) / 1_000_000).toFixed(6);
+}
+
+export function formatUsdcPrice(wei: bigint): string {
+  const usdc = Number(wei) / 1_000_000;
+  return usdc < 0.01 ? `$${usdc.toFixed(4)}` : `$${usdc.toFixed(2)}`;
+}
