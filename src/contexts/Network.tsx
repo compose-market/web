@@ -134,6 +134,25 @@ function writeCachedRegistry(chains: FacilitatorChain[]): void {
   }
 }
 
+function readStoredNetwork(): NetworkId | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored && !isBlockedAppNetwork(stored)) return stored as NetworkId;
+  } catch {
+    // Private-mode / blocked storage is non-fatal.
+  }
+  return null;
+}
+
+function resolveInitialNetwork(chains: readonly FacilitatorChain[]): NetworkId | null {
+  const stored = readStoredNetwork();
+  if (stored && (chains.length === 0 || chains.some((c) => c.network === stored))) {
+    return stored;
+  }
+  return chains[0]?.network ?? null;
+}
+
 function initialNetwork(_defaultNetwork: NetworkId): NetworkId {
   if (typeof window !== "undefined") {
     const stored = localStorage.getItem(STORAGE_KEY);
