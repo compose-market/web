@@ -131,3 +131,26 @@ export function getUsdcAddress(chainId: number): `0x${string}` | undefined {
 export function getUsdcAddressForNetwork(network: EvmNetworkId): `0x${string}` | undefined {
   return getUsdcAddress(evmChainId(network));
 }
+
+export function getChainConfig(chainId: number) {
+  return resolvedChains.find((c) => c.chainId === chainId);
+}
+
+export function getChainConfigByNetwork(network: NetworkId | string | null | undefined) {
+  return getChainByNetwork(network);
+}
+
+export function getContractAddress(contract: ContractName, chainId: number): Address {
+  if (!Number.isInteger(chainId) || chainId <= 0) {
+    throw new Error(`Valid EVM chainId is required to resolve ${contract}`);
+  }
+  const address = SHARED_COMPOSE_CONTRACTS[contract];
+  if (!address) {
+    throw new Error(`Contract ${contract} is not configured for chain ${chainId}`);
+  }
+  return address;
+}
+
+export function getContractAddressForChain(contract: ContractName, chainId: number): Address {
+  return getContractAddress(contract, chainId);
+}
