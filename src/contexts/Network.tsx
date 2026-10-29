@@ -102,17 +102,9 @@ function isBlockedAppNetwork(network: string): boolean {
 
 interface CachedChainRegistry {
   chains: FacilitatorChain[];
-  defaultNetwork: NetworkId;
   fetchedAt: number;
 }
 
-/**
- * The chain registry changes rarely and is needed to render anything useful
- * (the whole app gates on it). Cache it in localStorage so reloads hydrate
- * synchronously and revalidate in the background, instead of blocking first
- * paint on GET /api/x402/facilitator/chains (un-cached, un-timeout'ed at the
- * SDK layer).
- */
 function readCachedRegistry(): CachedChainRegistry | null {
   if (typeof window === "undefined") return null;
   try {
@@ -120,13 +112,10 @@ function readCachedRegistry(): CachedChainRegistry | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as CachedChainRegistry;
     if (!Array.isArray(parsed?.chains) || parsed.chains.length === 0) return null;
-    if (typeof parsed?.defaultNetwork !== "string" || !parsed.defaultNetwork) return null;
     const filteredChains = parsed.chains.filter(isAppAllowedChain);
     if (filteredChains.length === 0) return null;
-    const defaultAllowed = filteredChains.some((c) => c.network === parsed.defaultNetwork);
     return {
       chains: filteredChains,
-      defaultNetwork: defaultAllowed ? parsed.defaultNetwork : FIRST_TIME_DEFAULT,
       fetchedAt: parsed.fetchedAt,
     };
   } catch {
@@ -134,11 +123,11 @@ function readCachedRegistry(): CachedChainRegistry | null {
   }
 }
 
-function writeCachedRegistry(chains: FacilitatorChain[], defaultNetwork: NetworkId): void {
+function writeCachedRegistry(chains: FacilitatorChain[]): void {
   try {
     localStorage.setItem(
       REGISTRY_CACHE_KEY,
-      JSON.stringify({ chains, defaultNetwork, fetchedAt: Date.now() } satisfies CachedChainRegistry),
+      JSON.stringify({ chains, fetchedAt: Date.now() } satisfies CachedChainRegistry),
     );
   } catch {
     // Quota / private-mode failures are non-fatal: next reload just refetches.
