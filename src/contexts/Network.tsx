@@ -153,6 +153,26 @@ function resolveInitialNetwork(chains: readonly FacilitatorChain[]): NetworkId |
   return chains[0]?.network ?? null;
 }
 
+function fetchChainsNoPreflight(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return fetch(input, {
+    ...init,
+    headers: { Accept: "application/json" },
+  });
+}
+
+function readInitialRegistry(): CachedChainRegistry | null {
+  const cached = readCachedRegistry();
+  if (cached) return cached;
+  const boot = readBootChains();
+  if (!boot || !Array.isArray(boot.chains) || boot.chains.length === 0) return null;
+  const filteredChains = boot.chains.filter(isAppAllowedChain);
+  if (filteredChains.length === 0) return null;
+  return {
+    chains: filteredChains,
+    fetchedAt: Date.now(),
+  };
+}
+
 function initialNetwork(_defaultNetwork: NetworkId): NetworkId {
   if (typeof window !== "undefined") {
     const stored = localStorage.getItem(STORAGE_KEY);
