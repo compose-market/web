@@ -1,12 +1,14 @@
-import {
+import React, {
   createContext,
   useContext,
   useEffect,
   useState,
   type ReactNode,
 } from "react";
-import { fetchChains, isTestnet, type FacilitatorChain, type NetworkId } from "@compose-market/sdk/chains";
-import { evmChainId, getChainByNetwork, isEvmNetwork, setChainRegistry } from "@/lib/chains";
+import { fetchChains, isTestnet, type FacilitatorChain, type FacilitatorChainsResponse, type NetworkId } from "@compose-market/sdk/chains";
+import Globe from "lucide-react/icons/globe";
+import { evmChainId, getChainByNetwork, isEvmNetwork, isNearNetwork, isSolanaNetwork, setNetworkRegistry } from "@/lib/performance/networks";
+import { readBootChains, readBootChainsPromise } from "@/lib/performance/avatars";
 
 export const NETWORK_LOGOS: Record<string, string> = {
   "eip155:43113": "/networks/avalancheFuji.jpeg",
@@ -25,9 +27,6 @@ export const NETWORK_LOGOS: Record<string, string> = {
   "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1": "/networks/solanaDevnet.jpeg",
   "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp": "/networks/solana.jpeg",
 };
-
-import React from "react";
-import { Globe } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /** Logo URL for a CAIP-2 network id, if we have an asset for it. */
@@ -65,17 +64,18 @@ export function NetworkGlyph({
 export { NetworkGlyph as NetworkLogo };
 
 interface NetworkValue {
-  selectedNetwork: NetworkId;
+  selectedNetwork: NetworkId | null;
   setSelectedNetwork: (network: NetworkId) => void;
-  paymentNetwork: NetworkId;
+  paymentNetwork: NetworkId | null;
+  selectedChain: FacilitatorChain | undefined;
   chains: FacilitatorChain[];
   evmChains: FacilitatorChain[];
   solanaChains: FacilitatorChain[];
-  defaultNetwork: NetworkId;
+  nearChains: FacilitatorChain[];
   isLoading: boolean;
   error: Error | null;
   getChainById: (chainId: number) => FacilitatorChain | undefined;
-  getChainByNetworkId: (network: string) => FacilitatorChain | undefined;
+  getChainByNetworkId: (network: string | null | undefined) => FacilitatorChain | undefined;
 }
 
 const Network = createContext<NetworkValue | null>(null);
@@ -83,13 +83,19 @@ const STORAGE_KEY = "selected_network";
 const REGISTRY_CACHE_KEY = "chain_registry";
 const FETCH_CHAINS_TIMEOUT_MS = 8_000;
 
+function isSupportedWalletNamespace(network: string): boolean {
+  return isEvmNetwork(network) || isSolanaNetwork(network);
+}
+
 const FIRST_TIME_DEFAULT: NetworkId = "eip155:5042";
 
 function isAppAllowedChain(c: FacilitatorChain): boolean {
+  if (!isSupportedWalletNamespace(c.network)) return false;
   return !isTestnet(c) || c.network === "eip155:84532";
 }
 
 function isBlockedAppNetwork(network: string): boolean {
+  if (!isSupportedWalletNamespace(network)) return true;
   if (network === "eip155:84532") return false;
   return isTestnet(network);
 }
