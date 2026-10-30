@@ -1,24 +1,22 @@
 /**
- * Hooks for reading on-chain Manowar protocol data
- * Fetches agents and workflows from deployed contracts
- * Multi-chain: fetches from ALL supported chains
+ * Hooks for reading on-chain Manowar protocol data.
+ * Multi-chain: every contract read requires an explicit chainId or iterates
+ * over all live supported EVM chains — zero hardcoded single-chain singletons.
  */
 import { useQuery } from "@tanstack/react-query";
 import { readContract } from "thirdweb";
 import {
-  getAgentFactoryContract,
-  getWorkflowContract,
-  getWarpContract,
-  getRFAContract,
   getAgentFactoryContractForChain,
   getWorkflowContractForChain,
   getWarpContractForChain,
+  getRFAContractForChain,
   formatUsdcPrice,
   weiToUsdc,
   type AgentData,
   type WorkflowData,
 } from "@/lib/contracts";
-import { networkFromChainId, SUPPORTED_CHAINS } from "@/lib/chains";
+import { useChain } from "@/contexts/Network";
+import { evmChainId, isEvmNetwork, networkFromChainId, SUPPORTED_CHAINS } from "@/lib/chains";
 import { getIpfsUrl } from "@/lib/pinata";
 import type { NetworkId } from "@compose-market/sdk/chains";
 import type { AgentCard, WorkflowMetadata } from "@/lib/pinata";
@@ -30,7 +28,7 @@ import type { AgentCard, WorkflowMetadata } from "@/lib/pinata";
 export interface OnchainAgent {
   id: number;
   dnaHash: string;
-  walletAddress: string; // Derived wallet address (primary identifier)
+  walletAddress: string;
   network?: NetworkId;
   licenses: number;
   licensesMinted: number;
@@ -43,9 +41,7 @@ export interface OnchainAgent {
   isClone: boolean;
   parentAgentId: number;
   agentCardUri: string;
-  // Resolved metadata from IPFS
   metadata?: AgentCard;
-  // Warp status
   isWarped: boolean;
 }
 
@@ -53,7 +49,7 @@ export interface OnchainWorkflow {
   id: number;
   title: string;
   description: string;
-  image: string; // Standard NFT metadata field (gateway URL)
+  image: string;
   workflowCardUri: string;
   totalPrice: string;
   units: number;
@@ -66,16 +62,12 @@ export interface OnchainWorkflow {
   coordinatorModel: string;
   hasActiveRfa: boolean;
   rfaId: number;
-  // Identity fields from IPFS metadata
   dnaHash?: string;
   walletAddress?: string;
-  // Resolved metadata
   metadata?: WorkflowMetadata;
   agentIds?: number[];
   agentWallets?: number[];
-  // Network where this workflow was minted
   network?: NetworkId;
-  // Internal EVM read-loop chain id, used only for EVM contract reads.
   chainId?: number;
 }
 
@@ -83,12 +75,9 @@ export interface OnchainWorkflow {
 // Contract Read Helpers
 // =============================================================================
 
-async function fetchAgentData(agentWallet: number, chainId?: number): Promise<OnchainAgent | null> {
+async function fetchAgentData(agentWallet: number, chainId: number): Promise<OnchainAgent | null> {
   try {
-    // Use chain-specific contract if chainId provided, otherwise default
-    const factoryContract = chainId
-      ? getAgentFactoryContractForChain(chainId)
-      : getAgentFactoryContract();
+    const factoryContract = getAgentFactoryContractForChain(chainId);
     const data = await readContract({
       contract: factoryContract,
       method: "function getAgentData(uint256 agentWallet) view returns ((bytes32 dnaHash, uint256 licenses, uint256 licensesMinted, uint256 licensePrice, uint256 creatorFee, address creator, bool cloneable, bool isClone, uint256 parentAgentId, string agentCardUri))",
@@ -98,28 +87,23 @@ async function fetchAgentData(agentWallet: number, chainId?: number): Promise<On
     const licenses = Number(data.licenses);
     const licensesMinted = Number(data.licensesMinted);
 
-    // Check if this agent was created via warp
     let isWarped = false;
     try {
-      const warpContract = chainId
-        ? getWarpContractForChain(chainId)
-        : getWarpContract();
+      const warpContract = getWarpContractForChain(chainId);
       isWarped = await readContract({
         contract: warpContract,
         method: "function isWarped(uint256 agentWallet) view returns (bool)",
         params: [BigInt(agentWallet)],
       }) as boolean;
     } catch {
-      // Warp check failed, assume not warped
       isWarped = false;
     }
 
-    // walletAddress will be populated from IPFS metadata in fetchAgentMetadata
     return {
       id: agentWallet,
       dnaHash: data.dnaHash,
-      walletAddress: "", // Populated from metadata
-      ...(chainId ? { network: networkFromChainId(chainId) } : {}),
+      walletAddress: "",
+      network: networkFromChainId(chainId),
       licenses,
       licensesMinted,
       licensesAvailable: licenses === 0 ? Infinity : licenses - licensesMinted,
@@ -151,9 +135,6 @@ async function fetchAgentMetadata(agent: OnchainAgent): Promise<OnchainAgent> {
 
   try {
     const cid = agent.agentCardUri.replace("ipfs://", "");
-
-    // Validate CID format - proper IPFS CIDs start with 'Qm' (v0) or 'bafy/bafk' (v1)
-    // Skip fetching if CID looks invalid (e.g., timestamp-based names from old mints)
     if (!cid.startsWith("Qm") && !cid.startsWith("baf")) {
       console.warn(`[use-onchain] Skipping invalid CID for agent ${agent.id}: ${cid}`);
       return agent;
@@ -164,8 +145,6 @@ async function fetchAgentMetadata(agent: OnchainAgent): Promise<OnchainAgent> {
     if (!response.ok) throw new Error("Failed to fetch metadata");
     const metadata = await response.json() as AgentCard;
 
-    // walletAddress comes from IPFS metadata - this is the SINGLE SOURCE OF TRUTH
-    // Frontend and backend both read this, neither derives it
     const walletAddress = metadata.walletAddress || agent.walletAddress;
     const creatorFee = finite(metadata.creatorFee) ?? agent.creatorFee;
 
@@ -176,19 +155,12 @@ async function fetchAgentMetadata(agent: OnchainAgent): Promise<OnchainAgent> {
   }
 }
 
-/**
- * Find an agent by its wallet address (stored in IPFS metadata)
- * Searches across all supported chains to find the agent
- */
 export async function fetchAgentByWalletAddress(walletAddress: string): Promise<OnchainAgent | null> {
   const normalizedSearch = walletAddress.toLowerCase();
 
-  // Search across all supported chains
   for (const { id: chainId } of SUPPORTED_CHAINS) {
     try {
       const contract = getAgentFactoryContractForChain(chainId);
-
-      // Get total agents count for this chain
       const total = await readContract({
         contract,
         method: "function totalAgents() view returns (uint256)",
@@ -198,22 +170,17 @@ export async function fetchAgentByWalletAddress(walletAddress: string): Promise<
       const totalNum = Number(total);
       if (totalNum === 0) continue;
 
-      // Search through all agents on this chain (most recent first for efficiency)
-      // Agent IDs start at 1, not 0
       for (let i = totalNum; i >= 1; i--) {
         const agent = await fetchAgentData(i, chainId);
         if (!agent) continue;
 
-        // Fetch metadata to get the wallet address (source of truth)
         const agentWithMeta = await fetchAgentMetadata(agent);
-
         if (agentWithMeta.walletAddress && agentWithMeta.walletAddress.toLowerCase() === normalizedSearch) {
           return agentWithMeta;
         }
       }
     } catch (error) {
       console.warn(`Failed to search agents on chain ${chainId}:`, error);
-      // Continue to next chain
     }
   }
 
