@@ -90,6 +90,13 @@ export function getManowarDeployment(network: NetworkId): ManowarDeploymentConfi
     };
   }
 
+  if (network.startsWith("near:")) {
+    return {
+      network,
+      near: getManowarNearDeployment(),
+    };
+  }
+
   return {
     network,
     solana: getManowarSolanaDeployment(),
