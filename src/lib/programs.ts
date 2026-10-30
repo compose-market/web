@@ -20,6 +20,7 @@ import {
   type Hex,
   type ManowarContractName,
   type ManowarDeploymentConfig,
+  type ManowarNearDeployment,
   type ManowarSolanaDeployment,
 } from "@compose-market/sdk/blockchain";
 import type { FacilitatorChain, NetworkId, SolanaNetworkId } from "@compose-market/sdk/chains";
@@ -65,6 +66,15 @@ export function getManowarSolanaDeployment(): ManowarSolanaDeployment {
     reputationProgramId: requireEnvAddress("VITE_SOLANA_REPUTATION_PROGRAM_ID", env.VITE_SOLANA_REPUTATION_PROGRAM_ID),
     validationProgramId: requireEnvAddress("VITE_SOLANA_VALIDATION_PROGRAM_ID", env.VITE_SOLANA_VALIDATION_PROGRAM_ID),
     marketProgramId: requireEnvAddress("VITE_SOLANA_MARKET_PROGRAM_ID", env.VITE_SOLANA_MARKET_PROGRAM_ID),
+  };
+}
+
+export function getManowarNearDeployment(): ManowarNearDeployment {
+  return {
+    factoryAddress: requireEnvAddress("VITE_NEAR_FACTORY_ADDRESS", env.VITE_NEAR_FACTORY_ADDRESS),
+    reputationAddress: requireEnvAddress("VITE_NEAR_REPUTATION_ADDRESS", env.VITE_NEAR_REPUTATION_ADDRESS),
+    validationAddress: requireEnvAddress("VITE_NEAR_VALIDATION_ADDRESS", env.VITE_NEAR_VALIDATION_ADDRESS),
+    workflowAddress: requireEnvAddress("VITE_NEAR_WORKFLOW_ADDRESS", env.VITE_NEAR_WORKFLOW_ADDRESS),
   };
 }
 
