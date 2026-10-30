@@ -703,20 +703,11 @@ export function prepareMintWorkflowCall(
 // Helper Functions
 // =============================================================================
 
-/**
- * Generate DNA hash from agent parameters (matches contract logic)
- * 
- * The dnaHash uniquely identifies an agent and is used to derive its wallet.
- * The derivation formula includes timestamp to ensure uniqueness even for identical skills/chain/model.
- * 
- * Formula: keccak256(skills + chainId + model + timestamp)
- */
 export function computeDnaHash(
   skills: string[],
   chainId: number | string,
-  model: string
+  model: string,
 ): `0x${string}` {
-  // Sort skills for deterministic hashing
   const sortedSkills = [...skills].sort();
   const skillsStr = sortedSkills.join(",");
 
@@ -724,42 +715,26 @@ export function computeDnaHash(
     return keccak256(
       encodePacked(
         ["string", "string", "string"],
-        [skillsStr, chainId, model]
-      )
+        [skillsStr, chainId, model],
+      ),
     );
   }
 
   return keccak256(
     encodePacked(
       ["string", "uint256", "string"],
-      [skillsStr, BigInt(chainId), model]
-    )
+      [skillsStr, BigInt(chainId), model],
+    ),
   );
 }
 
-/**
- * Derive agent wallet address from dnaHash + timestamp
- * 
- * - dnaHash = keccak256(skills, chainId, model) - sent to contract
- * - timestamp makes each wallet unique even for same skills/chain/model
- * - walletAddress is stored in IPFS metadata as single source of truth
- * 
- * Formula: walletAddress = privateKeyToAddress(keccak256(dnaHash + timestamp + ":agent:wallet"))
- * 
- * IMPORTANT: Both frontend (this function) and backend (agent-wallet.ts) use
- * the same derivation formula. The walletAddress is stored in IPFS metadata and
- * the backend verifies it can derive the same address from dnaHash + walletTimestamp.
- */
 export function deriveAgentWalletAddress(dnaHash: `0x${string}`, timestamp: number): `0x${string}` {
-  // Derive private key from dnaHash + timestamp for uniqueness
   const derivationSeed = keccak256(
     encodePacked(
       ["bytes32", "uint256", "string"],
-      [dnaHash, BigInt(timestamp), ":agent:wallet"]
-    )
+      [dnaHash, BigInt(timestamp), ":agent:wallet"],
+    ),
   );
-
-  // Compute public address from private key
   return computeAddressFromPrivateKey(derivationSeed);
 }
 
