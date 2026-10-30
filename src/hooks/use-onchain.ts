@@ -188,11 +188,9 @@ export async function fetchAgentByWalletAddress(walletAddress: string): Promise<
   return null;
 }
 
-async function fetchWorkflowData(workflowId: number, chainId?: number): Promise<OnchainWorkflow | null> {
+async function fetchWorkflowData(workflowId: number, chainId: number): Promise<OnchainWorkflow | null> {
   try {
-    const contract = chainId
-      ? getWorkflowContractForChain(chainId)
-      : getWorkflowContract();
+    const contract = getWorkflowContractForChain(chainId);
     const data = await readContract({
       contract,
       method: "function getWorkflowData(uint256 workflowId) view returns ((string title, string description, string banner, string workflowCardUri, uint256 totalPrice, uint256 units, uint256 unitsMinted, address creator, bool leaseEnabled, uint256 leaseDuration, uint8 leasePercent, bool hasCoordinator, string coordinatorModel, bool hasActiveRfa, uint256 rfaId))",
@@ -209,7 +207,7 @@ async function fetchWorkflowData(workflowId: number, chainId?: number): Promise<
       id: workflowId,
       title: data.title,
       description: data.description,
-      image: data.banner, // Contract still uses 'banner' field name
+      image: data.banner,
       workflowCardUri: data.workflowCardUri,
       totalPrice: weiToUsdc(data.totalPrice),
       units: Number(data.units),
@@ -224,7 +222,7 @@ async function fetchWorkflowData(workflowId: number, chainId?: number): Promise<
       rfaId: Number(data.rfaId),
       agentIds: agents,
       agentWallets: agents,
-      ...(chainId ? { network: networkFromChainId(chainId) } : {}),
+      network: networkFromChainId(chainId),
       chainId,
     };
   } catch (error) {
@@ -233,12 +231,9 @@ async function fetchWorkflowData(workflowId: number, chainId?: number): Promise<
   }
 }
 
-async function fetchWorkflowMetadata(workflow: OnchainWorkflow, chainId?: number): Promise<OnchainWorkflow> {
+async function fetchWorkflowMetadata(workflow: OnchainWorkflow, chainId: number): Promise<OnchainWorkflow> {
   try {
-    // Fetch metadata via tokenURI (standard ERC721)
-    const contract = chainId
-      ? getWorkflowContractForChain(chainId)
-      : getWorkflowContract();
+    const contract = getWorkflowContractForChain(chainId);
     const tokenUri = await readContract({
       contract,
       method: "function tokenURI(uint256 tokenId) view returns (string)",
@@ -250,7 +245,6 @@ async function fetchWorkflowMetadata(workflow: OnchainWorkflow, chainId?: number
       return workflow;
     }
 
-    // Handle IPFS URIs
     let metadataUrl = tokenUri;
     if (tokenUri.startsWith("ipfs://")) {
       const cid = tokenUri.replace("ipfs://", "");
@@ -261,7 +255,6 @@ async function fetchWorkflowMetadata(workflow: OnchainWorkflow, chainId?: number
     if (!response.ok) throw new Error("Failed to fetch metadata");
     const metadata = await response.json() as WorkflowMetadata;
 
-    // walletAddress and dnaHash come from IPFS metadata - this is the SINGLE SOURCE OF TRUTH
     return {
       ...workflow,
       metadata,
