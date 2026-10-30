@@ -1,14 +1,20 @@
 /**
  * Manowar Protocol Contract Configuration
- * Multi-chain support 
- * 
- * Contract addresses are defined in chains.ts (single source of truth)
+ * Multi-chain support — every contract accessor requires an explicit chainId.
+ *
+ * EVM ABIs are imported directly from `@compose-market/sdk/blockchain`.
  */
 
 import { getContract, prepareContractCall } from "thirdweb";
 import {
+  AgentFactoryABI,
+  CloneABI,
+  RFAABI,
+  WarpABI,
+  WorkflowABI,
+} from "@compose-market/sdk/blockchain";
+import {
   thirdwebClient,
-  paymentChain,
   CHAIN_OBJECTS,
   CONTRACT_ADDRESSES,
   getContractAddress,
@@ -16,10 +22,6 @@ import {
 } from "./chains";
 import { keccak256, encodePacked, type Address } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import {
-  formatUsdcPrice,
-  weiToUsdc,
-} from "./performance/chains-data";
 
 // Re-export from chains.ts for backwards compatibility
 export { CONTRACT_ADDRESSES, getContractAddress, getContractAddressForChain };
@@ -570,7 +572,10 @@ export function getRFAContract() {
   });
 }
 
-// Chain-specific contract getters (for multi-chain fetching)
+// =============================================================================
+// Chain-Specific Contract Instances (Zero Single-Chain Singletons)
+// =============================================================================
+
 export function getAgentFactoryContractForChain(chainId: number) {
   const chain = CHAIN_OBJECTS[chainId as keyof typeof CHAIN_OBJECTS];
   if (!chain) throw new Error(`Chain ${chainId} not configured`);
@@ -586,6 +591,16 @@ export function getWorkflowContractForChain(chainId: number) {
   if (!chain) throw new Error(`Chain ${chainId} not configured`);
   return getContract({
     address: getContractAddressForChain("Workflow", chainId),
+    chain,
+    client: thirdwebClient,
+  });
+}
+
+export function getCloneContractForChain(chainId: number) {
+  const chain = CHAIN_OBJECTS[chainId as keyof typeof CHAIN_OBJECTS];
+  if (!chain) throw new Error(`Chain ${chainId} not configured`);
+  return getContract({
+    address: getContractAddressForChain("Clone", chainId),
     chain,
     client: thirdwebClient,
   });
