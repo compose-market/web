@@ -738,26 +738,26 @@ export function deriveAgentWalletAddress(dnaHash: `0x${string}`, timestamp: numb
   return computeAddressFromPrivateKey(derivationSeed);
 }
 
-/**
- * Compute Ethereum address from private key
- * Uses the standard secp256k1 -> keccak256 -> last 20 bytes flow
- */
 function computeAddressFromPrivateKey(privateKey: `0x${string}`): `0x${string}` {
-  try {
-    const account = privateKeyToAccount(privateKey);
-    return account.address;
-  } catch {
-    const fallback = keccak256(privateKey);
-    return `0x${fallback.slice(26)}` as `0x${string}`;
-  }
+  const account = privateKeyToAccount(privateKey);
+  return account.address;
 }
 
 /**
- * Convert USDC amount to wei (6 decimals)
+ * Convert decimal stablecoin amount to 6-decimal atomic micro-units using
+ * exact decimal-string parsing (zero binary float drift).
  */
 export function usdcToWei(amount: number | string): bigint {
-  const amountNum = typeof amount === "string" ? parseFloat(amount) : amount;
-  return BigInt(Math.round(amountNum * 1_000_000));
+  const raw = (typeof amount === "number" ? amount.toFixed(6) : amount).trim();
+  const match = raw.match(/^(\d+)(?:\.(\d*))?$/);
+  if (!match) {
+    const parsed = typeof amount === "number" ? amount : Number.parseFloat(raw);
+    if (!Number.isFinite(parsed) || parsed < 0) return 0n;
+    return BigInt(Math.round(parsed * 1_000_000));
+  }
+  const whole = match[1];
+  const frac = (match[2] ?? "").slice(0, 6).padEnd(6, "0");
+  return BigInt(whole) * 1_000_000n + BigInt(frac);
 }
 
 /**
