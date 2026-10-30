@@ -844,8 +844,8 @@ export interface MintAgentParams {
   skills: string[];
   chainId: number;
   model: string;
-  licenses: number; // 0 = infinite (Renamed from units)
-  licensePrice: number; // USDC (Renamed from price)
+  licenses: number;
+  licensePrice: number;
   creatorFee?: number;
   cloneable: boolean;
   agentCardUri: string;
@@ -856,10 +856,10 @@ export interface MintWorkflowParams {
   description: string;
   banner: string;
   workflowCardUri: string;
-  units: number; // 0 = infinite
+  units: number;
   leaseEnabled: boolean;
-  leaseDuration: number; // days
-  leasePercent: number; // 0-20
+  leaseDuration: number;
+  leasePercent: number;
   hasCoordinator: boolean;
   coordinatorModel: string;
   agentIds: number[];
@@ -869,28 +869,21 @@ export interface MintWorkflowParams {
 // RFA (Request-For-Agent) Helpers
 // =============================================================================
 
-/**
- * RFA Categories - based on actual MCP/onchain registry categories
- */
 export const RFA_CATEGORIES = [
-  { id: 'defi', label: 'DeFi', description: 'Trading, swaps, liquidity' },
-  { id: 'social', label: 'Social', description: 'Discord, Twitter, Telegram' },
-  { id: 'ai', label: 'AI', description: 'LLM, inference, embeddings' },
-  { id: 'blockchain', label: 'Blockchain', description: 'Web3, on-chain operations' },
-  { id: 'storage', label: 'Storage', description: 'IPFS, files' },
-  { id: 'productivity', label: 'Productivity', description: 'Tasks, automation' },
-  { id: 'network', label: 'Network', description: 'HTTP, APIs' },
-  { id: 'utility', label: 'Utility', description: 'General tools' },
+  { id: "defi", label: "DeFi", description: "Trading, swaps, liquidity" },
+  { id: "social", label: "Social", description: "Discord, Twitter, Telegram" },
+  { id: "ai", label: "AI", description: "LLM, inference, embeddings" },
+  { id: "blockchain", label: "Blockchain", description: "Web3, on-chain operations" },
+  { id: "storage", label: "Storage", description: "IPFS, files" },
+  { id: "productivity", label: "Productivity", description: "Tasks, automation" },
+  { id: "network", label: "Network", description: "HTTP, APIs" },
+  { id: "utility", label: "Utility", description: "General tools" },
 ] as const;
 
-export type RFACategoryId = typeof RFA_CATEGORIES[number]['id'];
+export type RFACategoryId = typeof RFA_CATEGORIES[number]["id"];
 
-/**
- * Encode a skill/category string as bytes32 for the RFA contract
- * Uses keccak256 hash of the lowercased skill string
- */
 export function encodeSkillAsBytes32(skill: string): `0x${string}` {
   return keccak256(
-    encodePacked(['string'], [skill.toLowerCase()])
+    encodePacked(["string"], [skill.toLowerCase()]),
   );
 }
