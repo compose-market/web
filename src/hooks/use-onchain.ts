@@ -271,25 +271,26 @@ async function fetchWorkflowMetadata(workflow: OnchainWorkflow, chainId: number)
 // =============================================================================
 // Hooks
 // =============================================================================
-// NOTE: agent catalog reads (list, by-wallet, by-creator) moved to
-// @/hooks/use-agents.ts — the versioned agents-worker snapshot pattern that
-// mirrors use-model.ts. Only numeric contract-read hooks remain here.
 
-/**
- * Fetch a single agent by numeric ID
- */
-export function useOnchainAgent(agentWallet: number | null) {
+function useSelectedEvmChainId(explicitChainId?: number): number | null {
+  const { paymentNetwork } = useChain();
+  if (explicitChainId != null) return explicitChainId;
+  return isEvmNetwork(paymentNetwork) ? evmChainId(paymentNetwork) : null;
+}
+
+export function useOnchainAgent(agentWallet: number | null, chainId?: number) {
+  const resolvedChainId = useSelectedEvmChainId(chainId);
   return useQuery({
-    queryKey: ["onchain-agent", agentWallet],
+    queryKey: ["onchain-agent", resolvedChainId, agentWallet],
     queryFn: async () => {
-      if (!agentWallet) return null;
-      const agent = await fetchAgentData(agentWallet);
+      if (!agentWallet || resolvedChainId == null) return null;
+      const agent = await fetchAgentData(agentWallet, resolvedChainId);
       if (!agent) return null;
       return fetchAgentMetadata(agent);
     },
-    enabled: !!agentWallet,
+    enabled: !!agentWallet && resolvedChainId != null,
     staleTime: 30 * 1000,
-    gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
+    gcTime: 5 * 60 * 1000,
   });
 }
 
