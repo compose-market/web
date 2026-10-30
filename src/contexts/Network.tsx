@@ -9,6 +9,7 @@ import { fetchChains, isTestnet, type FacilitatorChain, type FacilitatorChainsRe
 import Globe from "lucide-react/icons/globe";
 import { evmChainId, getChainByNetwork, isEvmNetwork, isNearNetwork, isSolanaNetwork, setNetworkRegistry } from "@/lib/performance/networks";
 import { readBootChains, readBootChainsPromise } from "@/lib/performance/avatars";
+import { cn } from "@/lib/utils";
 
 export const NETWORK_LOGOS: Record<string, string> = {
   "eip155:43113": "/networks/avalancheFuji.jpeg",
@@ -27,7 +28,6 @@ export const NETWORK_LOGOS: Record<string, string> = {
   "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1": "/networks/solanaDevnet.jpeg",
   "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp": "/networks/solana.jpeg",
 };
-import { cn } from "@/lib/utils";
 
 /** Logo URL for a CAIP-2 network id, if we have an asset for it. */
 export function networkLogo(network: string | undefined | null): string | undefined {
@@ -86,8 +86,6 @@ const FETCH_CHAINS_TIMEOUT_MS = 8_000;
 function isSupportedWalletNamespace(network: string): boolean {
   return isEvmNetwork(network) || isSolanaNetwork(network);
 }
-
-const FIRST_TIME_DEFAULT: NetworkId = "eip155:5042";
 
 function isAppAllowedChain(c: FacilitatorChain): boolean {
   if (!isSupportedWalletNamespace(c.network)) return false;
@@ -173,51 +171,57 @@ function readInitialRegistry(): CachedChainRegistry | null {
   };
 }
 
-function initialNetwork(_defaultNetwork: NetworkId): NetworkId {
-  if (typeof window !== "undefined") {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored && !isBlockedAppNetwork(stored)) return stored as NetworkId;
-  }
-  return FIRST_TIME_DEFAULT;
-}
-
 export function ChainProvider({ children }: { children: ReactNode }) {
-  // Synchronously hydrate from the cached registry so the module-level chain
-  // registry (lib/chains.ts) and all dependent UI work on first render.
-  // setChainRegistry is idempotent, so a double-invoked initializer is safe.
+  // Synchronously hydrate from the cached registry (or resolved boot fetch)
+  // so the module-level chain registry and all dependent UI work on first render.
   const [cachedRegistry] = useState<CachedChainRegistry | null>(() => {
-    const cached = readCachedRegistry();
-    if (cached) setChainRegistry(cached.chains, cached.defaultNetwork);
+    const cached = readInitialRegistry();
+    if (cached) setNetworkRegistry(cached.chains);
     return cached;
   });
   const [chains, setChains] = useState<FacilitatorChain[]>(cachedRegistry?.chains ?? []);
-  const [defaultNetwork, setDefaultNetwork] = useState<NetworkId>(
-    cachedRegistry?.defaultNetwork ?? "eip155:5042",
-  );
   const [isLoading, setIsLoading] = useState(!cachedRegistry);
   const [error, setError] = useState<Error | null>(null);
+  const [selectedNetwork, setSelectedNetworkState] = useState<NetworkId | null>(
+    () => resolveInitialNetwork(cachedRegistry?.chains ?? []),
+  );
 
   useEffect(() => {
     let current = true;
     const controller = new AbortController();
     const timeout = globalThis.setTimeout(() => controller.abort(), FETCH_CHAINS_TIMEOUT_MS);
-    fetchChains({ signal: controller.signal }).then(
-      (result) => {
-        if (!current) return;
-        const appChains = result.chains.filter(isAppAllowedChain);
-        const appDefaultNetwork = appChains.some((c) => c.network === result.defaultNetwork)
-          ? result.defaultNetwork
-          : (appChains[0]?.network ?? FIRST_TIME_DEFAULT);
-        setChainRegistry(appChains, appDefaultNetwork);
-        writeCachedRegistry(appChains, appDefaultNetwork);
-        setChains(appChains);
-        setDefaultNetwork(appDefaultNetwork);
-        setIsLoading(false);
-      },
+
+    const applyResult = (result: FacilitatorChainsResponse) => {
+      if (!current) return;
+      const appChains = result.chains.filter(isAppAllowedChain);
+      setNetworkRegistry(appChains);
+      writeCachedRegistry(appChains);
+      setChains(appChains);
+      setSelectedNetworkState((prev) => {
+        if (prev && !isBlockedAppNetwork(prev) && appChains.some((c) => c.network === prev)) {
+          return prev;
+        }
+        return resolveInitialNetwork(appChains);
+      });
+      setIsLoading(false);
+    };
+
+    const load = async (): Promise<FacilitatorChainsResponse> => {
+      const bootPromise = readBootChainsPromise();
+      if (bootPromise) {
+        const bootResult = await bootPromise;
+        if (bootResult && Array.isArray(bootResult.chains) && bootResult.chains.length > 0) {
+          return bootResult;
+        }
+      }
+      return fetchChains({ fetch: fetchChainsNoPreflight, signal: controller.signal });
+    };
+
+    load().then(
+      applyResult,
       (err: unknown) => {
         if (!current) return;
         if (cachedRegistry) {
-          // A stale registry beats an error screen — keep it and warn.
           console.warn("[chains] revalidation failed, using cached registry", err);
           setIsLoading(false);
           return;
@@ -235,34 +239,39 @@ export function ChainProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const evmChains = chains.filter((c) => c.namespace === "eip155" || (c.network ?? "").startsWith("eip155:"));
-  const solanaChains = chains.filter((c) => c.namespace === "solana" || (c.network ?? "").startsWith("solana:"));
+  const evmChains = chains.filter((c) => c.namespace === "eip155" || isEvmNetwork(c.network));
+  const solanaChains = chains.filter((c) => c.namespace === "solana" || isSolanaNetwork(c.network));
+  const nearChains = chains.filter((c) => c.namespace === "near" || isNearNetwork(c.network));
 
   const getChainById = (chainId: number) =>
     evmChains.find((c) => isEvmNetwork(c.network) && evmChainId(c.network) === chainId);
 
-  const getChainByNetworkId = (network: string) =>
-    getChainByNetwork(network) ?? chains.find((c) => c.network === network);
-
-  const [selectedNetwork, setSelectedNetworkState] = useState<NetworkId>(
-    () => initialNetwork("eip155:5042"),
-  );
+  const getChainByNetworkId = (network: string | null | undefined) => {
+    if (!network) return undefined;
+    return getChainByNetwork(network) ?? chains.find((c) => c.network === network);
+  };
 
   useEffect(() => {
     if (!isLoading && chains.length > 0) {
       setSelectedNetworkState((prev) => {
-        if (isBlockedAppNetwork(prev)) return defaultNetwork;
-        const chain = getChainByNetworkId(prev);
-        if (chain) return prev;
-        return defaultNetwork;
+        if (prev && !isBlockedAppNetwork(prev) && chains.some((c) => c.network === prev)) {
+          return prev;
+        }
+        return chains[0]?.network ?? null;
       });
     }
-  }, [isLoading, chains.length, defaultNetwork]);
+  }, [isLoading, chains]);
 
   const setSelectedNetwork = (network: NetworkId) => {
     setSelectedNetworkState(network);
-    localStorage.setItem(STORAGE_KEY, network);
+    try {
+      localStorage.setItem(STORAGE_KEY, network);
+    } catch {
+      // Non-fatal in private mode.
+    }
   };
+
+  const selectedChain = getChainByNetworkId(selectedNetwork);
 
   return (
     <Network.Provider
@@ -270,10 +279,11 @@ export function ChainProvider({ children }: { children: ReactNode }) {
         selectedNetwork,
         setSelectedNetwork,
         paymentNetwork: selectedNetwork,
+        selectedChain,
         chains,
         evmChains,
         solanaChains,
-        defaultNetwork,
+        nearChains,
         isLoading,
         error,
         getChainById,
