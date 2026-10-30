@@ -760,34 +760,19 @@ export function usdcToWei(amount: number | string): bigint {
   return BigInt(whole) * 1_000_000n + BigInt(frac);
 }
 
-/**
- * Compute hash for external agent (used as originalAgentHash in Warp contract)
- * Creates a unique identifier for an agent from an external registry
- */
 export function computeExternalAgentHash(registry: string, address: string): `0x${string}` {
   return keccak256(
     encodePacked(
       ["string", "string"],
-      [registry, address]
-    )
+      [registry, address],
+    ),
   );
 }
 
-/**
- * Compute Workflow DNA hash for unique identification
- * 
- * This creates a unique identifier for a Workflow based on:
- * - The Workflow contract address
- * - The agent IDs included in the workflow
- * - A timestamp (for uniqueness even with same agents)
- * 
- * This hash is stored on-chain and in IPFS metadata at minting time.
- * Both frontend and backend fetch it from there - never duplicate derivation.
- */
 export function computeWorkflowDnaHash(
   agentIds: number[],
   timestamp: number,
-  deploymentAddress: string = getContractAddress("Workflow"),
+  deploymentAddress: string,
 ): `0x${string}` {
   const sortedAgentIds = [...agentIds].sort((a, b) => a - b);
   const agentIdsStr = sortedAgentIds.join(",");
@@ -796,36 +781,25 @@ export function computeWorkflowDnaHash(
     return keccak256(
       encodePacked(
         ["string", "string", "uint256", "string"],
-        [deploymentAddress, agentIdsStr, BigInt(timestamp), ":workflow:dna"]
-      )
+        [deploymentAddress, agentIdsStr, BigInt(timestamp), ":workflow:dna"],
+      ),
     );
   }
 
   return keccak256(
     encodePacked(
       ["address", "string", "uint256", "string"],
-      [deploymentAddress as `0x${string}`, agentIdsStr, BigInt(timestamp), ":workflow:dna"]
-    )
+      [deploymentAddress as `0x${string}`, agentIdsStr, BigInt(timestamp), ":workflow:dna"],
+    ),
   );
 }
 
-/**
- * Derive workflow wallet address from DNA hash + timestamp
- * 
- * Similar to agent wallet derivation, this creates a unique wallet address
- * for the Workflow. This wallet can be used for:
- * - Receiving x402 payments
- * - Signing workflow-level transactions
- * - Unique identification in the system
- * 
- * The wallet address is stored in IPFS metadata as the single source of truth.
- */
 export function deriveWorkflowWalletAddress(dnaHash: `0x${string}`, timestamp: number): `0x${string}` {
   const derivationSeed = keccak256(
     encodePacked(
       ["bytes32", "uint256", "string"],
-      [dnaHash, BigInt(timestamp), ":workflow:wallet"]
-    )
+      [dnaHash, BigInt(timestamp), ":workflow:wallet"],
+    ),
   );
 
   return computeAddressFromPrivateKey(derivationSeed);
