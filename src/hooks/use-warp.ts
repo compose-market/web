@@ -115,18 +115,22 @@ export async function fetchExternalWarpStatus(registry: string, address: string,
 // React Query Hooks
 // =============================================================================
 
-/**
- * Hook to check if a manowar agent is warped
- */
-export function useIsWarped(agentId: number | null) {
+function useResolvedEvmChainId(explicitChainId?: number): number | null {
+  const { paymentNetwork } = useChain();
+  if (explicitChainId != null) return explicitChainId;
+  return isEvmNetwork(paymentNetwork) ? evmChainId(paymentNetwork) : null;
+}
+
+export function useIsWarped(agentId: number | null, chainId?: number) {
+  const resolvedChainId = useResolvedEvmChainId(chainId);
   return useQuery({
-    queryKey: ["is-warped", agentId],
+    queryKey: ["is-warped", resolvedChainId, agentId],
     queryFn: async () => {
-      if (!agentId) return false;
-      return checkIsWarped(agentId);
+      if (!agentId || resolvedChainId == null) return false;
+      return checkIsWarped(agentId, resolvedChainId);
     },
-    enabled: !!agentId,
-    staleTime: 60 * 1000, // 1 minute
+    enabled: !!agentId && resolvedChainId != null,
+    staleTime: 60 * 1000,
   });
 }
 
