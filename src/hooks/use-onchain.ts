@@ -294,9 +294,6 @@ export function useOnchainAgent(agentWallet: number | null, chainId?: number) {
   });
 }
 
-/**
- * Fetch all on-chain workflows from ALL supported networks.
- */
 export async function fetchOnchainWorkflows(options?: {
   includeRFA?: boolean;
   onlyComplete?: boolean;
@@ -306,7 +303,6 @@ export async function fetchOnchainWorkflows(options?: {
   const chainPromises = SUPPORTED_CHAINS.map(async ({ id: chainId }) => {
     try {
       const contract = getWorkflowContractForChain(chainId);
-
       const total = await readContract({
         contract,
         method: "function totalWorkflows() view returns (uint256)",
@@ -317,16 +313,16 @@ export async function fetchOnchainWorkflows(options?: {
       if (totalNum === 0) return [];
 
       const workflowPromises = Array.from({ length: totalNum }, (_, i) =>
-        fetchWorkflowData(i + 1, chainId)
+        fetchWorkflowData(i + 1, chainId),
       );
 
       let workflows = (await Promise.all(workflowPromises)).filter((m): m is OnchainWorkflow => m !== null);
-      workflows = await Promise.all(workflows.map(m => fetchWorkflowMetadata(m, chainId)));
+      workflows = await Promise.all(workflows.map((m) => fetchWorkflowMetadata(m, chainId)));
 
       if (onlyComplete && !includeRFA) {
-        workflows = workflows.filter(m => !m.hasActiveRfa);
+        workflows = workflows.filter((m) => !m.hasActiveRfa);
       } else if (includeRFA && !onlyComplete) {
-        workflows = workflows.filter(m => m.hasActiveRfa);
+        workflows = workflows.filter((m) => m.hasActiveRfa);
       }
 
       return workflows;
@@ -350,28 +346,22 @@ export function useOnchainWorkflows(options?: {
     queryKey: ["onchain-workflows", "all-chains", includeRFA, onlyComplete],
     queryFn: () => fetchOnchainWorkflows({ includeRFA, onlyComplete }),
     staleTime: 30 * 1000,
-    gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
+    gcTime: 5 * 60 * 1000,
     retry: 2,
   });
 }
 
-/**
- * Fetch workflows owned by a specific address
- */
 export function useWorkflowsByCreator(creator: string | undefined) {
   const { data: allWorkflows, ...rest } = useOnchainWorkflows({ onlyComplete: false });
 
   return {
     ...rest,
-    data: allWorkflows?.filter(m =>
-      m.creator.toLowerCase() === creator?.toLowerCase()
+    data: allWorkflows?.filter((m) =>
+      m.creator.toLowerCase() === creator?.toLowerCase(),
     ),
   };
 }
 
-/**
- * Fetch workflows with active RFAs (for marketplace RFA tab)
- */
 export function useWorkflowsWithRFA() {
   return useOnchainWorkflows({ includeRFA: true, onlyComplete: false });
 }
