@@ -80,3 +80,26 @@ export function mergeReceiptList(existing: Receipt[] | undefined, incoming: Rece
   }
   return Array.from(byKey.values());
 }
+
+export function enrichReceiptWithAnalytics(
+  receipt: Receipt,
+  settlementsByIntent: ReadonlyMap<string, InferenceAnalytics.InferenceSettlement>,
+): Receipt {
+  if (!receipt.paymentIntentId) return receipt;
+  const match = settlementsByIntent.get(receipt.paymentIntentId);
+  if (!match) return receipt;
+  const mappedStatus: SettlementStatus = match.status;
+  const settledAtMs = match.settledAt ? Date.parse(match.settledAt) : Number.NaN;
+  const enriched: Receipt = {
+    ...receipt,
+    finalAmountWei: match.billing.finalAmountAtomic || receipt.finalAmountWei,
+    providerAmountWei: match.billing.inferenceAmountAtomic || receipt.providerAmountWei,
+    platformFeeWei: match.billing.platformFeeAtomic || receipt.platformFeeWei,
+    settlementStatus: mappedStatus,
+    ...(match.transactionHash ? { txHash: match.transactionHash } : {}),
+    ...(match.claimTransactionHash ? { claimTxHash: match.claimTransactionHash } : {}),
+    ...(match.settleTransactionHash ? { settleTxHash: match.settleTransactionHash } : {}),
+    ...(Number.isFinite(settledAtMs) && settledAtMs > 0 ? { settledAt: settledAtMs } : {}),
+  };
+  return mergeTwoReceipts(receipt, enriched);
+}
