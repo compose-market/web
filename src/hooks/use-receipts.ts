@@ -66,3 +66,17 @@ function mergeTwoReceipts(current: Receipt, incoming: Receipt): Receipt {
     bills: (incoming.bills && incoming.bills.length > 0) ? incoming.bills : current.bills,
   };
 }
+
+export function mergeReceiptList(existing: Receipt[] | undefined, incoming: Receipt | Receipt[]): Receipt[] {
+  const additions = Array.isArray(incoming) ? incoming : [incoming];
+  const byKey = new Map<string, Receipt>();
+  for (const item of existing ?? []) {
+    byKey.set(receiptIdentityKey(item), item);
+  }
+  for (const item of additions) {
+    const key = receiptIdentityKey(item);
+    const prev = byKey.get(key);
+    byKey.set(key, prev ? mergeTwoReceipts(prev, item) : item);
+  }
+  return Array.from(byKey.values());
+}
