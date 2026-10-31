@@ -521,62 +521,64 @@ function parseRFAData(id: number, data: ContractRFAData, chainId: number): Oncha
   };
 }
 
-/** Fetch single RFA data by ID */
-async function fetchRFAData(rfaId: number): Promise<OnchainRFA | null> {
+async function fetchRFAData(rfaId: number, chainId: number): Promise<OnchainRFA | null> {
   try {
-    const contract = getRFAContract();
+    const contract = getRFAContractForChain(chainId);
     const data = await readContract({
       contract,
       method: "function getRFAData(uint256 rfaId) view returns ((uint256 workflowId, string title, string description, bytes32[] requiredSkills, uint256 offerAmount, address publisher, uint256 createdAt, uint8 status, uint256 fulfilledByAgentId, address agentCreator))",
       params: [BigInt(rfaId)],
     }) as ContractRFAData;
 
-    return parseRFAData(rfaId, data);
+    return parseRFAData(rfaId, data, chainId);
   } catch (error) {
-    console.error(`Failed to fetch RFA ${rfaId}:`, error);
+    console.error(`Failed to fetch RFA ${rfaId} on chain ${chainId}:`, error);
     return null;
   }
 }
 
-/** Fetch submissions for an RFA */
-async function fetchRFASubmissions(rfaId: number): Promise<RFASubmission[]> {
+async function fetchRFASubmissions(rfaId: number, chainId: number): Promise<RFASubmission[]> {
   try {
-    const contract = getRFAContract();
+    const contract = getRFAContractForChain(chainId);
     const submissions = await readContract({
       contract,
       method: "function getSubmissions(uint256 rfaId) view returns ((uint256 agentWallet, address creator, uint256 submittedAt)[])",
       params: [BigInt(rfaId)],
     }) as ContractSubmission[];
 
-    return submissions.map(s => ({
+    return submissions.map((s) => ({
       agentWallet: Number(s.agentWallet),
       creator: s.creator,
       submittedAt: Number(s.submittedAt),
     }));
   } catch (error) {
-    console.error(`Failed to fetch submissions for RFA ${rfaId}:`, error);
+    console.error(`Failed to fetch submissions for RFA ${rfaId} on chain ${chainId}:`, error);
     return [];
   }
 }
 
-/**
- * Fetch all open RFAs
- */
-export async function fetchOpenRFAs(): Promise<OnchainRFA[]> {
-  const contract = getRFAContract();
+export async function fetchOpenRFAs(chainId?: number): Promise<OnchainRFA[]> {
+  const targetChainIds = chainId != null ? [chainId] : SUPPORTED_CHAINS.map((c) => c.id);
+  const perChain = await Promise.all(
+    targetChainIds.map(async (id) => {
+      try {
+        const contract = getRFAContractForChain(id);
+        const rfaIds = await readContract({
+          contract,
+          method: "function getOpenRFAs() view returns (uint256[])",
+          params: [],
+        }) as bigint[];
+        if (rfaIds.length === 0) return [];
+        const rfas = await Promise.all(rfaIds.map((rfaId) => fetchRFAData(Number(rfaId), id)));
+        return rfas.filter((r): r is OnchainRFA => r !== null);
+      } catch (error) {
+        console.warn(`Failed to fetch open RFAs from chain ${id}:`, error);
+        return [];
+      }
+    }),
+  );
 
-  const rfaIds = await readContract({
-    contract,
-    method: "function getOpenRFAs() view returns (uint256[])",
-    params: [],
-  }) as bigint[];
-
-  if (rfaIds.length === 0) return [];
-
-  const rfaPromises = rfaIds.map(id => fetchRFAData(Number(id)));
-  const rfas = await Promise.all(rfaPromises);
-
-  return rfas.filter((r): r is OnchainRFA => r !== null);
+  return perChain.flat();
 }
 
 export function useOpenRFAs() {
