@@ -1,11 +1,14 @@
 /**
- * Hooks for Warp contract interactions
- * Allows checking warp status and fetching warped agents
+ * Hooks for Warp contract interactions.
+ * Multi-chain: every contract read uses an explicit chainId or queries the
+ * live selected EVM network / supported EVM chains.
  */
 import { useQuery } from "@tanstack/react-query";
 import { readContract } from "thirdweb";
 import { keccak256, encodePacked, type Address } from "viem";
-import { getWarpContract, getAgentFactoryContract } from "@/lib/contracts";
+import { useChain } from "@/contexts/Network";
+import { evmChainId, isEvmNetwork, SUPPORTED_CHAINS } from "@/lib/chains";
+import { getWarpContractForChain, getAgentFactoryContractForChain } from "@/lib/contracts";
 
 // =============================================================================
 // Types
@@ -26,16 +29,12 @@ export type WarpStatus = "native" | "warped" | "must-warp";
 // Hash Computation
 // =============================================================================
 
-/**
- * Compute hash for external agent (used as originalAgentHash in warp contract)
- * This creates a unique identifier for an agent from an external registry
- */
 export function computeExternalAgentHash(registry: string, address: string): `0x${string}` {
   return keccak256(
     encodePacked(
       ["string", "string"],
-      [registry, address]
-    )
+      [registry, address],
+    ),
   );
 }
 
@@ -43,12 +42,9 @@ export function computeExternalAgentHash(registry: string, address: string): `0x
 // Contract Read Functions
 // =============================================================================
 
-/**
- * Check if a manowar agent (by ID) is warped
- */
-async function checkIsWarped(agentId: number): Promise<boolean> {
+async function checkIsWarped(agentId: number, chainId: number): Promise<boolean> {
   try {
-    const contract = getWarpContract();
+    const contract = getWarpContractForChain(chainId);
     const isWarped = await readContract({
       contract,
       method: "function isWarped(uint256 agentId) view returns (bool)",
@@ -56,17 +52,14 @@ async function checkIsWarped(agentId: number): Promise<boolean> {
     });
     return isWarped as boolean;
   } catch (error) {
-    console.error(`Failed to check warp status for agent ${agentId}:`, error);
+    console.error(`Failed to check warp status for agent ${agentId} on chain ${chainId}:`, error);
     return false;
   }
 }
 
-/**
- * Get warped agent data by ID
- */
-async function fetchWarpedData(warpedAgentId: number): Promise<WarpedAgentData | null> {
+async function fetchWarpedData(warpedAgentId: number, chainId: number): Promise<WarpedAgentData | null> {
   try {
-    const contract = getWarpContract();
+    const contract = getWarpContractForChain(chainId);
     const data = await readContract({
       contract,
       method: "function getWarpedData(uint256 warpedAgentId) view returns ((address originalCreator, address warper, bytes32 originalAgentHash, uint256 royaltyExpiryDate, bool royaltiesClaimed, uint256 accumulatedRoyalties))",
@@ -74,18 +67,14 @@ async function fetchWarpedData(warpedAgentId: number): Promise<WarpedAgentData |
     });
     return data as WarpedAgentData;
   } catch (error) {
-    console.error(`Failed to fetch warped data for agent ${warpedAgentId}:`, error);
+    console.error(`Failed to fetch warped data for agent ${warpedAgentId} on chain ${chainId}:`, error);
     return null;
   }
 }
 
-/**
- * Check if an external agent hash has been warped
- * Returns the warped agent ID if found, 0 otherwise
- */
-async function getWarpedAgentIdByHash(externalHash: `0x${string}`): Promise<number> {
+async function getWarpedAgentIdByHash(externalHash: `0x${string}`, chainId: number): Promise<number> {
   try {
-    const contract = getWarpContract();
+    const contract = getWarpContractForChain(chainId);
     const warpedId = await readContract({
       contract,
       method: "function getWarpedAgentId(bytes32 externalHash) view returns (uint256)",
@@ -93,18 +82,31 @@ async function getWarpedAgentIdByHash(externalHash: `0x${string}`): Promise<numb
     });
     return Number(warpedId);
   } catch (error) {
-    console.error(`Failed to check warped agent ID for hash ${externalHash}:`, error);
+    console.error(`Failed to check warped agent ID for hash ${externalHash} on chain ${chainId}:`, error);
     return 0;
   }
 }
 
-export async function fetchExternalWarpStatus(registry: string, address: string) {
+export async function fetchExternalWarpStatus(registry: string, address: string, chainId?: number) {
   const externalHash = computeExternalAgentHash(registry, address);
-  const warpedAgentId = await getWarpedAgentIdByHash(externalHash);
+  const targetChainIds = chainId != null ? [chainId] : SUPPORTED_CHAINS.map((c) => c.id);
+
+  for (const id of targetChainIds) {
+    const warpedAgentId = await getWarpedAgentIdByHash(externalHash, id);
+    if (warpedAgentId > 0) {
+      return {
+        isWarped: true,
+        warpedAgentId,
+        chainId: id,
+        externalHash,
+      };
+    }
+  }
 
   return {
-    isWarped: warpedAgentId > 0,
-    warpedAgentId,
+    isWarped: false,
+    warpedAgentId: 0,
+    chainId: undefined as number | undefined,
     externalHash,
   };
 }
