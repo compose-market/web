@@ -35,3 +35,34 @@ export function receiptIdentityKey(receipt: Receipt): string {
   if (receipt.txHash) return `tx:${receipt.network}:${receipt.txHash.toLowerCase()}`;
   return `raw:${receipt.service ?? ""}:${receipt.subject ?? ""}:${receipt.finalAmountWei}:${receipt.settledAt}`;
 }
+
+function mergeTwoReceipts(current: Receipt, incoming: Receipt): Receipt {
+  const currentRank = statusRank(current.settlementStatus);
+  const incomingRank = statusRank(incoming.settlementStatus);
+  const preferIncoming = incomingRank > currentRank
+    || (incomingRank === currentRank && Boolean(incoming.txHash) && !current.txHash)
+    || (incomingRank === currentRank && Boolean(incoming.id?.startsWith("rct_")) && !current.id?.startsWith("rct_"));
+
+  const base = preferIncoming ? { ...current, ...incoming } : { ...incoming, ...current };
+  return {
+    ...base,
+    id: incoming.id?.startsWith("rct_") ? incoming.id : (current.id ?? incoming.id),
+    paymentIntentId: incoming.paymentIntentId ?? current.paymentIntentId,
+    txHash: incoming.txHash ?? current.txHash,
+    claimTxHash: incoming.claimTxHash ?? current.claimTxHash,
+    settleTxHash: incoming.settleTxHash ?? current.settleTxHash,
+    settlementStatus: incomingRank >= currentRank
+      ? (incoming.settlementStatus ?? current.settlementStatus)
+      : current.settlementStatus,
+    settledAt: (incoming.settledAt && incoming.settledAt > 0 && incomingRank >= currentRank)
+      ? incoming.settledAt
+      : (current.settledAt ?? incoming.settledAt ?? 0),
+    rootRunId: incoming.rootRunId ?? current.rootRunId,
+    executionRunId: incoming.executionRunId ?? current.executionRunId,
+    parentExecutionRunId: incoming.parentExecutionRunId ?? current.parentExecutionRunId,
+    providerAmountWei: incoming.providerAmountWei ?? current.providerAmountWei,
+    platformFeeWei: incoming.platformFeeWei ?? current.platformFeeWei,
+    lineItems: (incoming.lineItems && incoming.lineItems.length > 0) ? incoming.lineItems : current.lineItems,
+    bills: (incoming.bills && incoming.bills.length > 0) ? incoming.bills : current.bills,
+  };
+}
