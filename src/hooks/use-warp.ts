@@ -188,64 +188,55 @@ export function useWarpStatus(agent: {
   };
 }
 
-/**
- * Hook to fetch all warped agent IDs
- * Iterates through all manowar agents and checks which are warped
- */
-export function useWarpedAgents() {
+export function useWarpedAgents(chainId?: number) {
+  const resolvedChainId = useResolvedEvmChainId(chainId);
   return useQuery({
-    queryKey: ["warped-agents"],
+    queryKey: ["warped-agents", resolvedChainId],
     queryFn: async () => {
-      // Get total agents from AgentFactory
-      const factoryContract = getAgentFactoryContract();
+      if (resolvedChainId == null) return [];
+      const factoryContract = getAgentFactoryContractForChain(resolvedChainId);
       const totalAgents = await readContract({
         contract: factoryContract,
         method: "function totalAgents() view returns (uint256)",
         params: [],
       }) as bigint;
-      
+
       const total = Number(totalAgents);
       if (total === 0) return [];
-      
-      // Check warp status for each agent
-      const warpedAgentIds: number[] = [];
-      
-      // Use Promise.all for parallel fetching
+
       const warpChecks = await Promise.all(
-        Array.from({ length: total }, (_, i) => checkIsWarped(i + 1))
+        Array.from({ length: total }, (_, i) => checkIsWarped(i + 1, resolvedChainId)),
       );
-      
+
+      const warpedAgentIds: number[] = [];
       warpChecks.forEach((isWarped, i) => {
-        if (isWarped) {
-          warpedAgentIds.push(i + 1);
-        }
+        if (isWarped) warpedAgentIds.push(i + 1);
       });
-      
+
       return warpedAgentIds;
     },
+    enabled: resolvedChainId != null,
     staleTime: 60 * 1000,
   });
 }
 
-/**
- * Hook to batch check warp status for multiple agent IDs
- */
-export function useBatchWarpStatus(agentIds: number[]) {
+export function useBatchWarpStatus(agentIds: number[], chainId?: number) {
+  const resolvedChainId = useResolvedEvmChainId(chainId);
   return useQuery({
-    queryKey: ["batch-warp-status", agentIds.join(",")],
+    queryKey: ["batch-warp-status", resolvedChainId, agentIds.join(",")],
     queryFn: async () => {
-      if (agentIds.length === 0) return new Map<number, boolean>();
-      
+      if (agentIds.length === 0 || resolvedChainId == null) return new Map<number, boolean>();
+
       const results = await Promise.all(
         agentIds.map(async (id) => ({
           id,
-          isWarped: await checkIsWarped(id),
-        }))
+          isWarped: await checkIsWarped(id, resolvedChainId),
+        })),
       );
-      
-      return new Map(results.map(r => [r.id, r.isWarped]));
+
+      return new Map(results.map((r) => [r.id, r.isWarped]));
     },
-    enabled: agentIds.length > 0,
+    enabled: agentIds.length > 0 && resolvedChainId != null,
     staleTime: 60 * 1000,
   });
 }
