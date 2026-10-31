@@ -619,45 +619,45 @@ export function useRFASubmissions(rfaId: number | null, chainId?: number) {
   });
 }
 
-/**
- * Fetch RFAs published by a specific address
- */
-export function useRFAsByPublisher(publisher: string | undefined) {
+export function useRFAsByPublisher(publisher: string | undefined, chainId?: number) {
   return useQuery({
-    queryKey: ["rfa", "by-publisher", publisher?.toLowerCase()],
+    queryKey: ["rfa", "by-publisher", chainId ?? "all-chains", publisher?.toLowerCase()],
     queryFn: async () => {
       if (!publisher) return [];
-
-      const contract = getRFAContract();
-      const rfaIds = await readContract({
-        contract,
-        method: "function getRFAsByPublisher(address publisher) view returns (uint256[])",
-        params: [publisher as `0x${string}`],
-      }) as bigint[];
-
-      if (rfaIds.length === 0) return [];
-
-      const rfaPromises = rfaIds.map(id => fetchRFAData(Number(id)));
-      const rfas = await Promise.all(rfaPromises);
-
-      return rfas.filter((r): r is OnchainRFA => r !== null);
+      const targetChainIds = chainId != null ? [chainId] : SUPPORTED_CHAINS.map((c) => c.id);
+      const perChain = await Promise.all(
+        targetChainIds.map(async (id) => {
+          try {
+            const contract = getRFAContractForChain(id);
+            const rfaIds = await readContract({
+              contract,
+              method: "function getRFAsByPublisher(address publisher) view returns (uint256[])",
+              params: [publisher as `0x${string}`],
+            }) as bigint[];
+            if (rfaIds.length === 0) return [];
+            const rfas = await Promise.all(rfaIds.map((rfaId) => fetchRFAData(Number(rfaId), id)));
+            return rfas.filter((r): r is OnchainRFA => r !== null);
+          } catch (error) {
+            console.warn(`Failed to fetch publisher RFAs from chain ${id}:`, error);
+            return [];
+          }
+        }),
+      );
+      return perChain.flat();
     },
     enabled: !!publisher,
     staleTime: 30 * 1000,
-    gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
+    gcTime: 5 * 60 * 1000,
   });
 }
 
-/**
- * Fetch RFAs for a specific Workflow
- */
-export function useRFAsForWorkflow(workflowId: number | null) {
+export function useRFAsForWorkflow(workflowId: number | null, chainId?: number) {
+  const resolvedChainId = useSelectedEvmChainId(chainId);
   return useQuery({
-    queryKey: ["rfa", "by-workflow", workflowId],
+    queryKey: ["rfa", "by-workflow", resolvedChainId, workflowId],
     queryFn: async () => {
-      if (!workflowId) return [];
-
-      const contract = getRFAContract();
+      if (!workflowId || resolvedChainId == null) return [];
+      const contract = getRFAContractForChain(resolvedChainId);
       const rfaIds = await readContract({
         contract,
         method: "function getRFAsForWorkflow(uint256 workflowId) view returns (uint256[])",
@@ -665,14 +665,11 @@ export function useRFAsForWorkflow(workflowId: number | null) {
       }) as bigint[];
 
       if (rfaIds.length === 0) return [];
-
-      const rfaPromises = rfaIds.map(id => fetchRFAData(Number(id)));
-      const rfas = await Promise.all(rfaPromises);
-
+      const rfas = await Promise.all(rfaIds.map((rfaId) => fetchRFAData(Number(rfaId), resolvedChainId)));
       return rfas.filter((r): r is OnchainRFA => r !== null);
     },
-    enabled: !!workflowId && workflowId > 0,
+    enabled: !!workflowId && workflowId > 0 && resolvedChainId != null,
     staleTime: 30 * 1000,
-    gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
+    gcTime: 5 * 60 * 1000,
   });
 }
