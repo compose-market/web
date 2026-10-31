@@ -446,33 +446,31 @@ export function useOnchainWorkflowByIdentifier(identifier: string | null) {
 // RFA (Request-For-Agent) Types & Hooks
 // =============================================================================
 
-/** RFA status enum matching contract */
-export type RFAStatus = 'None' | 'Open' | 'Fulfilled' | 'Cancelled';
+export type RFAStatus = "None" | "Open" | "Fulfilled" | "Cancelled";
 
-/** On-chain RFA data */
 export interface OnchainRFA {
   id: number;
   workflowId: number;
   title: string;
   description: string;
-  requiredSkills: string[]; // bytes32[] decoded to strings
-  offerAmount: string; // USDC formatted (6 decimals)
-  offerAmountFormatted: string; // Display string like "$0.50"
+  requiredSkills: string[];
+  offerAmount: string;
+  offerAmountFormatted: string;
   publisher: string;
-  createdAt: number; // Unix timestamp
+  createdAt: number;
   status: RFAStatus;
   fulfilledByAgentId: number;
   agentCreator: string;
+  network?: NetworkId;
+  chainId?: number;
 }
 
-/** RFA submission */
 export interface RFASubmission {
   agentWallet: number;
   creator: string;
-  submittedAt: number; // Unix timestamp
+  submittedAt: number;
 }
 
-/** Contract RFA data structure */
 interface ContractRFAData {
   workflowId: bigint;
   title: string;
@@ -486,25 +484,22 @@ interface ContractRFAData {
   agentCreator: string;
 }
 
-/** Contract submission structure */
 interface ContractSubmission {
   agentWallet: bigint;
   creator: string;
   submittedAt: bigint;
 }
 
-/** Convert status number to enum */
 function parseRFAStatus(status: number): RFAStatus {
   switch (status) {
-    case 1: return 'Open';
-    case 2: return 'Fulfilled';
-    case 3: return 'Cancelled';
-    default: return 'None';
+    case 1: return "Open";
+    case 2: return "Fulfilled";
+    case 3: return "Cancelled";
+    default: return "None";
   }
 }
 
-/** Parse contract RFA data to typed structure */
-function parseRFAData(id: number, data: ContractRFAData): OnchainRFA {
+function parseRFAData(id: number, data: ContractRFAData, chainId: number): OnchainRFA {
   const offerAmount = weiToUsdc(data.offerAmount);
   const offerNum = parseFloat(offerAmount);
 
@@ -513,7 +508,7 @@ function parseRFAData(id: number, data: ContractRFAData): OnchainRFA {
     workflowId: Number(data.workflowId),
     title: data.title,
     description: data.description,
-    requiredSkills: data.requiredSkills.map(s => s), // Keep as hex for now
+    requiredSkills: data.requiredSkills.map((s) => s),
     offerAmount,
     offerAmountFormatted: offerNum < 0.01 ? `$${offerNum.toFixed(4)}` : `$${offerNum.toFixed(2)}`,
     publisher: data.publisher,
@@ -521,6 +516,8 @@ function parseRFAData(id: number, data: ContractRFAData): OnchainRFA {
     status: parseRFAStatus(data.status),
     fulfilledByAgentId: Number(data.fulfilledByAgentId),
     agentCreator: data.agentCreator,
+    chainId,
+    network: networkFromChainId(chainId),
   };
 }
 
