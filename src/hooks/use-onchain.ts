@@ -581,45 +581,41 @@ export async function fetchOpenRFAs(chainId?: number): Promise<OnchainRFA[]> {
   return perChain.flat();
 }
 
-export function useOpenRFAs() {
+export function useOpenRFAs(chainId?: number) {
   return useQuery({
-    queryKey: ["rfa", "open"],
-    queryFn: fetchOpenRFAs,
+    queryKey: ["rfa", "open", chainId ?? "all-chains"],
+    queryFn: () => fetchOpenRFAs(chainId),
     staleTime: 30 * 1000,
-    gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
+    gcTime: 5 * 60 * 1000,
     retry: 2,
   });
 }
 
-/**
- * Fetch a single RFA by ID
- */
-export function useRFAData(rfaId: number | null) {
+export function useRFAData(rfaId: number | null, chainId?: number) {
+  const resolvedChainId = useSelectedEvmChainId(chainId);
   return useQuery({
-    queryKey: ["rfa", "data", rfaId],
+    queryKey: ["rfa", "data", resolvedChainId, rfaId],
     queryFn: async () => {
-      if (!rfaId) return null;
-      return fetchRFAData(rfaId);
+      if (!rfaId || resolvedChainId == null) return null;
+      return fetchRFAData(rfaId, resolvedChainId);
     },
-    enabled: !!rfaId && rfaId > 0,
+    enabled: !!rfaId && rfaId > 0 && resolvedChainId != null,
     staleTime: 30 * 1000,
-    gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
+    gcTime: 5 * 60 * 1000,
   });
 }
 
-/**
- * Fetch submissions for an RFA
- */
-export function useRFASubmissions(rfaId: number | null) {
+export function useRFASubmissions(rfaId: number | null, chainId?: number) {
+  const resolvedChainId = useSelectedEvmChainId(chainId);
   return useQuery({
-    queryKey: ["rfa", "submissions", rfaId],
+    queryKey: ["rfa", "submissions", resolvedChainId, rfaId],
     queryFn: async () => {
-      if (!rfaId) return [];
-      return fetchRFASubmissions(rfaId);
+      if (!rfaId || resolvedChainId == null) return [];
+      return fetchRFASubmissions(rfaId, resolvedChainId);
     },
-    enabled: !!rfaId && rfaId > 0,
+    enabled: !!rfaId && rfaId > 0 && resolvedChainId != null,
     staleTime: 30 * 1000,
-    gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
+    gcTime: 5 * 60 * 1000,
   });
 }
 
