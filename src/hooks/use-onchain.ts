@@ -366,39 +366,28 @@ export function useWorkflowsWithRFA() {
   return useOnchainWorkflows({ includeRFA: true, onlyComplete: false });
 }
 
-
-
-/**
- * Fetch a single workflow by ID (with IPFS metadata)
- */
-export function useOnchainWorkflow(workflowId: number | null) {
+export function useOnchainWorkflow(workflowId: number | null, chainId?: number) {
+  const resolvedChainId = useSelectedEvmChainId(chainId);
   return useQuery({
-    queryKey: ["onchain-workflow", workflowId],
+    queryKey: ["onchain-workflow", resolvedChainId, workflowId],
     queryFn: async () => {
-      if (!workflowId) return null;
-      const workflow = await fetchWorkflowData(workflowId);
+      if (!workflowId || resolvedChainId == null) return null;
+      const workflow = await fetchWorkflowData(workflowId, resolvedChainId);
       if (!workflow) return null;
-      return fetchWorkflowMetadata(workflow);
+      return fetchWorkflowMetadata(workflow, resolvedChainId);
     },
-    enabled: !!workflowId,
+    enabled: !!workflowId && resolvedChainId != null,
     staleTime: 30 * 1000,
-    gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
+    gcTime: 5 * 60 * 1000,
   });
 }
 
-/**
- * Find a workflow by its wallet address (stored in IPFS metadata)
- * Searches across all supported chains to find the workflow
- */
 async function fetchWorkflowByWalletAddress(walletAddress: string): Promise<OnchainWorkflow | null> {
   const normalizedSearch = walletAddress.toLowerCase();
 
-  // Search across all supported chains
   for (const { id: chainId } of SUPPORTED_CHAINS) {
     try {
       const contract = getWorkflowContractForChain(chainId);
-
-      // Get total workflows count for this chain
       const total = await readContract({
         contract,
         method: "function totalWorkflows() view returns (uint256)",
@@ -408,22 +397,17 @@ async function fetchWorkflowByWalletAddress(walletAddress: string): Promise<Onch
       const totalNum = Number(total);
       if (totalNum === 0) continue;
 
-      // Search through all workflows on this chain (most recent first for efficiency)
-      // Workflow IDs start at 1, not 0
       for (let i = totalNum; i >= 1; i--) {
         const workflow = await fetchWorkflowData(i, chainId);
         if (!workflow) continue;
 
-        // Fetch metadata to get the wallet address (source of truth)
         const workflowWithMeta = await fetchWorkflowMetadata(workflow, chainId);
-
         if (workflowWithMeta.walletAddress && workflowWithMeta.walletAddress.toLowerCase() === normalizedSearch) {
           return workflowWithMeta;
         }
       }
     } catch (error) {
       console.warn(`Failed to search workflows on chain ${chainId}:`, error);
-      // Continue to next chain
     }
   }
 
@@ -431,10 +415,6 @@ async function fetchWorkflowByWalletAddress(walletAddress: string): Promise<Onch
   return null;
 }
 
-/**
- * Fetch a single workflow by wallet address
- * This is the preferred method since wallet address is the canonical identifier
- */
 export function useOnchainWorkflowByWallet(walletAddress: string | null) {
   return useQuery({
     queryKey: ["onchain-workflow-wallet", walletAddress?.toLowerCase()],
@@ -444,19 +424,13 @@ export function useOnchainWorkflowByWallet(walletAddress: string | null) {
     },
     enabled: !!walletAddress && walletAddress.startsWith("0x"),
     staleTime: 30 * 1000,
-    gcTime: 5 * 60 * 1000, // Keep in cache 5 minutes
+    gcTime: 5 * 60 * 1000,
   });
 }
 
-/**
- * Fetch a single workflow by either ID or wallet address
- * Automatically detects the identifier type
- */
 export function useOnchainWorkflowByIdentifier(identifier: string | null) {
-  // Determine if identifier is a wallet address (0x...) or numeric ID
-  // Wallet address = 0x + 40 hex chars = 42 total
   const isWalletAddress = identifier?.startsWith("0x") && identifier.length === 42;
-  const numericId = !isWalletAddress && identifier ? parseInt(identifier) : null;
+  const numericId = !isWalletAddress && identifier ? parseInt(identifier, 10) : null;
   const walletAddress = isWalletAddress ? identifier : null;
 
   const byIdQuery = useOnchainWorkflow(!isWalletAddress ? numericId : null);
