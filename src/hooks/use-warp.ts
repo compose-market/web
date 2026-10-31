@@ -147,57 +147,45 @@ export function useWarpedData(warpedAgentId: number | null, chainId?: number) {
   });
 }
 
-/**
- * Hook to check if an external agent has been warped
- * Returns { isWarped: boolean, warpedAgentId: number }
- */
-export function useIsExternalWarped(registry: string | null, address: string | null) {
+export function useIsExternalWarped(registry: string | null, address: string | null, chainId?: number) {
+  const resolvedChainId = useResolvedEvmChainId(chainId);
   return useQuery({
-    queryKey: ["is-external-warped", registry, address],
+    queryKey: ["is-external-warped", resolvedChainId ?? "all", registry, address],
     queryFn: async () => {
-      if (!registry || !address) return { isWarped: false, warpedAgentId: 0 };
-      return fetchExternalWarpStatus(registry, address);
+      if (!registry || !address) return { isWarped: false, warpedAgentId: 0, chainId: undefined, externalHash: "0x" as `0x${string}` };
+      return fetchExternalWarpStatus(registry, address, resolvedChainId ?? undefined);
     },
     enabled: !!registry && !!address,
     staleTime: 60 * 1000,
   });
 }
 
-/**
- * Hook to get warp status for any agent
- * Returns WarpStatus: "native" | "warped" | "must-warp"
- */
 export function useWarpStatus(agent: {
   registry: string;
   id: string;
   address?: string;
-} | null) {
+} | null, chainId?: number) {
   const isManowar = agent?.registry === "manowar";
-  const manowarId = isManowar && agent?.id ? parseInt(agent.id.replace("manowar-", "")) : null;
-  
-  // For manowar agents, check isWarped directly
-  const { data: isWarpedOnchain } = useIsWarped(manowarId);
-  
-  // For external agents, check if the hash has been warped
+  const manowarId = isManowar && agent?.id ? parseInt(agent.id.replace("manowar-", ""), 10) : null;
+
+  const { data: isWarpedOnchain } = useIsWarped(manowarId, chainId);
+
   const externalRegistry = !isManowar ? (agent?.registry || null) : null;
   const externalAddress = !isManowar ? (agent?.address || agent?.id || null) : null;
-  const { data: externalWarpData } = useIsExternalWarped(externalRegistry, externalAddress);
-  
+  const { data: externalWarpData } = useIsExternalWarped(externalRegistry, externalAddress, chainId);
+
   if (!agent) return { status: null as WarpStatus | null, warpedAgentId: null };
-  
+
   if (isManowar) {
-    // Manowar agents: check if this specific agent was created via warp
     return {
       status: isWarpedOnchain ? "warped" as WarpStatus : "native" as WarpStatus,
       warpedAgentId: isWarpedOnchain ? manowarId : null,
     };
-  } else {
-    // External agents: check if they've been warped into Manowar
-    return {
-      status: externalWarpData?.isWarped ? "warped" as WarpStatus : "must-warp" as WarpStatus,
-      warpedAgentId: externalWarpData?.warpedAgentId || null,
-    };
   }
+  return {
+    status: externalWarpData?.isWarped ? "warped" as WarpStatus : "must-warp" as WarpStatus,
+    warpedAgentId: externalWarpData?.warpedAgentId || null,
+  };
 }
 
 /**
