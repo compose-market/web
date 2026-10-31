@@ -134,17 +134,15 @@ export function useIsWarped(agentId: number | null, chainId?: number) {
   });
 }
 
-/**
- * Hook to get warped agent data
- */
-export function useWarpedData(warpedAgentId: number | null) {
+export function useWarpedData(warpedAgentId: number | null, chainId?: number) {
+  const resolvedChainId = useResolvedEvmChainId(chainId);
   return useQuery({
-    queryKey: ["warped-data", warpedAgentId],
+    queryKey: ["warped-data", resolvedChainId, warpedAgentId],
     queryFn: async () => {
-      if (!warpedAgentId) return null;
-      return fetchWarpedData(warpedAgentId);
+      if (!warpedAgentId || resolvedChainId == null) return null;
+      return fetchWarpedData(warpedAgentId, resolvedChainId);
     },
-    enabled: !!warpedAgentId,
+    enabled: !!warpedAgentId && resolvedChainId != null,
     staleTime: 60 * 1000,
   });
 }
