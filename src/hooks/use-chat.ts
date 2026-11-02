@@ -457,6 +457,28 @@ export interface UseChatReturn {
     stopRecording: () => void;
 }
 
+export interface PendingDeltaBatch {
+    blocks: Map<string, { type: "text" | "reasoning"; delta: string }>;
+    content?: string;
+    activities?: ActivityEvent[];
+}
+
+const EMPTY_RECEIPTS: Receipt[] = [];
+
+function blockup(blocks: MessageBlock[] | undefined, block: MessageBlock): MessageBlock[] {
+    const next = [...(blocks ?? [])];
+    const index = next.findIndex((item) => item.id === block.id);
+    if (index >= 0) next[index] = { ...next[index], ...block } as MessageBlock;
+    else next.push(block);
+    return next;
+}
+
+function visibleActivity(event: ActivityEvent): boolean {
+    if (event.type === "activity.trace" || event.type === "activity.plan") return false;
+    if (event.type === "activity.message" && !event.parentId) return false;
+    return true;
+}
+
 export function useChat(options: UseChatOptions = {}): UseChatReturn {
     const {
         conversationId: providedId,
