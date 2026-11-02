@@ -479,6 +479,76 @@ function visibleActivity(event: ActivityEvent): boolean {
     return true;
 }
 
+export function applyPendingDeltaMap(
+    prev: Message[],
+    pending: ReadonlyMap<string, PendingDeltaBatch>,
+    now = Date.now(),
+): Message[] {
+    if (pending.size === 0 || prev.length === 0) return prev;
+    let changed = false;
+    const next = [...prev];
+
+    for (const [id, batch] of pending.entries()) {
+        if (batch.blocks.size === 0 && batch.content === undefined && (!batch.activities || batch.activities.length === 0)) continue;
+        const lastIdx = next.length - 1;
+        const idx = next[lastIdx]?.id === id ? lastIdx : next.findIndex((m) => m.id === id);
+        if (idx < 0) continue;
+
+        const message = next[idx];
+        let blocks = message.blocks;
+        if (batch.blocks.size > 0) {
+            const nextBlocks = [...(message.blocks ?? [])];
+            for (const [blockId, entry] of batch.blocks.entries()) {
+                if (!entry.delta) continue;
+                const bIdx = nextBlocks.findIndex((item) => item.id === blockId);
+                if (bIdx >= 0) {
+                    const current = nextBlocks[bIdx];
+                    const existing = current.type === "text" || current.type === "reasoning" ? current.text : "";
+                    nextBlocks[bIdx] = entry.type === "reasoning"
+                        ? {
+                            id: blockId,
+                            type: "reasoning",
+                            text: existing + entry.delta,
+                            startedAt: current.type === "reasoning" ? (current.startedAt ?? now) : now,
+                        }
+                        : { id: blockId, type: "text", text: existing + entry.delta };
+                } else {
+                    nextBlocks.push(
+                        entry.type === "reasoning"
+                            ? { id: blockId, type: "reasoning", text: entry.delta, startedAt: now }
+                            : { id: blockId, type: "text", text: entry.delta },
+                    );
+                }
+            }
+            blocks = nextBlocks;
+        }
+
+        let activity = message.activity;
+        if (batch.activities && batch.activities.length > 0) {
+            let acc = activity ?? createActivityState();
+            let hasVisible = false;
+            for (const event of batch.activities) {
+                acc = reduceActivityState(acc, event);
+                if (visibleActivity(event)) hasVisible = true;
+            }
+            activity = acc;
+            if (hasVisible) {
+                blocks = blockup(blocks, { id: "activity", type: "activity" });
+            }
+        }
+
+        next[idx] = {
+            ...message,
+            ...(blocks !== message.blocks ? { blocks } : {}),
+            ...(activity !== message.activity ? { activity } : {}),
+            ...(batch.content !== undefined ? { content: batch.content } : {}),
+        };
+        changed = true;
+    }
+
+    return changed ? next : prev;
+}
+
 export function useChat(options: UseChatOptions = {}): UseChatReturn {
     const {
         conversationId: providedId,
