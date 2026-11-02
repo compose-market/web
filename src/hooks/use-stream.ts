@@ -1098,27 +1098,28 @@ function route(
     chat: UseChatReturn,
     cbRef: React.MutableRefObject<StreamCallbacks>,
     textBlockRef: React.MutableRefObject<string | null>,
+    blockTextRef: React.MutableRefObject<string>,
+    reasoningStateRef: React.MutableRefObject<ReasoningStreamState>,
     blockSeqRef: React.MutableRefObject<number>,
+    activityOwnsTools = false,
 ): void {
     if (event.domain === "model") {
-        dispatchModel(event, chat, cbRef, textBlockRef, blockSeqRef);
+        dispatchModel(event, chat, cbRef, textBlockRef, blockTextRef, reasoningStateRef, blockSeqRef, activityOwnsTools);
     } else {
-        dispatchActivity(event, chat, cbRef, textBlockRef, blockSeqRef);
+        dispatchActivity(event, chat, cbRef, textBlockRef, blockTextRef, reasoningStateRef, blockSeqRef);
     }
 }
 
 /**
  * Sub-agent model output never renders in the user's chat, but its work
- * belongs in mission control: child reasoning and answer deltas fold into
+ * belongs in the Flow Trace: child reasoning and answer deltas fold into
  * the child agent's tree node (agent:<runKey>) so each task fold shows what
  * its assigned agent is thinking and saying.
  */
 function routeChildModelToTree(event: ModelEvent, chat: UseChatReturn): void {
-    const assistantId = chat.currentAssistantIdRef.current;
+    const assistantId = chat.planMessageIdRef.current ?? chat.currentAssistantIdRef.current;
     const runId = typeof event.runId === "string" ? event.runId : undefined;
     if (!assistantId || !runId) return;
-    // Nested sub-plan completion turns run as `complete-<sub runKey>` — their
-    // speech folds under the SAME agent node as the sub-agent's task run.
     const agentRunKey = runId.startsWith("complete-") ? runId.slice("complete-".length) : runId;
 
     if (event.type === "model.reasoning.delta" && event.delta) {
