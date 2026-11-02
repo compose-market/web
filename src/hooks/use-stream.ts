@@ -1378,12 +1378,11 @@ function dispatchActivity(
     chat: UseChatReturn,
     cbRef: React.MutableRefObject<StreamCallbacks>,
     textBlockRef: React.MutableRefObject<string | null>,
+    blockTextRef: React.MutableRefObject<string>,
+    reasoningStateRef: React.MutableRefObject<ReasoningStreamState>,
     blockSeqRef: React.MutableRefObject<number>,
 ): void {
-    // Plan delivery artifacts are the run's FINAL product — they render
-    // inline like a picture even when the agent chose to speak nothing
-    // (speech is optional; the delivery never is). Without a live assistant
-    // message, the delivery creates its own carrier message.
+    const reasoningState = reasoningStateRef.current;
     if (event.type === "activity.tool" && event.status === "completed") {
         const deliveryArtifact = artifactFromActivityEvent(event);
         if (deliveryArtifact?.artifactType === "delivery" && !chat.currentAssistantIdRef.current) {
@@ -1396,45 +1395,126 @@ function dispatchActivity(
     const assistantId = chat.currentAssistantIdRef.current;
     if (!assistantId) return;
 
+    if (event.type === "activity.run") {
+        const payload = isRecord(event.payload) ? event.payload : undefined;
+        const execRunId = str(event.runId) ?? str(payload?.runId);
+        const rootId = str(event.rootId) ?? str(payload?.rootRunId);
+        if ((execRunId && !execRunId.startsWith("sub:")) || rootId) {
+            chat.attachAssistantRun(assistantId, {
+                ...(execRunId && !execRunId.startsWith("sub:") ? { executionRunId: execRunId } : {}),
+                ...(rootId ? { rootRunId: rootId } : {}),
+            });
+        }
+        const runStatus = str(event.status) ?? str(payload?.status);
+        if (
+            runStatus === "completed"
+            || runStatus === "failed"
+            || runStatus === "stopped"
+            || runStatus === "cancelled"
+        ) {
+            sealReasoningBlock(chat, assistantId, reasoningState);
+        }
+    }
+
     chat.applyAssistantActivityEvent(assistantId, event);
 
     if (event.type === "activity.tool") {
         const toolName = event.name || "tool";
         const summary = event.target?.summary || str(event.payload?.message);
-        const displayName = event.target?.name;
+        const displayName = event.target?.kind === "agent"
+            ? (event.name || event.target?.name)
+            : (event.target?.name || event.name);
+        const actionKind = event.target?.kind === "connector" ? "connector" : "tool";
         if (event.status === "running") {
-            chat.startToolActivity(toolName, summary, displayName);
+            if (reasoningState.blockId && !reasoningState.closed) {
+                reasoningState.pendingSeparator = true;
+            }
+            chat.startToolActivity(toolName, summary, displayName, { nodeId: event.id, kind: actionKind });
         } else {
-            chat.finishToolActivity(toolName, summary, event.status === "failed", displayName);
+            chat.finishToolActivity(toolName, summary, event.status === "failed", displayName, { nodeId: event.id, kind: actionKind });
         }
         const artifact = artifactFromActivityEvent(event);
         if (artifact) chat.upsertAssistantArtifact(assistantId, artifact);
+        if (event.status === "completed" || event.status === "failed") {
+            const toolAuthReq = connectorFromToolAuthFailure(event);
+            if (toolAuthReq) {
+                mergeConnectorRequest(chat, assistantId, toolAuthReq);
+                chat.setActivityPhase("thinking", `Connection required: ${toolAuthReq.name ?? toolAuthReq.slug}`);
+                cbRef.current.onWatchingChange?.(false);
+                return;
+            }
+        }
+    }
+
+    if (event.type === "activity.child") {
+        const isChildNotes = event.id.startsWith("notes:") || event.target?.summary === "Child agent notes";
+        if (!isChildNotes) {
+            const name = event.target?.name || event.name || "Sub-Agent";
+            const summary = event.target?.summary || str(event.payload?.message);
+            if (event.status === "running" || event.status === "pending") {
+                chat.startToolActivity(name, summary, name, { nodeId: event.id, kind: "agent" });
+            } else {
+                chat.finishToolActivity(name, summary, event.status === "failed", name, { nodeId: event.id, kind: "agent" });
+            }
+        }
+    }
+
+    if (event.type === "activity.conclave") {
+        const name = event.target?.name || event.name || "Swarm Bus";
+        const summary = event.target?.summary || str(event.payload?.message);
+        if (event.status === "running") {
+            chat.startToolActivity(name, summary, name, { nodeId: event.id, kind: "conclave" });
+        } else {
+            chat.finishToolActivity(name, summary, event.status === "failed", name, { nodeId: event.id, kind: "conclave" });
+        }
     }
 
     if (event.type === "activity.message" && event.delta && !event.parentId) {
+        if (
+            event.status === "completed"
+            && (event.delta === blockTextRef.current || event.delta === chat.streamedTextRef.current)
+        ) {
+            return;
+        }
+        const isNewBlock = textBlockRef.current === null;
         const blockId = textBlockRef.current ?? nextBlock("text", blockSeqRef);
         textBlockRef.current = blockId;
-        chat.appendAssistantBlockText(assistantId, blockId, "text", event.delta);
+        if (isNewBlock) blockTextRef.current = "";
+        blockTextRef.current += event.delta;
         chat.streamedTextRef.current += event.delta;
-        chat.scheduleStreamUpdate(chat.streamedTextRef.current);
+        chat.appendAssistantBlockText(assistantId, blockId, "text", event.delta, chat.streamedTextRef.current);
         return;
     }
 
-    if (event.type === "activity.thinking" && event.delta) {
-        chat.appendAssistantBlockText(assistantId, `reasoning:${event.runId ?? "main"}`, "reasoning", event.delta);
+    if (event.type === "activity.thinking" && event.delta && !event.parentId) {
+        pushReasoningDelta(chat, assistantId, reasoningState, blockSeqRef, event.delta);
         return;
     }
 
-    if (event.type !== "activity.trace") textBlockRef.current = null;
+    if (event.type !== "activity.trace") {
+        textBlockRef.current = null;
+        blockTextRef.current = "";
+    }
 
     if (event.type === "activity.plan") {
         const plan = planFromActivityEvent(event);
-        mergePlan(chat, assistantId, plan, chat.streamedTextRef.current);
-        chat.upsertAssistantBlock(assistantId, { id: `plan`, type: "plan", planId: plan.proposalId });
-        // State-based phase label — the decision stays "approved" forever,
-        // so a decision-based label would freeze at "Plan approved" even
-        // after execution completes.
-        chat.setActivityPhase("thinking", planPhaseLabel(plan));
+        chat.planMessageIdRef.current = assistantId;
+        mergePlan(chat, assistantId, plan);
+        chat.upsertAssistantBlock(assistantId, { id: "plan", type: "plan", planId: plan.proposalId });
+        if (
+            plan.state === "awaiting_approval"
+            || plan.state === "clarify"
+            || plan.state === "completed"
+            || plan.state === "cancelled"
+            || plan.state === "rejected"
+            || plan.state === "expired"
+        ) {
+            chat.clearActivityStateUnlessError();
+        } else if (plan.state === "failed" || plan.state === "blocked") {
+            chat.setActivityPhase("error", plan.failureReason || planPhaseLabel(plan));
+        } else {
+            chat.setActivityPhase("thinking", planPhaseLabel(plan));
+        }
         return;
     }
 
@@ -1442,11 +1522,24 @@ function dispatchActivity(
         const request = connectorFromActivityEvent(event);
         if (request) {
             mergeConnectorRequest(chat, assistantId, request);
+            const isPending = request.state === "requested" || request.state === "escalated";
+            if (isPending) {
+                chat.startToolActivity(request.slug, request.reason, request.name ?? request.slug, { nodeId: event.id, kind: "connector" });
+                cbRef.current.onWatchingChange?.(false);
+            } else {
+                chat.finishToolActivity(
+                    request.slug,
+                    request.reason,
+                    request.state === "denied" || request.state === "discarded",
+                    request.name ?? request.slug,
+                    { nodeId: event.id, kind: "connector" },
+                );
+            }
             chat.setActivityPhase(
                 "thinking",
-                request.state === "requested"
-                    ? `Awaiting connector decision: ${request.slug}`
-                    : `Connector ${request.state}: ${request.slug}`,
+                isPending
+                    ? `Connection required: ${request.name ?? request.slug}`
+                    : `Connector ${request.state}: ${request.name ?? request.slug}`,
             );
         }
         return;
