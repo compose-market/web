@@ -103,3 +103,18 @@ export function enrichReceiptWithAnalytics(
   };
   return mergeTwoReceipts(receipt, enriched);
 }
+
+export function reconcileMessageReceipts(
+  existing: Receipt[] | undefined,
+  fetchedReceipts: Receipt[],
+  analyticsSettlements: readonly InferenceAnalytics.InferenceSettlement[],
+): Receipt[] {
+  const byIntent = new Map<string, InferenceAnalytics.InferenceSettlement>();
+  for (const row of analyticsSettlements) {
+    if (row.paymentIntentId) {
+      byIntent.set(row.paymentIntentId, row);
+    }
+  }
+  const merged = mergeReceiptList(existing, fetchedReceipts);
+  return merged.map((receipt) => enrichReceiptWithAnalytics(receipt, byIntent));
+}
