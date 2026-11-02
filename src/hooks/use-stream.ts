@@ -1080,6 +1080,19 @@ function sealReasoningBlock(
     }
 }
 
+export function projectStreamEvent(
+    event: RunEvent,
+    chat: UseChatReturn,
+    cbRef: React.MutableRefObject<StreamCallbacks>,
+    textBlockRef: React.MutableRefObject<string | null>,
+    blockTextRef: React.MutableRefObject<string>,
+    reasoningStateRef: React.MutableRefObject<ReasoningStreamState>,
+    blockSeqRef: React.MutableRefObject<number>,
+    activityOwnsTools = false,
+): void {
+    route(event, chat, cbRef, textBlockRef, blockTextRef, reasoningStateRef, blockSeqRef, activityOwnsTools);
+}
+
 function route(
     event: RunEvent,
     chat: UseChatReturn,
