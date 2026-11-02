@@ -16,7 +16,17 @@ import type {
 import { createRunProjection, reduceRunProjection } from "@compose-market/sdk";
 
 import { sdk } from "@/lib/sdk";
-import { noticeId, type Artifact, type ConnectorRequest, type Plan, type Task, type UseChatReturn } from "@/hooks/use-chat";
+import {
+    noticeId,
+    type Artifact,
+    type ConnectorRequest,
+    type Plan,
+    type PlanClarificationItem,
+    type PlanMissingInput,
+    type ProposalClarification,
+    type Task,
+    type UseChatReturn,
+} from "@/hooks/use-chat";
 import {
     getModelTypeValues,
     IMAGE_ATTACHMENT_REQUIRED_MESSAGE,
@@ -34,6 +44,7 @@ export interface StreamCallbacks {
     onVideoStatus?: (status: { jobId: string; status: "queued" | "processing" | "completed" | "failed"; progress?: number; url?: string; error?: string }) => void;
     onDone?: () => void;
     onFinal?: (final: { text: string; requestId: string | null; structuredOutput?: unknown }) => void;
+    onWatchingChange?: (watching: boolean) => void;
 }
 
 export type StreamCallOptions = Pick<
@@ -88,7 +99,10 @@ export interface UseStream {
     runResponses: (args: ResponsesStreamArgs) => Promise<void>;
     appendResponses: (args: ResponsesAppendArgs) => Promise<void>;
     cancelResponses: () => void;
-    watchPlan: (params: { agentWallet: string; runId: string; threadId: string }) => Promise<void>;
+    stopAgent: (agentWallet: string, runId?: string, threadId?: string) => Promise<void>;
+    stopWatch: () => void;
+    watchPlan: (params: { agentWallet: string; runId: string; threadId: string; signal?: AbortSignal }) => Promise<void>;
+    rehydrateRun: (params: { agentWallet: string; runId: string; threadId: string }) => Promise<string | null>;
 }
 
 interface LiveResponse {
@@ -107,6 +121,10 @@ interface OpeningResponse {
 }
 
 const modelCards = new Map<string, Promise<CatalogModel | null>>();
+
+export function clearSeededModelCards(): void {
+    modelCards.clear();
+}
 
 export function seedModelCards(
     models: readonly CatalogModel[],
@@ -214,10 +232,38 @@ export function useStream(
     const callbacksRef = useRef(callbacks);
     callbacksRef.current = callbacks;
     const textBlockRef = useRef<string | null>(null);
+    const blockTextRef = useRef<string>("");
+    const reasoningStateRef = useRef<ReasoningStreamState>(createReasoningState());
     const blockSeqRef = useRef(0);
     const liveRef = useRef<Map<string, LiveResponse>>(new Map());
     const openingRef = useRef<Map<string, OpeningResponse>>(new Map());
     const responseControllerRef = useRef<AbortController | null>(null);
+    const agentControllerRef = useRef<AbortController | null>(null);
+    const workflowControllerRef = useRef<AbortController | null>(null);
+    const watchControllerRef = useRef<AbortController | null>(null);
+    const activeRunIdRef = useRef<string | null>(null);
+    const seenReceiptsRef = useRef<Set<string>>(new Set());
+
+    const deliverReceipt = useCallback((receipt: Receipt, assistantId?: string | null) => {
+        const key = `${receipt.id ?? receipt.paymentIntentId ?? receipt.txHash ?? receipt.finalAmountWei}:${receipt.checkpointSequence ?? "final"}`;
+        if (seenReceiptsRef.current.has(key)) return;
+        seenReceiptsRef.current.add(key);
+        if (seenReceiptsRef.current.size > 128) {
+            const first = seenReceiptsRef.current.values().next().value;
+            if (first) seenReceiptsRef.current.delete(first);
+        }
+        const targetId = assistantId ?? chatRef.current.currentAssistantIdRef.current ?? chatRef.current.planMessageIdRef.current;
+        if (targetId) {
+            chatRef.current.attachAssistantReceipt(targetId, receipt);
+        }
+        callbacksRef.current.onReceipt?.(receipt);
+    }, []);
+
+    const stopWatch = useCallback((): void => {
+        const controller = watchControllerRef.current;
+        watchControllerRef.current = null;
+        if (controller) abort(controller);
+    }, []);
 
     const cancelStandardResponses = useCallback((): void => {
         const controller = responseControllerRef.current;
@@ -254,34 +300,74 @@ export function useStream(
         closeRealtime(true);
     }, [cancelStandardResponses, closeRealtime]);
 
+    const stopAgent = useCallback(async (agentWallet: string, runId?: string, threadId?: string): Promise<void> => {
+        const controller = agentControllerRef.current;
+        agentControllerRef.current = null;
+        if (controller) abort(controller);
+        stopWatch();
+        const targetRun = runId ?? activeRunIdRef.current ?? undefined;
+        chatRef.current.clearActivityStateUnlessError();
+        if (targetRun && typeof sdk.agent.stop === "function") {
+            try {
+                await sdk.agent.stop({
+                    agentWallet,
+                    runId: targetRun,
+                    ...(threadId ? { threadId } : {}),
+                });
+            } catch {
+                // run may already be terminal on runtime
+            }
+        }
+        activeRunIdRef.current = null;
+    }, [stopWatch]);
+
     useEffect(() => {
         const unsubs: Array<() => void> = [
-            sdk.events.on("receipt", (event) => callbacksRef.current.onReceipt?.(event.receipt)),
+            sdk.events.on("receipt", (event) => deliverReceipt(event.receipt)),
             sdk.events.on("budget", (event) => callbacksRef.current.onBudget?.(event.snapshot)),
             sdk.events.on("sessionInvalid", (event) => callbacksRef.current.onSessionInvalid?.(event.reason)),
         ];
         return () => {
             for (const unsub of unsubs) unsub();
         };
-    }, []);
+    }, [deliverReceipt]);
 
     useEffect(() => {
-        const unload = () => cancelResponses();
-        window.addEventListener("beforeunload", unload);
-        window.addEventListener("pagehide", unload);
-        return () => {
-            window.removeEventListener("beforeunload", unload);
-            window.removeEventListener("pagehide", unload);
+        const abortAll = () => {
+            if (agentControllerRef.current) {
+                abort(agentControllerRef.current);
+                agentControllerRef.current = null;
+            }
+            if (workflowControllerRef.current) {
+                abort(workflowControllerRef.current);
+                workflowControllerRef.current = null;
+            }
             cancelResponses();
+            stopWatch();
         };
-    }, [cancelResponses]);
+        window.addEventListener("beforeunload", abortAll);
+        window.addEventListener("pagehide", abortAll);
+        return () => {
+            window.removeEventListener("beforeunload", abortAll);
+            window.removeEventListener("pagehide", abortAll);
+            abortAll();
+        };
+    }, [cancelResponses, stopWatch]);
 
     const runAgent = useCallback(async (args: AgentStreamArgs): Promise<void> => {
         const c = chatRef.current;
+        if (agentControllerRef.current) abort(agentControllerRef.current);
+        const controller = new AbortController();
+        const cleanup = linked(args.signal, controller);
+        agentControllerRef.current = controller;
+
         c.currentAssistantIdRef.current = args.assistantId;
         c.streamedTextRef.current = "";
         textBlockRef.current = null;
-        c.setActivityPhase("thinking", "Starting agent");
+        blockTextRef.current = "";
+        resetReasoningState(reasoningStateRef.current);
+        activeRunIdRef.current = args.runId ?? null;
+        c.clearActivityState();
 
         const stream = sdk.agent.stream(
             {
@@ -300,26 +386,39 @@ export function useStream(
                 ...(args.proof !== undefined ? { proof: args.proof } : {}),
                 ...(args.constraints ? { constraints: args.constraints } : {}),
             },
-            { ...args.options, signal: args.signal },
+            { ...args.options, signal: controller.signal },
         );
 
         try {
             const { result, projection } = await consume(stream, (event) => {
-                route(event, chatRef.current, callbacksRef, textBlockRef, blockSeqRef);
+                if (event.domain === "activity" && event.runId && !event.runId.startsWith("sub:")) {
+                    activeRunIdRef.current = event.rootId ?? event.runId;
+                }
+                route(event, chatRef.current, callbacksRef, textBlockRef, blockTextRef, reasoningStateRef, blockSeqRef, true);
             });
             finish(chatRef.current, args.assistantId, projection.text, null, callbacksRef, projection.structuredOutput);
-            if (result.receipt) callbacksRef.current.onReceipt?.(result.receipt);
+            if (result.receipt) deliverReceipt(result.receipt, args.assistantId);
         } catch (err) {
             fail(err, chatRef.current, args.assistantId, callbacksRef);
+        } finally {
+            cleanup();
+            if (agentControllerRef.current === controller) agentControllerRef.current = null;
         }
-    }, []);
+    }, [deliverReceipt]);
 
     const runWorkflow = useCallback(async (args: WorkflowStreamArgs): Promise<void> => {
         const c = chatRef.current;
+        if (workflowControllerRef.current) abort(workflowControllerRef.current);
+        const controller = new AbortController();
+        const cleanup = linked(args.signal, controller);
+        workflowControllerRef.current = controller;
+
         c.currentAssistantIdRef.current = args.assistantId;
         c.streamedTextRef.current = "";
         textBlockRef.current = null;
-        c.setActivityPhase("thinking", "Starting workflow");
+        blockTextRef.current = "";
+        resetReasoningState(reasoningStateRef.current);
+        c.clearActivityState();
 
         const stream = sdk.workflow.stream(
             {
@@ -331,19 +430,22 @@ export function useStream(
                 ...(typeof args.lastEventIndex === "number" ? { lastEventIndex: args.lastEventIndex } : {}),
                 ...(args.attachment ? { attachment: args.attachment } : {}),
             },
-            { ...args.options, signal: args.signal },
+            { ...args.options, signal: controller.signal },
         );
 
         try {
             const { result, projection } = await consume(stream, (event) => {
-                route(event, chatRef.current, callbacksRef, textBlockRef, blockSeqRef);
+                route(event, chatRef.current, callbacksRef, textBlockRef, blockTextRef, reasoningStateRef, blockSeqRef, true);
             });
             finish(chatRef.current, args.assistantId, projection.text, null, callbacksRef, projection.structuredOutput);
-            if (result.receipt) callbacksRef.current.onReceipt?.(result.receipt);
+            if (result.receipt) deliverReceipt(result.receipt, args.assistantId);
         } catch (err) {
             fail(err, chatRef.current, args.assistantId, callbacksRef);
+        } finally {
+            cleanup();
+            if (workflowControllerRef.current === controller) workflowControllerRef.current = null;
         }
-    }, []);
+    }, [deliverReceipt]);
 
     const append = useCallback(async (args: ResponsesStreamArgs, active: LiveResponse): Promise<void> => {
         const input = latestInput((args.params as { input?: unknown }).input);
@@ -413,7 +515,7 @@ export function useStream(
                             settle.resolve?.(active);
                         }
                     }
-                    route(event, chatRef.current, callbacksRef, textBlockRef, blockSeqRef);
+                    route(event, chatRef.current, callbacksRef, textBlockRef, blockTextRef, reasoningStateRef, blockSeqRef);
                 });
                 if (!ready) {
                     ready = true;
@@ -428,7 +530,7 @@ export function useStream(
                 cleanup();
                 chatRef.current.setRealtimeSession(null);
                 finish(chatRef.current, args.assistantId, chatRef.current.streamedTextRef.current, null, callbacksRef);
-                if (result.receipt) callbacksRef.current.onReceipt?.(result.receipt);
+                if (result.receipt) deliverReceipt(result.receipt, args.assistantId);
             } catch (err) {
                 if (openingRef.current.get(model) === opening) {
                     openingRef.current.delete(model);
@@ -446,7 +548,7 @@ export function useStream(
         })();
 
         await started;
-    }, []);
+    }, [deliverReceipt]);
 
     const runResponses = useCallback(async (args: ResponsesStreamArgs): Promise<void> => {
         cancelStandardResponses();
@@ -508,6 +610,9 @@ export function useStream(
         c.currentAssistantIdRef.current = args.assistantId;
         c.streamedTextRef.current = "";
         textBlockRef.current = null;
+        blockTextRef.current = "";
+        resetReasoningState(reasoningStateRef.current);
+        c.clearActivityState();
 
         const controller = new AbortController();
         const cleanup = linked(args.signal, controller);
@@ -522,17 +627,17 @@ export function useStream(
                 if (event.domain === "model" && event.responseId) {
                     callbacksRef.current.onResponseId?.(event.responseId);
                 }
-                route(event, chatRef.current, callbacksRef, textBlockRef, blockSeqRef);
+                route(event, chatRef.current, callbacksRef, textBlockRef, blockTextRef, reasoningStateRef, blockSeqRef);
             });
             finish(chatRef.current, args.assistantId, projection.text, null, callbacksRef, projection.structuredOutput);
-            if (result.receipt) callbacksRef.current.onReceipt?.(result.receipt);
+            if (result.receipt) deliverReceipt(result.receipt, args.assistantId);
         } catch (err) {
             fail(err, chatRef.current, args.assistantId, callbacksRef);
         } finally {
             cleanup();
             if (responseControllerRef.current === controller) responseControllerRef.current = null;
         }
-    }, [append, cancelStandardResponses, runRealtimeResponses]);
+    }, [append, cancelStandardResponses, deliverReceipt, runRealtimeResponses]);
 
     const appendResponses = useCallback(async (args: ResponsesAppendArgs): Promise<void> => {
         await sdk.inference.responses.append(args.responseId, {
@@ -565,18 +670,73 @@ export function useStream(
     // reconnects with capped backoff until a terminal plan state is
     // observed (or the total watch window elapses), because plan execution
     // outlives any single SSE connection.
-    const watchPlan = useCallback(async (params: { agentWallet: string; runId: string; threadId: string }): Promise<void> => {
+    const watchPlan = useCallback(async (params: { agentWallet: string; runId: string; threadId: string; signal?: AbortSignal }): Promise<void> => {
         const WATCH_RECONNECT_BASE_MS = 1_000;
         const WATCH_RECONNECT_MAX_MS = 30_000;
         const WATCH_TOTAL_MS = 2 * 60 * 60 * 1_000;
         const TERMINAL_PLAN_STATES = new Set(["completed", "failed", "cancelled", "expired", "rejected"]);
+
+        // Cancel any previous watch loop immediately so switching agents/runs never leaks
+        stopWatch();
+        const controller = new AbortController();
+        const cleanup = linked(params.signal, controller);
+        watchControllerRef.current = controller;
+        activeRunIdRef.current = params.runId;
+
         const startedAt = Date.now();
         let backoff = WATCH_RECONNECT_BASE_MS;
-        const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+        let completionAssistantId: string | null = null;
+        let lastSeenSeq: number | undefined;
+        // Isolate watch stream block refs from foreground runAgent turns
+        const watchTextBlockRef: React.MutableRefObject<string | null> = { current: null };
+        const watchBlockTextRef: React.MutableRefObject<string> = { current: "" };
+        const watchReasoningStateRef: React.MutableRefObject<ReasoningStreamState> = { current: createReasoningState() };
+        const HUMAN_GATED_STATES = new Set(["awaiting_approval", "clarify"]);
+        callbacksRef.current.onWatchingChange?.(true);
+        chatRef.current.clearActivityState();
+        chatRef.current.setActivityPhase("thinking", "Executing plan");
+
+        const sleep = (ms: number) => new Promise<void>((resolve) => {
+            if (controller.signal.aborted) {
+                resolve();
+                return;
+            }
+            const timer = window.setTimeout(() => {
+                controller.signal.removeEventListener("abort", onAbort);
+                resolve();
+            }, ms);
+            const onAbort = () => {
+                window.clearTimeout(timer);
+                resolve();
+            };
+            controller.signal.addEventListener("abort", onAbort, { once: true });
+        });
+
+        const isSubRun = (event: RunEvent): boolean => {
+            const runId = (event as unknown as { runId?: unknown }).runId;
+            return typeof runId === "string" && runId.startsWith("sub:");
+        };
+
+        const isNestedCompletion = (event: RunEvent): boolean => {
+            const runId = (event as unknown as { runId?: unknown }).runId;
+            return typeof runId === "string" && runId.startsWith("complete-sub:");
+        };
 
         const isTerminal = (event: RunEvent): boolean => {
             if (event.domain !== "activity") return false;
-            const record = event as unknown as { type?: string; payload?: Record<string, unknown> };
+            // Sub-agent / nested completion events MUST NEVER terminate the root plan watch stream
+            if (isSubRun(event) || isNestedCompletion(event)) return false;
+            const record = event as unknown as {
+                type?: string;
+                runId?: unknown;
+                rootId?: unknown;
+                payload?: Record<string, unknown>;
+            };
+            const eventRunId = str(record.runId) ?? str(record.payload?.runId);
+            const eventRootId = str(record.rootId) ?? str(record.payload?.rootRunId);
+            if (eventRunId && eventRunId !== params.runId && eventRootId !== params.runId) {
+                return false;
+            }
             if (record.type === "activity.run" && isRecord(record.payload)) {
                 const status = str(record.payload.status);
                 return status !== undefined && TERMINAL_PLAN_STATES.has(status);
@@ -588,81 +748,216 @@ export function useStream(
             return false;
         };
 
-        const isSubRun = (event: RunEvent): boolean => {
-            const runId = (event as unknown as { runId?: unknown }).runId;
-            return typeof runId === "string" && runId.startsWith("sub:");
-        };
-
-        // Nested sub-plan completion turns (complete-sub:*) are sub-agent
-        // speech — mission control's activity tree only, never the user's chat.
-        const isNestedCompletion = (event: RunEvent): boolean => {
-            const runId = (event as unknown as { runId?: unknown }).runId;
-            return typeof runId === "string" && runId.startsWith("complete-sub:");
-        };
-
         const routeWatchEvent = (event: RunEvent): void => {
             const chat = chatRef.current;
             if (event.domain === "model") {
-                // Sub-agent model output never renders in the user's chat —
-                // but its reasoning/answer folds into the child agent's
-                // mission-control tree node.
-                if (isSubRun(event)) {
+                if (isSubRun(event) || isNestedCompletion(event)) {
                     routeChildModelToTree(event, chat);
                     return;
                 }
-                if (isNestedCompletion(event)) {
-                    routeChildModelToTree(event, chat);
-                    return;
+                // Post-approval completion speech opens its own clean assistant turn
+                // instead of bleeding onto the proposing plan message.
+                if (
+                    event.type === "model.text.delta"
+                    || event.type === "model.reasoning.delta"
+                    || event.type === "model.asset"
+                ) {
+                    const owningPlanMsg = chat.planMessageIdRef.current;
+                    if (!completionAssistantId && (!chat.currentAssistantIdRef.current || chat.currentAssistantIdRef.current === owningPlanMsg)) {
+                        completionAssistantId = chat.createAssistantPlaceholder();
+                        chat.currentAssistantIdRef.current = completionAssistantId;
+                        chat.streamedTextRef.current = "";
+                        watchTextBlockRef.current = null;
+                        watchBlockTextRef.current = "";
+                        resetReasoningState(watchReasoningStateRef.current);
+                    } else if (completionAssistantId) {
+                        chat.currentAssistantIdRef.current = completionAssistantId;
+                    }
                 }
-                // The user-facing agent's own words (the completion turn)
-                // need an assistant message when no live turn is running.
-                if (!chat.currentAssistantIdRef.current && (event.type === "model.text.delta" || event.type === "model.reasoning.delta")) {
-                    const assistantId = chat.createAssistantPlaceholder();
-                    chat.currentAssistantIdRef.current = assistantId;
-                    chat.streamedTextRef.current = "";
-                    textBlockRef.current = null;
-                }
-                route(event, chat, callbacksRef, textBlockRef, blockSeqRef);
+                route(event, chat, callbacksRef, watchTextBlockRef, watchBlockTextRef, watchReasoningStateRef, blockSeqRef, true);
                 return;
             }
             if (event.domain === "activity" && event.type === "activity.plan") {
-                // Only the user-facing plan renders in chat — sub-agent
-                // proposals are their parents' business, not the user's UI.
                 const payload = (event as unknown as { payload?: Record<string, unknown> }).payload;
                 const planRunId = str(payload?.runId);
                 if (planRunId !== undefined && planRunId.startsWith("sub:")) return;
-                route(event, chat, callbacksRef, textBlockRef, blockSeqRef);
+                const planState = str(payload?.state);
+                if (planState && HUMAN_GATED_STATES.has(planState)) {
+                    callbacksRef.current.onWatchingChange?.(false);
+                } else if (planState && !TERMINAL_PLAN_STATES.has(planState)) {
+                    callbacksRef.current.onWatchingChange?.(true);
+                }
+                // Ensure a carrier message exists on page reload rehydration
+                if (!chat.planMessageIdRef.current && !chat.currentAssistantIdRef.current) {
+                    const carrierId = chat.createAssistantPlaceholder();
+                    chat.planMessageIdRef.current = carrierId;
+                    chat.currentAssistantIdRef.current = carrierId;
+                }
+                const targetPlanId = chat.planMessageIdRef.current ?? chat.currentAssistantIdRef.current;
+                const prevAssistant = chat.currentAssistantIdRef.current;
+                if (targetPlanId) chat.currentAssistantIdRef.current = targetPlanId;
+                route(event, chat, callbacksRef, watchTextBlockRef, watchBlockTextRef, watchReasoningStateRef, blockSeqRef, true);
+                if (completionAssistantId) chat.currentAssistantIdRef.current = completionAssistantId;
+                else if (prevAssistant) chat.currentAssistantIdRef.current = prevAssistant;
                 return;
             }
-            route(event, chat, callbacksRef, textBlockRef, blockSeqRef);
+            if (event.domain === "activity" && event.type === "activity.connector") {
+                const payload = (event as unknown as { payload?: Record<string, unknown> }).payload;
+                const connState = str(payload?.decision) ?? str(payload?.state);
+                if (!connState || connState === "requested" || connState === "escalated") {
+                    callbacksRef.current.onWatchingChange?.(false);
+                } else {
+                    callbacksRef.current.onWatchingChange?.(true);
+                }
+            }
+            // Activity artifact events (documents, code, deliveries) attach to the
+            // same active assistant message as completion speech/assets so watch
+            // never splits a run's artifacts across two separate bubbles.
+            const isArtifactTool = event.domain === "activity"
+                && event.type === "activity.tool"
+                && isRecord((event as unknown as { payload?: Record<string, unknown> }).payload?.artifact);
+            if (isArtifactTool) {
+                const targetId = completionAssistantId ?? chat.planMessageIdRef.current ?? chat.currentAssistantIdRef.current ?? chat.createAssistantPlaceholder();
+                const prevAssistant = chat.currentAssistantIdRef.current;
+                chat.currentAssistantIdRef.current = targetId;
+                route(event, chat, callbacksRef, watchTextBlockRef, watchBlockTextRef, watchReasoningStateRef, blockSeqRef, true);
+                if (completionAssistantId) chat.currentAssistantIdRef.current = completionAssistantId;
+                else if (prevAssistant) chat.currentAssistantIdRef.current = prevAssistant;
+                return;
+            }
+            // Activity events attach to the run's owning plan message when available
+            const ownerId = chat.planMessageIdRef.current ?? chat.currentAssistantIdRef.current;
+            if (!ownerId) {
+                const carrierId = chat.createAssistantPlaceholder();
+                chat.planMessageIdRef.current = carrierId;
+                chat.currentAssistantIdRef.current = carrierId;
+            }
+            const prevAssistant = chat.currentAssistantIdRef.current;
+            if (chat.planMessageIdRef.current) {
+                chat.currentAssistantIdRef.current = chat.planMessageIdRef.current;
+            }
+            route(event, chat, callbacksRef, watchTextBlockRef, watchBlockTextRef, watchReasoningStateRef, blockSeqRef, true);
+            if (completionAssistantId) chat.currentAssistantIdRef.current = completionAssistantId;
+            else if (prevAssistant) chat.currentAssistantIdRef.current = prevAssistant;
         };
 
-        for (; ;) {
-            let terminal = false;
-            try {
-                const stream = sdk.agent.watch({ ...params, timeoutMs: 3_600_000 });
-                for (; ;) {
-                    const next = await stream.next();
-                    if (next.done) break;
-                    routeWatchEvent(next.value);
-                    if (isTerminal(next.value)) {
-                        terminal = true;
-                        break;
+        try {
+            for (; ;) {
+                if (controller.signal.aborted) return;
+                let terminal = false;
+                try {
+                    const stream = sdk.agent.watch({
+                        agentWallet: params.agentWallet,
+                        runId: params.runId,
+                        threadId: params.threadId,
+                        timeoutMs: 3_600_000,
+                        ...(lastSeenSeq !== undefined ? { afterSeq: lastSeenSeq } : {}),
+                    }, {
+                        signal: controller.signal,
+                    });
+                    for (; ;) {
+                        if (controller.signal.aborted) return;
+                        const next = await stream.next();
+                        if (next.done) {
+                            if (next.value?.receipt) {
+                                deliverReceipt(next.value.receipt, completionAssistantId ?? chatRef.current.planMessageIdRef.current);
+                            }
+                            break;
+                        }
+                        backoff = WATCH_RECONNECT_BASE_MS;
+                        const seq = typeof (next.value as { seq?: unknown }).seq === "number"
+                            ? (next.value as { seq: number }).seq
+                            : undefined;
+                        if (seq !== undefined) {
+                            if (lastSeenSeq !== undefined && seq <= lastSeenSeq) {
+                                continue;
+                            }
+                            lastSeenSeq = seq;
+                        }
+                        routeWatchEvent(next.value);
+                        if (isTerminal(next.value)) {
+                            terminal = true;
+                            chatRef.current.flushPendingDeltas();
+                            chatRef.current.clearActivityStateUnlessError();
+                            abort(controller);
+                            void stream.return?.(undefined as never).catch(() => undefined);
+                            break;
+                        }
+                    }
+                } catch (err) {
+                    if (controller.signal.aborted) return;
+                    const status = (err && typeof err === "object" && "status" in err && typeof (err as { status?: unknown }).status === "number")
+                        ? (err as { status: number }).status
+                        : undefined;
+                    if (status !== undefined && status >= 400 && status < 500 && status !== 429) {
+                        return;
                     }
                 }
-            } catch {
-                // Watch transport failures leave durable state untouched;
-                // reconnect below and re-derive from the snapshot replay.
+                if (terminal || controller.signal.aborted) return;
+                if (Date.now() - startedAt >= WATCH_TOTAL_MS) return;
+                await sleep(backoff);
+                backoff = Math.min(backoff * 2, WATCH_RECONNECT_MAX_MS);
+                if (Date.now() - startedAt >= WATCH_TOTAL_MS) return;
             }
-            if (terminal) return;
-            if (Date.now() - startedAt >= WATCH_TOTAL_MS) return;
-            await sleep(backoff);
-            backoff = Math.min(backoff * 2, WATCH_RECONNECT_MAX_MS);
-            if (Date.now() - startedAt >= WATCH_TOTAL_MS) return;
+        } finally {
+            chatRef.current.flushPendingDeltas();
+            cleanup();
+            if (watchControllerRef.current === controller) {
+                watchControllerRef.current = null;
+                callbacksRef.current.onWatchingChange?.(false);
+            }
         }
-    }, []);
+    }, [deliverReceipt, stopWatch]);
 
-    return useMemo(() => ({ runAgent, runWorkflow, runResponses, appendResponses, cancelResponses, watchPlan }), [runAgent, runWorkflow, runResponses, appendResponses, cancelResponses, watchPlan]);
+    const rehydrateRun = useCallback(async (params: { agentWallet: string; runId: string; threadId: string }): Promise<string | null> => {
+        if (!params.agentWallet || !params.runId || !params.threadId || typeof sdk.agent.runState !== "function") {
+            return null;
+        }
+        try {
+            const state = await sdk.agent.runState({
+                agentWallet: params.agentWallet,
+                runId: params.runId,
+                threadId: params.threadId,
+            }) as unknown as Record<string, unknown> | null | undefined;
+            if (!state || !isRecord(state)) return null;
+            const runId = str(state.rootRunId) ?? str(state.runId) ?? str(isRecord(state.activePlan) ? state.activePlan.rootRunId : undefined);
+            const planState = str(state.state) ?? str(isRecord(state.activePlan) ? state.activePlan.state : undefined);
+            const terminal = new Set(["completed", "failed", "cancelled", "expired", "rejected"]);
+            if (runId && (!planState || !terminal.has(planState))) {
+                void watchPlan({
+                    agentWallet: params.agentWallet,
+                    runId,
+                    threadId: params.threadId,
+                });
+                return runId;
+            }
+            return null;
+        } catch {
+            return null;
+        }
+    }, [watchPlan]);
+
+    return useMemo(() => ({
+        runAgent,
+        runWorkflow,
+        runResponses,
+        appendResponses,
+        cancelResponses,
+        stopAgent,
+        stopWatch,
+        watchPlan,
+        rehydrateRun,
+    }), [
+        runAgent,
+        runWorkflow,
+        runResponses,
+        appendResponses,
+        cancelResponses,
+        stopAgent,
+        stopWatch,
+        watchPlan,
+        rehydrateRun,
+    ]);
 }
 
 async function consume(
