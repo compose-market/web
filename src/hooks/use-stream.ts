@@ -974,6 +974,112 @@ async function consume(
     return { result: next.value, projection };
 }
 
+export interface ReasoningStreamState {
+    blockId: string | null;
+    text: string;
+    pendingSeparator: boolean;
+    closed: boolean;
+    completedIds: Set<string>;
+}
+
+export function createReasoningState(): ReasoningStreamState {
+    return {
+        blockId: null,
+        text: "",
+        pendingSeparator: false,
+        closed: false,
+        completedIds: new Set(),
+    };
+}
+
+function resetReasoningState(state: ReasoningStreamState): void {
+    state.blockId = null;
+    state.text = "";
+    state.pendingSeparator = false;
+    state.closed = false;
+    state.completedIds.clear();
+}
+
+function pushReasoningDelta(
+    chat: UseChatReturn,
+    assistantId: string,
+    state: ReasoningStreamState,
+    blockSeqRef: React.MutableRefObject<number>,
+    delta: string,
+    preferredBlockId?: string,
+): void {
+    if (!delta) return;
+    if (state.closed) {
+        state.closed = false;
+    }
+    const blockId = state.blockId ?? preferredBlockId ?? nextBlock("reasoning", blockSeqRef);
+    state.blockId = blockId;
+    let chunk = delta;
+    if (state.pendingSeparator && state.text.length > 0) {
+        if (!state.text.endsWith("\n\n") && !chunk.startsWith("\n")) {
+            chunk = `\n\n${chunk}`;
+        }
+        state.pendingSeparator = false;
+    }
+    state.text += chunk;
+    chat.appendAssistantBlockText(assistantId, blockId, "reasoning", chunk);
+}
+
+function completeReasoningEvent(
+    chat: UseChatReturn,
+    assistantId: string,
+    state: ReasoningStreamState,
+    blockSeqRef: React.MutableRefObject<number>,
+    event: ModelEvent,
+): void {
+    const doneKey = event.itemId || event.id;
+    if (doneKey && state.completedIds.has(doneKey)) {
+        return;
+    }
+    if (doneKey) {
+        state.completedIds.add(doneKey);
+    }
+
+    const incoming = typeof event.text === "string" ? event.text.trim() : "";
+    const existingTrimmed = state.text.trim();
+    if (incoming) {
+        const alreadyPresent = existingTrimmed.length > 0 && (
+            existingTrimmed === incoming
+            || existingTrimmed.endsWith(incoming)
+            || existingTrimmed.includes(incoming)
+        );
+        if (!alreadyPresent) {
+            if (existingTrimmed.length > 0 && incoming.startsWith(existingTrimmed)) {
+                const suffix = incoming.slice(existingTrimmed.length);
+                if (suffix) {
+                    state.pendingSeparator = false;
+                    pushReasoningDelta(chat, assistantId, state, blockSeqRef, suffix);
+                }
+            } else {
+                const preferredId = event.responseId ? `reasoning:${event.responseId}` : undefined;
+                pushReasoningDelta(chat, assistantId, state, blockSeqRef, incoming, preferredId);
+            }
+        }
+    }
+
+    if (state.blockId) {
+        chat.finishAssistantReasoningBlock(assistantId, state.blockId);
+        state.pendingSeparator = true;
+    }
+}
+
+function sealReasoningBlock(
+    chat: UseChatReturn,
+    assistantId: string,
+    state: ReasoningStreamState,
+): void {
+    if (state.blockId && !state.closed) {
+        chat.finishAssistantReasoningBlock(assistantId, state.blockId);
+        state.closed = true;
+        state.pendingSeparator = false;
+    }
+}
+
 function route(
     event: RunEvent,
     chat: UseChatReturn,
