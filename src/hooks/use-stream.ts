@@ -1169,14 +1169,15 @@ function dispatchModel(
     chat: UseChatReturn,
     cbRef: React.MutableRefObject<StreamCallbacks>,
     textBlockRef: React.MutableRefObject<string | null>,
+    blockTextRef: React.MutableRefObject<string>,
+    reasoningStateRef: React.MutableRefObject<ReasoningStreamState>,
     blockSeqRef: React.MutableRefObject<number>,
+    activityOwnsTools = false,
 ): void {
     const assistantId = chat.currentAssistantIdRef.current;
     if (!assistantId) return;
+    const reasoningState = reasoningStateRef.current;
 
-    // Agent<>user chat: sub-agent model output never renders in the
-    // user's chat — the user-facing agent's own words are the chat; the
-    // swarm's work shows in mission control's activity tree.
     if (typeof event.runId === "string" && event.runId.startsWith("sub:")) {
         routeChildModelToTree(event, chat);
         return;
@@ -1184,57 +1185,157 @@ function dispatchModel(
 
     chat.applyAssistantModelEvent(assistantId, event);
 
+    if (event.type === "model.start") {
+        textBlockRef.current = null;
+        blockTextRef.current = "";
+        if (reasoningState.blockId) {
+            reasoningState.pendingSeparator = true;
+        }
+        return;
+    }
+
+    if (event.type === "model.tool.delta") {
+        if (activityOwnsTools) return;
+        if (!event.toolCallId) return;
+        const name = event.name || "tool";
+        const nodeId = event.toolCallId.startsWith("tool:") ? event.toolCallId : `tool:${event.toolCallId}`;
+        chat.startToolActivity(name, undefined, name, { nodeId, kind: "tool" });
+        return;
+    }
+
+    if (event.type === "model.tool.done") {
+        if (!activityOwnsTools) {
+            const name = event.name || "tool";
+            const nodeId = event.toolCallId
+                ? (event.toolCallId.startsWith("tool:") ? event.toolCallId : `tool:${event.toolCallId}`)
+                : event.id;
+            chat.finishToolActivity(name, undefined, false, name, { nodeId, kind: "tool" });
+        }
+        if (reasoningState.blockId) {
+            reasoningState.pendingSeparator = true;
+        }
+        return;
+    }
+
     const phase = event.phase;
-    if (event.type === "model.status" && phase === "finalizing_payment") {
-        chat.clearActivityStateUnlessError();
+    if (event.type === "model.status") {
+        if (phase === "finalizing_payment") {
+            chat.clearActivityStateUnlessError();
+            return;
+        }
+        const raw = isRecord(event.raw) ? event.raw : undefined;
+        const rawType = str(raw?.type);
+        if (rawType === "response.warning" && event.text) {
+            chat.upsertAssistantBlock(assistantId, {
+                id: noticeId("warning", event.text),
+                type: "notice",
+                tone: "warning",
+                text: event.text,
+            });
+            return;
+        }
+        if (rawType === "response.citation" && (event.text || str(raw?.url))) {
+            const label = str(raw?.title) ?? event.text ?? str(raw?.url) ?? "Source";
+            chat.upsertAssistantBlock(assistantId, {
+                id: noticeId("info", `${label}:${str(raw?.url) ?? ""}`),
+                type: "notice",
+                tone: "info",
+                text: label,
+                ...(str(raw?.url) ? { url: str(raw?.url) } : {}),
+            });
+            return;
+        }
         return;
     }
 
     if (event.type === "model.text.delta" && event.delta) {
+        sealReasoningBlock(chat, assistantId, reasoningState);
+        const isNewBlock = textBlockRef.current === null;
         const blockId = textBlockRef.current ?? nextBlock("text", blockSeqRef);
         textBlockRef.current = blockId;
-        chat.appendAssistantBlockText(assistantId, blockId, "text", event.delta);
+        if (isNewBlock) {
+            blockTextRef.current = "";
+        }
+        if (
+            isNewBlock
+            && chat.streamedTextRef.current.length > 0
+            && !chat.streamedTextRef.current.endsWith("\n")
+            && !event.delta.startsWith("\n")
+        ) {
+            chat.streamedTextRef.current += "\n\n";
+        }
+        blockTextRef.current += event.delta;
         chat.streamedTextRef.current += event.delta;
-        chat.scheduleStreamUpdate(chat.streamedTextRef.current);
+        chat.appendAssistantBlockText(assistantId, blockId, "text", event.delta, chat.streamedTextRef.current);
         chat.setActivityPhase("streaming", "Responding");
         return;
     }
 
     if (event.type === "model.text.done" && event.text) {
-        const current = chat.streamedTextRef.current;
-        const append = event.text.startsWith(current) ? event.text.slice(current.length) : current.includes(event.text) ? "" : event.text;
+        const blockCurrent = blockTextRef.current;
+        const fullCurrent = chat.streamedTextRef.current;
+        let append = "";
+        if (blockCurrent.length > 0) {
+            if (event.text.startsWith(blockCurrent)) {
+                append = event.text.slice(blockCurrent.length);
+            } else if (!blockCurrent.includes(event.text) && !fullCurrent.endsWith(event.text)) {
+                append = event.text;
+            }
+        } else if (fullCurrent.length === 0) {
+            append = event.text;
+        } else if (event.text.startsWith(fullCurrent)) {
+            append = event.text.slice(fullCurrent.length);
+        } else if (!fullCurrent.endsWith(event.text) && !fullCurrent.includes(event.text)) {
+            append = event.text;
+        }
         if (append) {
+            sealReasoningBlock(chat, assistantId, reasoningState);
+            const isNewBlock = textBlockRef.current === null;
             const blockId = textBlockRef.current ?? nextBlock("text", blockSeqRef);
             textBlockRef.current = blockId;
-            chat.appendAssistantBlockText(assistantId, blockId, "text", append);
+            if (
+                isNewBlock
+                && chat.streamedTextRef.current.length > 0
+                && !chat.streamedTextRef.current.endsWith("\n")
+                && !append.startsWith("\n")
+            ) {
+                chat.streamedTextRef.current += "\n\n";
+            }
+            blockTextRef.current += append;
             chat.streamedTextRef.current += append;
-            chat.scheduleStreamUpdate(chat.streamedTextRef.current);
+            chat.appendAssistantBlockText(assistantId, blockId, "text", append, chat.streamedTextRef.current);
         }
+        chat.flushPendingDeltas();
         return;
     }
 
-    if (event.type === "model.reasoning.done" && event.text) {
-        const blockId = `reasoning:${event.responseId ?? "main"}`;
-        chat.upsertAssistantBlock(assistantId, { id: blockId, type: "reasoning", text: event.text });
+    if (event.type === "model.reasoning.delta" && event.delta) {
+        const preferredId = event.responseId ? `reasoning:${event.responseId}` : undefined;
+        pushReasoningDelta(chat, assistantId, reasoningState, blockSeqRef, event.delta, preferredId);
+        chat.setActivityPhase("thinking", "Reasoning");
+        return;
+    }
+
+    if (event.type === "model.reasoning.done") {
+        completeReasoningEvent(chat, assistantId, reasoningState, blockSeqRef, event);
         return;
     }
 
     if (event.type === "model.done") {
+        chat.flushPendingDeltas();
+        sealReasoningBlock(chat, assistantId, reasoningState);
+        if (event.usage) {
+            chat.attachAssistantUsage(assistantId, event.usage);
+        }
         chat.stopRealtimeArtifacts(event.responseId);
         chat.clearActivityStateUnlessError();
         cbRef.current.onDone?.();
         return;
     }
 
-    if (event.type === "model.reasoning.delta" && event.delta) {
-        const blockId = `reasoning:${event.responseId ?? "main"}`;
-        chat.appendAssistantBlockText(assistantId, blockId, "reasoning", event.delta);
-        chat.setActivityPhase("thinking", "Reasoning");
-        return;
-    }
-
     if (event.type === "model.asset") {
         textBlockRef.current = null;
+        blockTextRef.current = "";
         const item = artifactFromModelEvent(event);
         chat.upsertAssistantArtifact(assistantId, item);
         if (item.partial !== true && !item.url && item.responseId && (item.inline || (item.artifactType === "embedding" && !item.embedding))) {
@@ -1262,6 +1363,8 @@ function dispatchModel(
 
     if (event.type === "model.error") {
         textBlockRef.current = null;
+        blockTextRef.current = "";
+        sealReasoningBlock(chat, assistantId, reasoningState);
         const message = event.error?.message || "Model stream error";
         chat.upsertAssistantBlock(assistantId, { id: noticeId("error", message), type: "notice", tone: "error", text: message });
         chat.setActivityPhase("error", message);
