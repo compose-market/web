@@ -118,3 +118,76 @@ export function reconcileMessageReceipts(
   const merged = mergeReceiptList(existing, fetchedReceipts);
   return merged.map((receipt) => enrichReceiptWithAnalytics(receipt, byIntent));
 }
+
+export interface TurnReceiptSummary {
+  items: Receipt[];
+  totalAmountWei: string;
+  providerAmountWei: string;
+  platformFeeWei: string;
+  status: SettlementStatus;
+  settledCount: number;
+  totalCount: number;
+  primaryTxHash?: string;
+  primaryNetwork?: string;
+}
+
+export function summarizeTurnReceipts(
+  receipts: Receipt[] | undefined,
+  fallbackReceipt?: Receipt,
+): TurnReceiptSummary | null {
+  const items = receipts && receipts.length > 0
+    ? receipts
+    : fallbackReceipt
+      ? [fallbackReceipt]
+      : [];
+  if (items.length === 0) return null;
+
+  let totalAmountWei = "0";
+  let providerAmountWei = "0";
+  let platformFeeWei = "0";
+  let settledCount = 0;
+  let failedCount = 0;
+  let submittedCount = 0;
+  let primaryTxHash: string | undefined;
+  let primaryNetwork: string | undefined;
+
+  for (const item of items) {
+    if (item.finalAmountWei) {
+      totalAmountWei = addAtomicAmounts(totalAmountWei, item.finalAmountWei);
+    }
+    if (item.providerAmountWei) {
+      providerAmountWei = addAtomicAmounts(providerAmountWei, item.providerAmountWei);
+    }
+    if (item.platformFeeWei) {
+      platformFeeWei = addAtomicAmounts(platformFeeWei, item.platformFeeWei);
+    }
+    const status = item.settlementStatus ?? (item.txHash ? "settled" : "queued");
+    if (status === "settled") settledCount += 1;
+    else if (status === "failed") failedCount += 1;
+    else if (status === "submitted" || status === "claimed") submittedCount += 1;
+
+    if (!primaryTxHash && (item.settleTxHash || item.txHash)) {
+      primaryTxHash = item.settleTxHash ?? item.txHash;
+    }
+    if (!primaryNetwork && item.network) {
+      primaryNetwork = item.network;
+    }
+  }
+
+  let status: SettlementStatus = "queued";
+  if (settledCount === items.length) status = "settled";
+  else if (failedCount === items.length) status = "failed";
+  else if (submittedCount > 0 || settledCount > 0) status = "submitted";
+
+  return {
+    items,
+    totalAmountWei,
+    providerAmountWei,
+    platformFeeWei,
+    status,
+    settledCount,
+    totalCount: items.length,
+    primaryTxHash,
+    primaryNetwork,
+  };
+}
