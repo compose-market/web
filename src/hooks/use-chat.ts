@@ -590,14 +590,30 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     const stoppedRealtimeResponsesRef = useRef<Set<string>>(new Set());
     const micRef = useRef<MicStream | null>(null);
 
-    // === Streaming refs (synchronous flush, no rAF batching) ===
+    // === Streaming refs (rAF-coalesced delta batching; lossless synchronous flush before structural events) ===
     const streamedTextRef = useRef<string>("");
     const currentAssistantIdRef = useRef<string | null>(null);
+    const planMessageIdRef = useRef<string | null>(null);
+    const pendingDeltasRef = useRef<Map<string, PendingDeltaBatch>>(new Map());
+    const deltaRafRef = useRef<number | null>(null);
 
     // === Scroll Refs ===
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const stickToBottomRef = useRef(true);
+    const scrollRafRef = useRef<number | null>(null);
+
+    useEffect(() => () => {
+        if (deltaRafRef.current !== null && typeof cancelAnimationFrame === "function") {
+            cancelAnimationFrame(deltaRafRef.current);
+            deltaRafRef.current = null;
+        }
+        if (scrollRafRef.current !== null && typeof cancelAnimationFrame === "function") {
+            cancelAnimationFrame(scrollRafRef.current);
+            scrollRafRef.current = null;
+        }
+        pendingDeltasRef.current.clear();
+    }, []);
 
     // Check if recording is supported on mount
     useEffect(() => {
@@ -676,7 +692,31 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         });
     }, []);
 
+    const flushPendingDeltas = useCallback(() => {
+        if (deltaRafRef.current !== null && typeof cancelAnimationFrame === "function") {
+            cancelAnimationFrame(deltaRafRef.current);
+            deltaRafRef.current = null;
+        }
+        if (pendingDeltasRef.current.size === 0) return;
+        const snapshot = pendingDeltasRef.current;
+        pendingDeltasRef.current = new Map();
+        setMessages((prev) => applyPendingDeltaMap(prev, snapshot));
+    }, []);
+
+    const scheduleDeltaFlush = useCallback(() => {
+        if (deltaRafRef.current !== null) return;
+        if (typeof requestAnimationFrame !== "function") {
+            flushPendingDeltas();
+            return;
+        }
+        deltaRafRef.current = requestAnimationFrame(() => {
+            deltaRafRef.current = null;
+            flushPendingDeltas();
+        });
+    }, [flushPendingDeltas]);
+
     const upsertAssistantBlock = useCallback((id: string, block: MessageBlock) => {
+        flushPendingDeltas();
         setMessages((prev) => {
             const next = [...prev];
             const merge = (message: Message): Message => {
@@ -695,46 +735,22 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
             if (idx >= 0) next[idx] = merge(next[idx]);
             return next;
         });
-    }, []);
+    }, [flushPendingDeltas]);
 
-    const appendAssistantBlockText = useCallback((id: string, blockId: string, type: "text" | "reasoning", delta: string) => {
-        if (!delta) return;
+    const attachAssistantReceipt = useCallback((id: string, receipt: Receipt) => {
         setMessages((prev) => {
             const next = [...prev];
             const merge = (message: Message): Message => {
-                const blocks = [...(message.blocks ?? [])];
-                const index = blocks.findIndex((item) => item.id === blockId);
-                if (index >= 0) {
-                    const current = blocks[index];
-                    const text = current.type === "text" || current.type === "reasoning" ? current.text : "";
-                    blocks[index] = { id: blockId, type, text: text + delta };
-                } else {
-                    blocks.push({ id: blockId, type, text: delta });
-                }
-                return { ...message, blocks };
-            };
-            const last = next[next.length - 1];
-            if (last?.id === id) {
-                next[next.length - 1] = merge(last);
-                return next;
-            }
-            const idx = next.findIndex((m) => m.id === id);
-            if (idx >= 0) next[idx] = merge(next[idx]);
-            return next;
-        });
-    }, []);
-
-    const applyAssistantActivityEvent = useCallback((id: string, event: ActivityEvent) => {
-        setMessages((prev) => {
-            const next = [...prev];
-            const merge = (message: Message): Message => {
-                const visible = visibleActivity(event);
+                const receipts = mergeReceiptList(
+                    message.receipts ?? (message.receipt ? [message.receipt] : []),
+                    receipt,
+                );
                 return {
                     ...message,
-                    activity: reduceActivityState(message.activity ?? createActivityState(), event),
-                    blocks: visible
-                        ? blockup(message.blocks, { id: `activity`, type: "activity" })
-                        : message.blocks,
+                    receipt: receipts[receipts.length - 1] ?? receipt,
+                    receipts,
+                    ...(receipt.executionRunId && !message.executionRunId ? { executionRunId: receipt.executionRunId } : {}),
+                    ...(receipt.rootRunId && !message.rootRunId ? { rootRunId: receipt.rootRunId } : {}),
                 };
             };
             const last = next[next.length - 1];
@@ -748,11 +764,132 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         });
     }, []);
 
+    const reconcileAssistantReceipts = useCallback((id: string, receipts: Receipt[]) => {
+        if (receipts.length === 0) return;
+        setMessages((prev) => {
+            const idx = prev.findIndex((m) => m.id === id);
+            if (idx < 0) return prev;
+            const next = [...prev];
+            const current = next[idx];
+            next[idx] = {
+                ...current,
+                receipt: receipts[receipts.length - 1] ?? current.receipt,
+                receipts,
+            };
+            return next;
+        });
+    }, []);
+
+    const attachAssistantRun = useCallback((id: string, run: { executionRunId?: string; rootRunId?: string }) => {
+        if (!run.executionRunId && !run.rootRunId) return;
+        setMessages((prev) => {
+            const idx = prev.findIndex((m) => m.id === id);
+            if (idx < 0) return prev;
+            const current = prev[idx];
+            const nextExec = run.executionRunId ?? current.executionRunId;
+            const nextRoot = run.rootRunId ?? current.rootRunId;
+            if (nextExec === current.executionRunId && nextRoot === current.rootRunId) return prev;
+            const next = [...prev];
+            next[idx] = {
+                ...current,
+                ...(nextExec ? { executionRunId: nextExec } : {}),
+                ...(nextRoot ? { rootRunId: nextRoot } : {}),
+            };
+            return next;
+        });
+    }, []);
+
+    const attachAssistantUsage = useCallback((id: string, usage: Record<string, unknown>) => {
+        updateAssistantMessage(id, { usage });
+    }, [updateAssistantMessage]);
+
+    const appendAssistantBlockText = useCallback((
+        id: string,
+        blockId: string,
+        type: "text" | "reasoning",
+        delta: string,
+        syncedContent?: string,
+    ) => {
+        if (!delta && syncedContent === undefined) return;
+        let batch = pendingDeltasRef.current.get(id);
+        if (!batch) {
+            batch = { blocks: new Map() };
+            pendingDeltasRef.current.set(id, batch);
+        }
+        if (delta) {
+            const existing = batch.blocks.get(blockId);
+            if (existing) {
+                existing.delta += delta;
+            } else {
+                batch.blocks.set(blockId, { type, delta });
+            }
+        }
+        if (syncedContent !== undefined) {
+            batch.content = syncedContent;
+        }
+        scheduleDeltaFlush();
+    }, [scheduleDeltaFlush]);
+
+    const finishAssistantReasoningBlock = useCallback((id: string, blockId: string, finalText?: string) => {
+        flushPendingDeltas();
+        setMessages((prev) => {
+            const next = [...prev];
+            const merge = (message: Message): Message => {
+                const blocks = [...(message.blocks ?? [])];
+                const index = blocks.findIndex((item) => item.id === blockId);
+                const now = Date.now();
+                if (index >= 0) {
+                    const current = blocks[index];
+                    const existingText = current.type === "reasoning" ? current.text : "";
+                    const nextText = !finalText
+                        ? existingText
+                        : !existingText
+                            ? finalText
+                            : existingText.includes(finalText)
+                                ? existingText
+                                : finalText.startsWith(existingText)
+                                    ? finalText
+                                    : `${existingText}\n\n${finalText}`;
+                    blocks[index] = {
+                        id: blockId,
+                        type: "reasoning",
+                        text: nextText,
+                        startedAt: current.type === "reasoning" ? (current.startedAt ?? now) : now,
+                        finishedAt: now,
+                    };
+                } else if (finalText) {
+                    blocks.push({ id: blockId, type: "reasoning", text: finalText, startedAt: now, finishedAt: now });
+                }
+                return { ...message, blocks };
+            };
+            const last = next[next.length - 1];
+            if (last?.id === id) {
+                next[next.length - 1] = merge(last);
+                return next;
+            }
+            const idx = next.findIndex((m) => m.id === id);
+            if (idx >= 0) next[idx] = merge(next[idx]);
+            return next;
+        });
+    }, [flushPendingDeltas]);
+
+    const applyAssistantActivityEvent = useCallback((id: string, event: ActivityEvent) => {
+        let batch = pendingDeltasRef.current.get(id);
+        if (!batch) {
+            batch = { blocks: new Map(), activities: [] };
+            pendingDeltasRef.current.set(id, batch);
+        }
+        if (!batch.activities) batch.activities = [];
+        batch.activities.push(event);
+        scheduleDeltaFlush();
+    }, [scheduleDeltaFlush]);
+
     const applyAssistantModelEvent = useCallback((_id: string, _event: ModelEvent) => {
         // Model events are projected by use-stream into ordered text/reasoning/asset blocks.
     }, []);
 
     const failAssistant = useCallback((id: string, message: string) => {
+        flushPendingDeltas();
         setMessages((prev) => {
             const next = [...prev];
             const merge = (current: Message): Message => ({
@@ -773,7 +910,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
             if (idx >= 0) next[idx] = merge(next[idx]);
             return next;
         });
-    }, []);
+    }, [flushPendingDeltas]);
 
     const upsertAssistantArtifact = useCallback((id: string, artifact: Artifact) => {
         if (
@@ -782,12 +919,33 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
             && artifact.responseId
             && stoppedRealtimeResponsesRef.current.has(artifact.responseId)
         ) return;
+        flushPendingDeltas();
         setMessages((prev) => {
             const next = [...prev];
             const merge = (message: Message): Message => {
                 const artifacts = [...(message.artifacts || [])];
                 const key = artifactKey(artifact);
-                const idx = artifacts.findIndex((item) => item.id === artifact.id || (key !== undefined && artifactKey(item) === key));
+                const normalizedUrl = artifact.url ? normalizeMediaUrl(artifact.url) : undefined;
+                const idx = artifacts.findIndex((item) => {
+                    if (item.id === artifact.id) return true;
+                    if (key !== undefined && artifactKey(item) === key) return true;
+                    if (
+                        artifact.contentHash
+                        && item.contentHash === artifact.contentHash
+                        && item.artifactType === artifact.artifactType
+                    ) {
+                        return true;
+                    }
+                    if (
+                        normalizedUrl
+                        && item.url
+                        && item.artifactType === artifact.artifactType
+                        && normalizeMediaUrl(item.url) === normalizedUrl
+                    ) {
+                        return true;
+                    }
+                    return false;
+                });
                 const blockId = idx >= 0 ? artifacts[idx].id : artifact.id;
                 if (idx >= 0) {
                     const patch = Object.fromEntries(
@@ -812,7 +970,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
             if (idx >= 0) next[idx] = merge(next[idx]);
             return next;
         });
-    }, []);
+    }, [flushPendingDeltas]);
 
     function artifactKey(artifact: Artifact): string | undefined {
         const index = artifact.outputIndex ?? rawNumber(artifact.raw, "outputIndex") ?? rawNumber(artifact.raw, "output_index");
@@ -828,20 +986,6 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     function rawNumber(raw: Record<string, unknown> | undefined, key: string): number | undefined {
         const value = raw?.[key];
         return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-    }
-
-    function blockup(blocks: MessageBlock[] | undefined, block: MessageBlock): MessageBlock[] {
-        const next = [...(blocks ?? [])];
-        const index = next.findIndex((item) => item.id === block.id);
-        if (index >= 0) next[index] = { ...next[index], ...block } as MessageBlock;
-        else next.push(block);
-        return next;
-    }
-
-    function visibleActivity(event: ActivityEvent): boolean {
-        if (event.type === "activity.trace" || event.type === "activity.plan") return false;
-        if (event.type === "activity.message" && !event.parentId) return false;
-        return true;
     }
 
     const stopMic = useCallback(() => {
@@ -907,10 +1051,16 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     }, [setRealtimeSession, stopMic, stopRealtimeArtifacts]);
 
     const clearMessages = useCallback(() => {
+        if (deltaRafRef.current !== null && typeof cancelAnimationFrame === "function") {
+            cancelAnimationFrame(deltaRafRef.current);
+            deltaRafRef.current = null;
+        }
+        pendingDeltasRef.current.clear();
         void closeRealtime().catch(() => undefined);
         setMessages([]);
         streamedTextRef.current = "";
         currentAssistantIdRef.current = null;
+        planMessageIdRef.current = null;
         setActivityState({
             phase: "idle",
             label: "",
@@ -932,58 +1082,105 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         setActivityState((prev) => prev.phase === "error" ? prev : {
             phase: "idle",
             label: "",
-            tools: [],
+            tools: prev.tools.map((tool) => tool.status === "running"
+                ? { ...tool, status: "completed", endedAt: tool.endedAt ?? Date.now() }
+                : tool),
             updatedAt: Date.now(),
         });
     }, []);
 
     const setActivityPhase = useCallback((phase: ChatActivityPhase, label?: string) => {
-        setActivityState((prev) => ({
-            ...prev,
-            phase,
-            label: label ?? prev.label,
-            updatedAt: Date.now(),
-        }));
+        setActivityState((prev) => {
+            const nextLabel = label ?? prev.label;
+            if (prev.phase === phase && prev.label === nextLabel) {
+                return prev;
+            }
+            return {
+                ...prev,
+                phase,
+                label: nextLabel,
+                updatedAt: Date.now(),
+            };
+        });
     }, []);
 
-    const startToolActivity = useCallback((toolName: string, summary?: string, displayName?: string) => {
-        setActivityState((prev) => ({
-            phase: "tool",
-            label: `Using ${displayName || toolName}`,
-            tools: [
-                ...prev.tools,
-                {
+    const startToolActivity = useCallback((
+        toolName: string,
+        summary?: string,
+        displayName?: string,
+        meta?: { nodeId?: string; kind?: ChatActionKind },
+    ) => {
+        setActivityState((prev) => {
+            const existingIdx = meta?.nodeId
+                ? prev.tools.findIndex((item) => item.nodeId === meta.nodeId)
+                : -1;
+            const tools = [...prev.tools];
+            if (existingIdx >= 0) {
+                tools[existingIdx] = {
+                    ...tools[existingIdx],
+                    status: "running",
+                    displayName: displayName || tools[existingIdx].displayName,
+                    summary: summarizeActivity(summary) || tools[existingIdx].summary,
+                    kind: meta?.kind || tools[existingIdx].kind,
+                };
+            } else {
+                tools.push({
                     id: crypto.randomUUID(),
+                    nodeId: meta?.nodeId,
+                    kind: meta?.kind ?? "tool",
                     toolName,
                     displayName,
                     status: "running",
                     summary: summarizeActivity(summary),
                     startedAt: Date.now(),
-                },
-            ],
-            updatedAt: Date.now(),
-        }));
+                });
+            }
+            return {
+                phase: "tool",
+                label: displayName || toolName,
+                tools,
+                updatedAt: Date.now(),
+            };
+        });
     }, []);
 
-    const finishToolActivity = useCallback((toolName: string, summary?: string, failed = false, displayName?: string) => {
+    const finishToolActivity = useCallback((
+        toolName: string,
+        summary?: string,
+        failed = false,
+        displayName?: string,
+        meta?: { nodeId?: string; kind?: ChatActionKind },
+    ) => {
         setActivityState((prev) => {
             const nextTools = [...prev.tools];
-            const index = [...nextTools]
-                .reverse()
-                .findIndex((item) => item.toolName === toolName && item.status === "running");
+            const indexByNode = meta?.nodeId
+                ? nextTools.findIndex((item) => item.nodeId === meta.nodeId)
+                : -1;
+            const reverseIndex = indexByNode < 0
+                ? [...nextTools]
+                    .reverse()
+                    .findIndex((item) => item.toolName === toolName && item.status === "running")
+                : -1;
+            const resolvedIndex = indexByNode >= 0
+                ? indexByNode
+                : reverseIndex >= 0
+                    ? nextTools.length - 1 - reverseIndex
+                    : -1;
 
-            if (index >= 0) {
-                const resolvedIndex = nextTools.length - 1 - index;
+            if (resolvedIndex >= 0) {
                 nextTools[resolvedIndex] = {
                     ...nextTools[resolvedIndex],
                     status: failed ? "error" : "completed",
                     displayName: displayName || nextTools[resolvedIndex].displayName,
                     summary: summarizeActivity(summary) || nextTools[resolvedIndex].summary,
+                    kind: meta?.kind || nextTools[resolvedIndex].kind,
                     endedAt: Date.now(),
                 };
             } else {
                 nextTools.push({
                     id: crypto.randomUUID(),
+                    nodeId: meta?.nodeId,
+                    kind: meta?.kind ?? "tool",
                     toolName,
                     displayName,
                     status: failed ? "error" : "completed",
@@ -995,7 +1192,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
 
             return {
                 phase: failed ? "error" : "thinking",
-                label: failed ? `${displayName || toolName} failed` : `Processed ${displayName || toolName}`,
+                label: failed ? `${displayName || toolName} failed` : `${displayName || toolName} done`,
                 tools: nextTools,
                 updatedAt: Date.now(),
             };
@@ -1003,28 +1200,34 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     }, []);
 
     // ==========================================================================
-    // Streaming Functions (synchronous; per-delta updates render on every tick)
+    // Streaming Functions (rAF-coalesced batching + lossless synchronous flush)
     // ==========================================================================
 
     const flushStreamContent = useCallback((targetAssistantId?: string, targetContent?: string) => {
+        flushPendingDeltas();
         const assistantId = targetAssistantId ?? currentAssistantIdRef.current;
         const content = targetContent ?? streamedTextRef.current;
 
         if (assistantId && content) {
             updateAssistantMessage(assistantId, { content });
         }
-    }, [updateAssistantMessage]);
+    }, [flushPendingDeltas, updateAssistantMessage]);
 
     const scheduleStreamUpdate = useCallback((content: string) => {
         streamedTextRef.current = content;
         const assistantId = currentAssistantIdRef.current;
-        if (assistantId) {
-            updateAssistantMessage(assistantId, { content });
+        if (!assistantId) return;
+        let batch = pendingDeltasRef.current.get(assistantId);
+        if (!batch) {
+            batch = { blocks: new Map() };
+            pendingDeltasRef.current.set(assistantId, batch);
         }
-    }, [updateAssistantMessage]);
+        batch.content = content;
+        scheduleDeltaFlush();
+    }, [scheduleDeltaFlush]);
 
     // ==========================================================================
-    // Scroll Functions
+    // Scroll Functions (non-fighting rAF auto-scroll)
     // ==========================================================================
 
     const isNearBottom = useCallback(() => {
@@ -1036,26 +1239,68 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     useEffect(() => {
         const el = scrollContainerRef.current;
         if (!el) return;
+        let touchStartY = 0;
+        let stickRaf: number | null = null;
         const updateStickiness = () => {
+            stickRaf = null;
             stickToBottomRef.current = isNearBottom();
         };
-        const markUserScroll = () => {
-            if (!isNearBottom()) stickToBottomRef.current = false;
+        const scheduleStickiness = () => {
+            if (stickRaf !== null) return;
+            if (typeof requestAnimationFrame === "function") {
+                stickRaf = requestAnimationFrame(updateStickiness);
+            } else {
+                updateStickiness();
+            }
+        };
+        const markUserScroll = (event: WheelEvent | TouchEvent) => {
+            if ("deltaY" in event) {
+                if (event.deltaY < 0) {
+                    stickToBottomRef.current = false;
+                }
+                return;
+            }
+            const currentY = event.touches[0]?.clientY ?? touchStartY;
+            if (currentY > touchStartY + 8) {
+                stickToBottomRef.current = false;
+            }
+        };
+        const onTouchStart = (event: TouchEvent) => {
+            touchStartY = event.touches[0]?.clientY ?? 0;
         };
         updateStickiness();
         el.addEventListener("wheel", markUserScroll, { passive: true });
+        el.addEventListener("touchstart", onTouchStart, { passive: true });
         el.addEventListener("touchmove", markUserScroll, { passive: true });
-        el.addEventListener("scroll", updateStickiness, { passive: true });
+        el.addEventListener("scroll", scheduleStickiness, { passive: true });
         return () => {
+            if (stickRaf !== null && typeof cancelAnimationFrame === "function") {
+                cancelAnimationFrame(stickRaf);
+            }
             el.removeEventListener("wheel", markUserScroll);
+            el.removeEventListener("touchstart", onTouchStart);
             el.removeEventListener("touchmove", markUserScroll);
-            el.removeEventListener("scroll", updateStickiness);
+            el.removeEventListener("scroll", scheduleStickiness);
         };
     }, [isNearBottom]);
 
     useEffect(() => {
         if (!stickToBottomRef.current) return;
-        messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+        const el = scrollContainerRef.current;
+        if (!el) return;
+        if (scrollRafRef.current !== null) return;
+        if (typeof requestAnimationFrame !== "function") {
+            el.scrollTop = el.scrollHeight;
+            return;
+        }
+        scrollRafRef.current = requestAnimationFrame(() => {
+            scrollRafRef.current = null;
+            if (!stickToBottomRef.current) return;
+            const target = scrollContainerRef.current;
+            if (target) {
+                target.scrollTop = target.scrollHeight;
+            }
+        });
     }, [messages]);
 
     // ==========================================================================
@@ -1244,7 +1489,19 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             mediaStreamRef.current = stream;
 
-            const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+            const preferredMimeTypes = [
+                "audio/webm;codecs=opus",
+                "audio/webm",
+                "audio/mp4",
+                "audio/ogg;codecs=opus",
+                "audio/ogg",
+            ];
+            const supportedMimeType = typeof MediaRecorder.isTypeSupported === "function"
+                ? preferredMimeTypes.find((type) => MediaRecorder.isTypeSupported(type))
+                : undefined;
+            const recorder = supportedMimeType
+                ? new MediaRecorder(stream, { mimeType: supportedMimeType })
+                : new MediaRecorder(stream);
             mediaRecorderRef.current = recorder;
             audioChunksRef.current = [];
 
@@ -1258,8 +1515,14 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
                 mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
                 mediaStreamRef.current = null;
 
-                const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-                const audioFile = new File([audioBlob], `recording-${Date.now()}.webm`, { type: "audio/webm" });
+                const resolvedMime = (recorder.mimeType || supportedMimeType || "audio/mp4").split(";")[0]?.trim() || "audio/mp4";
+                const ext = resolvedMime.includes("mp4") || resolvedMime.includes("aac")
+                    ? "m4a"
+                    : resolvedMime.includes("ogg")
+                        ? "ogg"
+                        : "webm";
+                const audioBlob = new Blob(audioChunksRef.current, { type: resolvedMime });
+                const audioFile = new File([audioBlob], `recording-${Date.now()}.${ext}`, { type: resolvedMime });
                 let preview: string | undefined;
 
                 try {
@@ -1351,30 +1614,72 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         };
     }, [stopMic]);
 
+    const latestSlices = useMemo(() => {
+        let planActivity: ActivityState | undefined;
+        let fallbackActivity: ActivityState | undefined;
+        let latestPlan: Plan | undefined;
+        let latestReceipt: Receipt | undefined;
+        let latestReceipts: Receipt[] = EMPTY_RECEIPTS;
+        let hasReceiptSource = false;
+        let latestUsage: Record<string, unknown> | undefined;
+
+        for (let i = messages.length - 1; i >= 0; i -= 1) {
+            const m = messages[i];
+            if (m.role !== "assistant") continue;
+            if (!latestPlan && m.proposal) {
+                latestPlan = m.proposal;
+                if (m.activity) planActivity = m.activity;
+            }
+            if (!fallbackActivity && m.activity) {
+                fallbackActivity = m.activity;
+            }
+            if (!hasReceiptSource && ((m.receipts?.length ?? 0) > 0 || m.receipt)) {
+                hasReceiptSource = true;
+                latestReceipt = m.receipt;
+                latestReceipts = m.receipts && m.receipts.length > 0
+                    ? m.receipts
+                    : m.receipt ? [m.receipt] : EMPTY_RECEIPTS;
+            }
+            if (!latestUsage && m.usage) {
+                latestUsage = m.usage;
+            }
+            if (latestPlan && fallbackActivity && hasReceiptSource && latestUsage) {
+                break;
+            }
+        }
+
+        return {
+            latestActivity: planActivity ?? fallbackActivity,
+            latestPlan,
+            latestReceipt,
+            latestReceipts,
+            latestUsage,
+        };
+    }, [messages]);
+
     return useMemo(() => ({
         // Messages
         messages,
-        // The plan's children live on the assistant message that proposed
-        // it (their parent run IS the proposing run). Bind mission control
-        // to that message's tree so later assistant messages (e.g. the
-        // completion turn) don't supersede the swarm's work; fall back to
-        // the newest tree when no plan owns the panel.
-        latestActivity: (() => {
-            const planMessage = [...messages].reverse().find((m) => m.role === "assistant" && m.proposal);
-            if (planMessage?.activity) return planMessage.activity;
-            return [...messages].reverse().find((m) => m.role === "assistant" && m.activity)?.activity;
-        })(),
-        latestPlan: messages.length > 0
-            ? [...messages].reverse().find((m) => m.role === "assistant" && m.proposal)?.proposal
-            : undefined,
+        latestActivity: latestSlices.latestActivity,
+        latestPlan: latestSlices.latestPlan,
+        latestReceipt: latestSlices.latestReceipt,
+        latestReceipts: latestSlices.latestReceipts,
+        latestUsage: latestSlices.latestUsage,
+        planMessageIdRef,
         setMessages,
         addUserMessage,
         createAssistantPlaceholder,
         updateAssistantMessage,
+        attachAssistantReceipt,
+        reconcileAssistantReceipts,
+        attachAssistantRun,
+        attachAssistantUsage,
         applyAssistantActivityEvent,
         applyAssistantModelEvent,
         upsertAssistantBlock,
         appendAssistantBlockText,
+        flushPendingDeltas,
+        finishAssistantReasoningBlock,
         failAssistant,
         upsertAssistantArtifact,
         clearMessages,
@@ -1415,7 +1720,8 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         messages, activityState, attachedFiles, isUploading, uploadedCids, realtimeActive,
         isRecording, recordingSupported,
         addUserMessage, createAssistantPlaceholder, updateAssistantMessage,
-        applyAssistantActivityEvent, applyAssistantModelEvent, upsertAssistantBlock, appendAssistantBlockText, failAssistant, upsertAssistantArtifact,
+        attachAssistantReceipt, reconcileAssistantReceipts, attachAssistantRun, attachAssistantUsage,
+        applyAssistantActivityEvent, applyAssistantModelEvent, upsertAssistantBlock, appendAssistantBlockText, flushPendingDeltas, finishAssistantReasoningBlock, failAssistant, upsertAssistantArtifact,
         clearMessages, scheduleStreamUpdate, flushStreamContent,
         clearActivityState, clearActivityStateUnlessError, setActivityPhase, startToolActivity, finishToolActivity,
         isNearBottom, handleFileSelect, handleRemoveFile, clearFiles, cleanupFiles,
