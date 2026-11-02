@@ -207,3 +207,178 @@ function messageHasPendingReceipts(message: Message): boolean {
     return status !== "settled" && status !== "failed";
   });
 }
+
+function receiptsChanged(prev: Receipt[] | undefined, next: Receipt[]): boolean {
+  if (!prev || prev.length !== next.length) return next.length > 0;
+  for (let i = 0; i < next.length; i += 1) {
+    const a = prev[i];
+    const b = next[i];
+    if (
+      a.id !== b.id
+      || a.paymentIntentId !== b.paymentIntentId
+      || a.settlementStatus !== b.settlementStatus
+      || a.txHash !== b.txHash
+      || a.finalAmountWei !== b.finalAmountWei
+      || a.settledAt !== b.settledAt
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function useTurnReceipts({
+  messages,
+  userAddress,
+  network,
+  mode,
+  isStreaming = false,
+  onReconcile,
+}: {
+  messages: Message[];
+  userAddress: string | null | undefined;
+  network: NetworkId | null | undefined;
+  mode: "agent" | "playground";
+  isStreaming?: boolean;
+  onReconcile: (messageId: string, receipts: Receipt[]) => void;
+}): void {
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const onReconcileRef = useRef(onReconcile);
+  onReconcileRef.current = onReconcile;
+  const isStreamingRef = useRef(isStreaming);
+  isStreamingRef.current = isStreaming;
+
+  const owner = useMemo(() => {
+    if (!userAddress || !network) return null;
+    return network.startsWith("eip155:") ? userAddress.toLowerCase() : userAddress;
+  }, [network, userAddress]);
+
+  const targetSignature = useMemo(() => {
+    return messages
+      .filter((msg) => msg.role === "assistant" && (msg.executionRunId || msg.rootRunId || msg.receipt || (msg.receipts?.length ?? 0) > 0))
+      .map((msg) => `${msg.id}:${msg.executionRunId ?? ""}:${msg.rootRunId ?? ""}:${msg.receipt?.paymentIntentId ?? msg.receipt?.id ?? ""}:${msg.receipts?.length ?? 0}:${msg.receipts?.every((r) => r.settlementStatus === "settled" || r.settlementStatus === "failed") ? "done" : "open"}`)
+      .join("|");
+  }, [messages]);
+
+  const hasPending = useMemo(
+    () => messages.some(messageHasPendingReceipts),
+    [messages],
+  );
+
+  const reconcileAll = useCallback(async () => {
+    if (!owner || !network || isStreamingRef.current) return;
+    if (!sdk.keys.currentToken() && !findPersistedSessionKey(owner, network)) return;
+    const candidates = messagesRef.current.filter(
+      (msg) => msg.role === "assistant" && (msg.executionRunId || msg.rootRunId || msg.receipt || (msg.receipts?.length ?? 0) > 0),
+    );
+    if (candidates.length === 0) return;
+
+    const toIso = new Date().toISOString();
+    const fromIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const analyticsPromise: Promise<InferenceAnalytics.InferenceSettlement[]> = Promise.resolve(
+      sdk.analytics.get({ networks: [network], from: fromIso, to: toIso, limit: 50 }, { userAddress: owner }),
+    )
+      .then((res) => res.settlements?.data ?? [])
+      .catch(() => [] as InferenceAnalytics.InferenceSettlement[]);
+
+    if (mode === "agent") {
+      const recentCandidates = candidates.slice(-6);
+      const [analyticsSettlements, ...lists] = await Promise.all([
+        analyticsPromise,
+        ...recentCandidates.map((msg): Promise<Receipt[]> => {
+          const queryByRoot = Boolean(msg.proposal && msg.rootRunId);
+          return Promise.resolve(
+            sdk.receipts.list({
+              network,
+              limit: 40,
+              ...(queryByRoot
+                ? { rootRunId: msg.rootRunId }
+                : msg.executionRunId
+                  ? { executionRunId: msg.executionRunId }
+                  : msg.rootRunId
+                    ? { rootRunId: msg.rootRunId }
+                    : {}),
+            }),
+          )
+            .then((res) => res.receipts ?? [])
+            .catch(() => [] as Receipt[]);
+        }),
+      ]);
+
+      recentCandidates.forEach((msg, idx) => {
+        const fetched: Receipt[] = lists[idx] ?? [];
+        const existing = msg.receipts && msg.receipts.length > 0
+          ? msg.receipts
+          : msg.receipt
+            ? [msg.receipt]
+            : [];
+        // Keep only receipts matching this message when queried without a run filter
+        const relevant = (msg.executionRunId || msg.rootRunId)
+          ? fetched
+          : fetched.filter((r: Receipt) => existing.some((e) =>
+            (e.paymentIntentId && e.paymentIntentId === r.paymentIntentId)
+            || (e.id && e.id === r.id),
+          ));
+        const next = reconcileMessageReceipts(existing, relevant, analyticsSettlements);
+        if (next.length > 0 && receiptsChanged(msg.receipts, next)) {
+          onReconcileRef.current(msg.id, next);
+        }
+      });
+      return;
+    }
+
+    // Playground mode: match each assistant turn by paymentIntentId or receipt id
+    const [analyticsSettlements, allReceipts] = await Promise.all([
+      analyticsPromise,
+      Promise.resolve(sdk.receipts.list({ network, limit: 40 }))
+        .then((res) => res.receipts ?? [])
+        .catch(() => [] as Receipt[]),
+    ]);
+    for (const msg of candidates.slice(-10)) {
+      const existing = msg.receipts && msg.receipts.length > 0
+        ? msg.receipts
+        : msg.receipt
+          ? [msg.receipt]
+          : [];
+      if (existing.length === 0) continue;
+      const matched = allReceipts.filter((candidate: Receipt) => existing.some((item) =>
+        (item.paymentIntentId && candidate.paymentIntentId === item.paymentIntentId)
+        || (item.id && candidate.id === item.id)
+        || (item.txHash && candidate.txHash?.toLowerCase() === item.txHash.toLowerCase()),
+      ));
+      const next = reconcileMessageReceipts(existing, matched, analyticsSettlements);
+      if (next.length > 0 && receiptsChanged(msg.receipts, next)) {
+        onReconcileRef.current(msg.id, next);
+      }
+    }
+  }, [mode, network, owner]);
+
+  // Real-time invalidation via existing GET /api/analytics/inference/events SSE
+  useReconciliation({
+    owner: owner && (hasPending || targetSignature.length > 0) ? owner : null,
+    subscribe: (options) => sdk.analytics.subscribe(options),
+    refetch: reconcileAll,
+  });
+
+  // Trigger immediately when a turn completes (isStreaming -> false) or new run/receipt arrives
+  useEffect(() => {
+    if (!owner || !network || isStreaming || !targetSignature) return;
+    const timer = window.setTimeout(() => {
+      void reconcileAll();
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [isStreaming, network, owner, reconcileAll, targetSignature]);
+
+  // Bounded backoff check while any message has queued/submitted receipts
+  useEffect(() => {
+    if (!owner || !network || isStreaming || !hasPending) return;
+    const delays = [2500, 6000, 12000];
+    const timers = delays.map((delay) => window.setTimeout(() => {
+      void reconcileAll();
+    }, delay));
+    return () => {
+      for (const timer of timers) window.clearTimeout(timer);
+    };
+  }, [hasPending, isStreaming, network, owner, reconcileAll, targetSignature]);
+}
