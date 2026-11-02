@@ -16,16 +16,56 @@ import type {
     ModelEvent,
     PlanDecision,
     ProposalSnapshot,
+    Receipt,
 } from "@compose-market/sdk";
 
-export type Task = NonNullable<ProposalSnapshot["tasks"]>[number];
-import { createActivityState, reduceActivityState, decodeActivityEvent } from "@compose-market/sdk";
+export type Task = NonNullable<ProposalSnapshot["tasks"]>[number] & {
+    ownerName?: string;
+    ownerWallet?: string;
+    instructions?: string;
+    completionCriteria?: string;
+    error?: string;
+    retryCount?: number;
+};
+
+export interface PlanClarificationItem {
+    id: string;
+    stepId?: string;
+    stepTitle?: string;
+    question: string;
+    options?: string[];
+    acceptedInputs?: string[];
+    defaultHint?: string;
+    required?: boolean;
+}
+
+export interface PlanMissingInput {
+    taskId: string;
+    taskTitle: string;
+    modelId: string;
+    modelName?: string;
+    acceptedInputs: string[];
+    reason?: string;
+    questions?: string[];
+}
+
+export interface ProposalClarification {
+    questions: string[];
+    context?: string;
+    items?: PlanClarificationItem[];
+    canSkipWithDefaults?: boolean;
+    missingInputs?: PlanMissingInput[];
+    answer?: string;
+}
+import { createActivityState, reduceActivityState } from "@compose-market/sdk";
 import { uploadConversationFile, cleanupConversationFiles } from "@/lib/pinata";
+import { mergeReceiptList } from "@/hooks/use-receipts";
+import { normalizeMediaUrl } from "@/lib/performance/markdown";
 import {
     createObjectUrlPreview,
     revokeObjectUrlPreview,
     revokeObjectUrlSet,
-} from "@/lib/performance/object-url";
+} from "@/lib/performance/urls";
 
 // =============================================================================
 // Types
@@ -38,13 +78,18 @@ export interface Plan {
     proposalId: string;
     version: number;
     state: string;
-    decision?: PlanDecision;
+    decision?: PlanDecision | "clarify" | "cancelled";
     rootRunId?: string;
     runId?: string;
+    approvalId?: string;
     requestedBy?: string;
     proposal?: ProposalSnapshot;
     tasks?: Task[];
     markdown?: string;
+    clarify?: string | ProposalClarification;
+    questions?: string[];
+    missingInputs?: Array<string | PlanMissingInput>;
+    strikes?: number;
     ts?: number;
     updatedAt?: number;
     approver?: string;
@@ -58,7 +103,9 @@ export interface Plan {
 
 export interface ConnectorRequest {
     requestId: string;
+    kind?: "mcp" | "account" | "connector";
     slug: string;
+    name?: string;
     bindingId?: string;
     runId?: string;
     rootRunId?: string;
@@ -66,19 +113,27 @@ export interface ConnectorRequest {
     agentWallet?: string;
     actions?: string[];
     reason?: string;
-    state: "requested" | "escalated" | "connected" | "discarded";
+    missingVars?: Array<{ varName: string; description?: string; obtainUrl?: string }>;
+    authUrl?: string;
+    toolkit?: string;
+    origin?: string;
+    authMode?: string;
+    state: "requested" | "escalated" | "connected" | "granted" | "discarded" | "denied";
     ts?: number;
 }
 
 export interface Artifact {
     id: string;
-    artifactType: "image" | "audio" | "video" | "embedding" | "realtime" | "file" | "artifact" | "delivery" | "snippet";
+    artifactType: "image" | "audio" | "video" | "embedding" | "realtime" | "file" | "artifact" | "delivery" | "document" | "code" | "snippet";
     url?: string;
     inline?: boolean;
     partial?: boolean;
     embedding?: number[] | number[][];
     mimeType?: string;
     bytes?: number;
+    sampleRate?: number;
+    channels?: number;
+    revisedPrompt?: string;
     responseId?: string;
     outputIndex?: number;
     status?: string;
@@ -90,8 +145,11 @@ export interface Artifact {
     raw?: Record<string, unknown>;
     hydrating?: boolean;
     error?: string;
-    /** Delivery artifacts (plan final delivery content store). */
+    /** Document, code, and delivery artifacts. */
     title?: string;
+    filename?: string;
+    language?: string;
+    provider?: string;
     content?: string;
     summary?: string;
     deliverableId?: string;
@@ -99,17 +157,17 @@ export interface Artifact {
     taskId?: string;
     taskTitle?: string;
     agentWallet?: string;
-    /** Snippet artifacts (smart contracts): the verbatim contract source. */
+    /** Legacy snippet artifacts (smart contracts): verbatim contract source. */
     code?: string;
 }
 
 export type MessageBlock =
     | { id: string; type: "text"; text: string }
-    | { id: string; type: "reasoning"; text: string }
+    | { id: string; type: "reasoning"; text: string; startedAt?: number; finishedAt?: number }
     | { id: string; type: "plan"; planId: string }
     | { id: string; type: "activity"; nodeId?: string }
     | { id: string; type: "asset"; artifactId: string }
-    | { id: string; type: "notice"; tone?: "error" | "info"; text: string };
+    | { id: string; type: "notice"; tone?: "error" | "info" | "warning"; text: string; url?: string };
 
 export interface Message {
     id: string;
@@ -126,6 +184,11 @@ export interface Message {
     connectorRequests?: ConnectorRequest[];
     artifacts?: Artifact[];
     blocks?: MessageBlock[];
+    receipt?: Receipt;
+    receipts?: Receipt[];
+    executionRunId?: string;
+    rootRunId?: string;
+    usage?: Record<string, unknown>;
 }
 
 export interface AttachedFile {
@@ -246,9 +309,12 @@ export interface UseChatOptions {
 }
 
 export type ChatActivityPhase = "idle" | "thinking" | "tool" | "streaming" | "error";
+export type ChatActionKind = "tool" | "agent" | "connector" | "model" | "conclave" | "memory";
 
 export interface ChatToolActivity {
     id: string;
+    nodeId?: string;
+    kind?: ChatActionKind;
     toolName: string;
     displayName?: string;
     status: "running" | "completed" | "error";
@@ -268,10 +334,10 @@ function summarizeActivity(value: string | undefined): string | undefined {
     if (!value) return undefined;
     const normalized = value.replace(/\s+/g, " ").trim();
     if (!normalized) return undefined;
-    return normalized.length > 120 ? `${normalized.slice(0, 117)}...` : normalized;
+    return normalized.length > 160 ? `${normalized.slice(0, 157)}…` : normalized;
 }
 
-export function noticeId(tone: "error" | "info", message: string): string {
+export function noticeId(tone: "error" | "info" | "warning", message: string): string {
     const normalized = message.replace(/\s+/g, " ").trim().toLowerCase() || tone;
     let hash = 5381;
     for (let i = 0; i < normalized.length; i += 1) {
@@ -283,10 +349,18 @@ export function noticeId(tone: "error" | "info", message: string): string {
 export interface UseChatReturn {
     // === Messages ===
     messages: Message[];
-    /** Latest assistant message's ActivityState (for side-panel Mission Control) */
+    /** Latest assistant message's ActivityState (for Trace / Flow Sheet) */
     latestActivity?: ActivityState;
-    /** Latest assistant message's Plan (for side-panel Mission Control) */
+    /** Latest assistant message's Plan (for Trace / Flow Sheet) */
     latestPlan?: Plan;
+    /** Latest settled x402 Receipt */
+    latestReceipt?: Receipt;
+    /** All reconciled x402 receipts for the latest billable assistant turn */
+    latestReceipts: Receipt[];
+    /** Latest model token usage */
+    latestUsage?: Record<string, unknown>;
+    /** ID of the assistant message currently owning the active plan/activity tree */
+    planMessageIdRef: React.MutableRefObject<string | null>;
     setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
     /** Add a user message, returns the message ID */
     addUserMessage: (content: string, options?: {
@@ -299,12 +373,30 @@ export interface UseChatReturn {
     createAssistantPlaceholder: (type?: Message["type"]) => string;
     /** Update assistant message by ID (O(1) for last message) */
     updateAssistantMessage: (id: string, update: Partial<Message>) => void;
+    /** Attach a settled x402 receipt to an assistant message */
+    attachAssistantReceipt: (id: string, receipt: Receipt) => void;
+    /** Replace/merge reconciled receipts for an assistant turn */
+    reconcileAssistantReceipts: (id: string, receipts: Receipt[]) => void;
+    /** Attach canonical executionRunId / rootRunId correlation to an assistant message */
+    attachAssistantRun: (id: string, run: { executionRunId?: string; rootRunId?: string }) => void;
+    /** Attach model usage metadata to an assistant message */
+    attachAssistantUsage: (id: string, usage: Record<string, unknown>) => void;
     /** Reduce a real runtime activity event into an assistant message activity tree. */
     applyAssistantActivityEvent: (id: string, event: ActivityEvent) => void;
     /** Append or replace an ordered assistant message block. */
     upsertAssistantBlock: (id: string, block: MessageBlock) => void;
-    /** Append text to an ordered assistant text/reasoning block. */
-    appendAssistantBlockText: (id: string, blockId: string, type: "text" | "reasoning", delta: string) => void;
+    /** Append text to an ordered assistant text/reasoning block (rAF-batched). */
+    appendAssistantBlockText: (
+        id: string,
+        blockId: string,
+        type: "text" | "reasoning",
+        delta: string,
+        syncedContent?: string,
+    ) => void;
+    /** Flush any rAF-buffered text/reasoning deltas synchronously before structural updates. */
+    flushPendingDeltas: () => void;
+    /** Mark a reasoning block finished so its duration freezes cleanly. */
+    finishAssistantReasoningBlock: (id: string, blockId: string, finalText?: string) => void;
     /** Preserve typed model events for callers that want a central hook point. */
     applyAssistantModelEvent: (id: string, event: ModelEvent) => void;
     /** Fold a local/transport failure into the same stream tree used by SSE errors. */
@@ -325,8 +417,8 @@ export interface UseChatReturn {
     clearActivityState: () => void;
     clearActivityStateUnlessError: () => void;
     setActivityPhase: (phase: ChatActivityPhase, label?: string) => void;
-    startToolActivity: (toolName: string, summary?: string, displayName?: string) => void;
-    finishToolActivity: (toolName: string, summary?: string, failed?: boolean, displayName?: string) => void;
+    startToolActivity: (toolName: string, summary?: string, displayName?: string, meta?: { nodeId?: string; kind?: ChatActionKind }) => void;
+    finishToolActivity: (toolName: string, summary?: string, failed?: boolean, displayName?: string, meta?: { nodeId?: string; kind?: ChatActionKind }) => void;
 
     // === Scroll ===
     scrollContainerRef: React.RefObject<HTMLDivElement | null>;
