@@ -191,3 +191,19 @@ export function summarizeTurnReceipts(
     primaryNetwork,
   };
 }
+
+function messageHasPendingReceipts(message: Message): boolean {
+  if (message.role !== "assistant") return false;
+  const list = message.receipts && message.receipts.length > 0
+    ? message.receipts
+    : message.receipt
+      ? [message.receipt]
+      : [];
+  if (list.length === 0) {
+    return Boolean(message.executionRunId || message.rootRunId);
+  }
+  return list.some((item) => {
+    const status = item.settlementStatus;
+    return status !== "settled" && status !== "failed";
+  });
+}
