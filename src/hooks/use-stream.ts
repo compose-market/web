@@ -1609,16 +1609,111 @@ function fail(
     cbRef.current.onError?.({ message });
 }
 
-/** State-based phase label for a plan — never decision-based. */
 function planPhaseLabel(plan: Plan): string {
-    if (plan.state === "completed") return "Plan completed";
+    const tasks = plan.tasks ?? [];
+    const total = tasks.length;
+    const done = tasks.filter((task) => task.status === "done").length;
+    const active = tasks.find((task) => task.status === "doing");
+    if (plan.state === "completed") return total > 0 ? `Plan completed (${done}/${total})` : "Plan completed";
+    if (plan.state === "cancelled") return "Plan cancelled";
     if (plan.state === "failed" || plan.state === "blocked") return "Plan failed";
-    if (plan.state === "executing" || plan.state === "monitoring") return "Plan executing";
-    if (plan.state === "approved") return "Plan executing";
-    if (plan.state === "awaiting_approval") return "Awaiting plan decision";
-    if (plan.state === "changes_requested") return "Plan feedback requested";
+    if (plan.state === "executing" || plan.state === "monitoring" || plan.state === "approved") {
+        if (active && total > 0) return `Executing ${done}/${total} · ${active.title}`;
+        if (total > 0) return `Executing ${done}/${total} steps`;
+        return "Executing plan";
+    }
+    if (plan.state === "refining") return "Revising plan";
+    if (plan.state === "clarify") return "Awaiting your clarification";
+    if (plan.state === "awaiting_approval") return "Awaiting plan approval";
+    if (plan.state === "changes_requested") return "Updating plan";
     if (plan.decision) return `Plan ${plan.decision}`;
     return "Awaiting plan decision";
+}
+
+function stringList(value: unknown): string[] | undefined {
+    if (!Array.isArray(value)) return undefined;
+    const items = value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+    return items.length > 0 ? items : undefined;
+}
+
+function parseMissingInputs(value: unknown): Array<string | PlanMissingInput> | undefined {
+    if (!Array.isArray(value)) return undefined;
+    const result: Array<string | PlanMissingInput> = [];
+    for (const item of value) {
+        if (typeof item === "string" && item.trim().length > 0) {
+            result.push(item.trim());
+            continue;
+        }
+        if (isRecord(item)) {
+            const taskId = str(item.taskId) ?? "";
+            const taskTitle = str(item.taskTitle) ?? str(item.title) ?? taskId;
+            const modelId = str(item.modelId) ?? "";
+            const acceptedInputs = stringList(item.acceptedInputs) ?? [];
+            if (taskTitle || modelId || acceptedInputs.length > 0) {
+                result.push({
+                    taskId,
+                    taskTitle,
+                    modelId,
+                    ...(str(item.modelName) ? { modelName: str(item.modelName) } : {}),
+                    acceptedInputs,
+                    ...(str(item.reason) ? { reason: str(item.reason) } : {}),
+                    ...(stringList(item.questions) ? { questions: stringList(item.questions) } : {}),
+                });
+            }
+        }
+    }
+    return result.length > 0 ? result : undefined;
+}
+
+function parseClarificationItems(value: unknown): PlanClarificationItem[] | undefined {
+    if (!Array.isArray(value)) return undefined;
+    const items: PlanClarificationItem[] = [];
+    for (let idx = 0; idx < value.length; idx += 1) {
+        const entry = value[idx];
+        if (!isRecord(entry)) continue;
+        const question = str(entry.question);
+        if (!question) continue;
+        items.push({
+            id: str(entry.id) ?? `clarify-${idx + 1}`,
+            ...(str(entry.stepId) ? { stepId: str(entry.stepId) } : {}),
+            ...(str(entry.stepTitle) ? { stepTitle: str(entry.stepTitle) } : {}),
+            question,
+            ...(stringList(entry.options) ? { options: stringList(entry.options) } : {}),
+            ...(stringList(entry.acceptedInputs) ? { acceptedInputs: stringList(entry.acceptedInputs) } : {}),
+            ...(str(entry.defaultHint) ? { defaultHint: str(entry.defaultHint) } : {}),
+            ...(typeof entry.required === "boolean" ? { required: entry.required } : {}),
+        });
+    }
+    return items.length > 0 ? items : undefined;
+}
+
+function parseClarifyPayload(value: unknown): string | ProposalClarification | undefined {
+    if (typeof value === "string" && value.trim().length > 0) return value.trim();
+    if (!isRecord(value)) return undefined;
+    const items = parseClarificationItems(value.items);
+    const questions = stringList(value.questions) ?? items?.map((item) => item.question) ?? [];
+    const missingInputs = parseMissingInputs(value.missingInputs)?.filter(
+        (entry): entry is PlanMissingInput => typeof entry !== "string",
+    );
+    const context = str(value.context);
+    const answer = str(value.answer);
+    if (
+        questions.length === 0
+        && !items?.length
+        && !missingInputs?.length
+        && !context
+        && !answer
+    ) {
+        return undefined;
+    }
+    return {
+        questions,
+        ...(context ? { context } : {}),
+        ...(items?.length ? { items } : {}),
+        ...(typeof value.canSkipWithDefaults === "boolean" ? { canSkipWithDefaults: value.canSkipWithDefaults } : {}),
+        ...(missingInputs?.length ? { missingInputs } : {}),
+        ...(answer ? { answer } : {}),
+    };
 }
 
 function planFromActivityEvent(event: ActivityEvent): Plan {
