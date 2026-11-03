@@ -1802,28 +1802,133 @@ function mergePlan(chat: UseChatReturn, assistantId: string, plan: Plan): void {
     }));
 }
 
+function parseMissingVars(
+    value: unknown,
+): Array<{ varName: string; description?: string; obtainUrl?: string }> | undefined {
+    if (!Array.isArray(value)) return undefined;
+    const out: Array<{ varName: string; description?: string; obtainUrl?: string }> = [];
+    for (const item of value) {
+        if (typeof item === "string" && item.trim().length > 0) {
+            out.push({ varName: item.trim() });
+            continue;
+        }
+        if (isRecord(item) && typeof item.varName === "string" && item.varName.trim().length > 0) {
+            out.push({
+                varName: item.varName.trim(),
+                ...(str(item.description) ? { description: str(item.description) } : {}),
+                ...(str(item.obtainUrl) ? { obtainUrl: str(item.obtainUrl) } : {}),
+            });
+        }
+    }
+    return out.length > 0 ? out : undefined;
+}
+
+function parseToolJsonObject(raw: unknown): Record<string, unknown> | null {
+    if (!raw) return null;
+    let current: unknown = raw;
+    if (typeof current === "string") {
+        const trimmed = current.trim();
+        if (!trimmed.startsWith("{")) return null;
+        try {
+            current = JSON.parse(trimmed);
+        } catch {
+            return null;
+        }
+    }
+    if (!isRecord(current)) return null;
+    if (current.__compose_tool_result === "compacted_json" && isRecord(current.value)) {
+        return current.value;
+    }
+    return current;
+}
+
+function connectorFromToolAuthFailure(event: ActivityEvent): ConnectorRequest | null {
+    const payload = isRecord(event.payload) ? event.payload : {};
+    const parsed = parseToolJsonObject(payload.output) ?? parseToolJsonObject(payload.result);
+    const code = str(parsed?.code) ?? str(payload.code);
+    const authRequired = parsed?.authRequired === true
+        || code === "CONNECTOR_AUTH_REQUIRED"
+        || code === "CREDENTIALS_REQUIRED";
+    if (!authRequired) return null;
+
+    const bindingId = str(parsed?.bindingId) ?? str(payload.bindingId) ?? str(event.target?.target);
+    const slug = str(parsed?.slug)
+        ?? str(parsed?.serverId)
+        ?? str(payload.slug)
+        ?? (bindingId ? bindingId.split(":").pop() : undefined)
+        ?? str(event.target?.name);
+    if (!slug) return null;
+
+    const requestId = str(parsed?.requestId) ?? str(payload.requestId) ?? `tool-auth:${slug}:${event.spanId ?? event.id}`;
+    const missingVars = parseMissingVars(parsed?.missingVars ?? parsed?.missing ?? payload.missingVars);
+    const isAccount = Boolean(bindingId?.toLowerCase().startsWith("account:"))
+        || str(parsed?.origin) === "account";
+
+    return {
+        requestId,
+        kind: isAccount ? "account" : "connector",
+        slug,
+        name: str(parsed?.name) ?? str(event.target?.name) ?? slug,
+        ...(bindingId ? { bindingId } : {}),
+        runId: str(parsed?.runId) ?? str(payload.runId) ?? event.runId,
+        rootRunId: str(parsed?.rootRunId) ?? str(payload.rootRunId) ?? event.rootId,
+        userAddress: str(parsed?.userAddress) ?? str(payload.userAddress),
+        agentWallet: str(parsed?.agentWallet) ?? str(payload.agentWallet),
+        reason: str(parsed?.error) ?? str(payload.error) ?? `Connect ${slug} to continue.`,
+        ...(missingVars?.length ? { missingVars } : {}),
+        state: "requested",
+        ts: event.ts,
+    };
+}
+
 function connectorFromActivityEvent(event: ActivityEvent): ConnectorRequest | null {
     const payload = event.payload ?? {};
-    const requestId = str(payload.requestId);
-    const slug = str(payload.slug);
+    const details = isRecord(event.target?.details) ? event.target.details : undefined;
+    const requestId = str(payload.requestId) ?? str(details?.requestId);
+    const slug = str(payload.slug) ?? str(payload.toolkit) ?? str(details?.slug);
     if (!requestId || !slug) return null;
-    const decisionValue = str(payload.decision);
-    const state: ConnectorRequest["state"] = decisionValue === "connected" || decisionValue === "discarded"
-        ? decisionValue
-        : "requested";
+    const decisionValue = str(payload.decision) ?? str(payload.state) ?? str(details?.decision);
+    const state: ConnectorRequest["state"] =
+        decisionValue === "connected"
+        || decisionValue === "granted"
+        || decisionValue === "discarded"
+        || decisionValue === "denied"
+        || decisionValue === "escalated"
+            ? decisionValue
+            : "requested";
+    const bindingId = str(payload.bindingId);
+    const origin = str(payload.origin) ?? str(details?.origin);
+    const authMode = str(payload.authMode) ?? str(details?.authMode);
+    const toolkit = str(payload.toolkit) ?? str(details?.toolkit);
+    const authUrl = str(payload.authUrl) ?? str(details?.authUrl);
+    const missingVars = parseMissingVars(payload.missingVars ?? details?.missingVars);
+    const kindValue = str(payload.kind) ?? str(details?.kind);
+    const kind: ConnectorRequest["kind"] =
+        kindValue === "account" || kindValue === "mcp" || kindValue === "connector"
+            ? kindValue
+            : (origin === "account" || authMode === "oauth" || bindingId?.toLowerCase().startsWith("account:"))
+                ? "account"
+                : undefined;
     const actions = Array.isArray(payload.actions)
         ? payload.actions.filter((action): action is string => typeof action === "string")
         : undefined;
     return {
         requestId,
+        ...(kind ? { kind } : {}),
         slug,
-        bindingId: str(payload.bindingId),
+        ...(str(payload.name) ? { name: str(payload.name) } : {}),
+        bindingId,
         runId: str(payload.runId) ?? event.runId,
         rootRunId: str(payload.rootRunId) ?? event.rootId,
         userAddress: str(payload.userAddress),
         agentWallet: str(payload.agentWallet),
         ...(actions?.length ? { actions } : {}),
         reason: str(payload.reason),
+        ...(missingVars?.length ? { missingVars } : {}),
+        ...(authUrl ? { authUrl } : {}),
+        ...(toolkit ? { toolkit } : {}),
+        ...(origin ? { origin } : {}),
+        ...(authMode ? { authMode } : {}),
         state,
         ts: event.ts,
     };
