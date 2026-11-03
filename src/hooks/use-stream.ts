@@ -1718,26 +1718,40 @@ function parseClarifyPayload(value: unknown): string | ProposalClarification | u
 
 function planFromActivityEvent(event: ActivityEvent): Plan {
     const payload = event.payload ?? {};
+    const clarify = parseClarifyPayload(payload.clarify);
+    const state = str(payload.state) ?? event.status ?? "pending";
     const planType: Plan["type"] = decision(payload.decision)
         ? "approval.decided"
-        : str(payload.feedback)
+        : str(payload.feedback) || state === "clarify" || Boolean(clarify)
             ? "plan.feedback_requested"
             : "plan.proposed";
-    // Live task rows (payload.tasks) win — statuses, forks, retries, errors
-    // update post-approval; the proposal snapshot is the fallback.
     const liveTasks = proposalTasks(payload.tasks);
     const snapshotTasks = proposalTasks(payload.proposal);
+    const questionSet = new Set<string>();
+    for (const q of stringList(payload.questions) ?? []) questionSet.add(q);
+    if (clarify && typeof clarify !== "string") {
+        for (const q of clarify.questions) questionSet.add(q);
+        for (const item of clarify.items ?? []) questionSet.add(item.question);
+    }
+    const questions = questionSet.size > 0 ? Array.from(questionSet) : undefined;
+    const missingInputs = parseMissingInputs(payload.missingInputs)
+        ?? (clarify && typeof clarify !== "string" && clarify.missingInputs?.length ? clarify.missingInputs : undefined);
     return {
         type: planType,
         proposalId: str(payload.proposalId) ?? event.id,
-        version: num(payload.version) ?? 1,
-        state: str(payload.state) ?? event.status ?? "pending",
+        version: num(payload.proposalVersion) ?? num(payload.version) ?? 1,
+        state,
         decision: decision(payload.decision),
         rootRunId: event.rootId,
         runId: event.runId,
+        approvalId: str(payload.approvalId),
         proposal: proposalSnapshot(payload.proposal),
         tasks: liveTasks.length > 0 ? liveTasks : snapshotTasks.length > 0 ? snapshotTasks : undefined,
         markdown: str(payload.markdown),
+        clarify,
+        questions,
+        missingInputs,
+        strikes: num(payload.strikes),
         approver: str(payload.approver),
         reason: str(payload.reason),
         feedback: str(payload.feedback),
@@ -1747,18 +1761,42 @@ function planFromActivityEvent(event: ActivityEvent): Plan {
     };
 }
 
-function mergePlan(chat: UseChatReturn, assistantId: string, plan: Plan, content: string): void {
+const ACTIONABLE_PLAN_STATES = new Set(["awaiting_approval", "clarify", "proposed", "pending"]);
+
+function mergePlan(chat: UseChatReturn, assistantId: string, plan: Plan): void {
     chat.setMessages((messages) => messages.map((message) => {
         if (message.id !== assistantId) return message;
         const current = message.proposal;
+        if (current && current.proposalId === plan.proposalId) {
+            if (plan.version < current.version) return message;
+            if (plan.version === current.version && current.updatedAt && plan.updatedAt && plan.updatedAt < current.updatedAt) {
+                return message;
+            }
+        }
         const same = current?.proposalId === plan.proposalId && current.version === plan.version;
+        const inClarify = plan.state === "clarify";
+        const isActionable = ACTIONABLE_PLAN_STATES.has(plan.state);
         return {
             ...message,
-            content,
             proposal: {
                 ...(same ? current : {}),
                 ...plan,
+                decision: isActionable
+                    ? undefined
+                    : (plan.decision ?? (same ? current?.decision : undefined)),
+                pending: false,
+                error: undefined,
                 tasks: plan.tasks?.length ? plan.tasks : same ? current?.tasks : undefined,
+                clarify: inClarify
+                    ? (plan.clarify ?? (same ? current?.clarify : undefined))
+                    : plan.clarify,
+                questions: inClarify
+                    ? (plan.questions?.length ? plan.questions : same ? current?.questions : undefined)
+                    : plan.questions,
+                missingInputs: inClarify
+                    ? (plan.missingInputs?.length ? plan.missingInputs : same ? current?.missingInputs : undefined)
+                    : plan.missingInputs,
+                feedback: plan.feedback ?? (same && plan.state === "changes_requested" ? current?.feedback : undefined),
             },
         };
     }));
