@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useActiveWalletConnectionStatus } from "thirdweb/react";
 import type { InferenceAnalytics } from "@compose-market/sdk";
 
 import { useReconciliation } from "@/hooks/use-reconciliation";
 import { useWalletPair } from "@/hooks/use-pair";
+import { useSession } from "@/hooks/use-session";
 import {
   buildAnalyticsQueryKey,
   buildRollingAnalyticsFilters,
@@ -16,8 +17,8 @@ import {
   type Summary,
 } from "@/lib/analytics";
 import { durableQueryMeta, DURABLE_CACHE_MAX_AGE } from "@/lib/queryClient";
-import { readCachedAccount } from "@/lib/cache";
-import { sdk } from "@/lib/sdk";
+import { readCachedAccount, readCachedAnalytics, writeCachedAnalytics } from "@/lib/cache";
+import { hasSessionAuth, sdk } from "@/lib/sdk";
 
 const STALE_TIME = 30_000;
 
@@ -54,6 +55,7 @@ export interface UseAnalyticsReturn {
 
 export function useAnalytics(input: UseAnalyticsInput): UseAnalyticsReturn {
   const { owner: liveOwner, pair } = useWalletPair();
+  const { keyToken, sessionActive } = useSession();
   const connectionStatus = useActiveWalletConnectionStatus();
   const [cachedAccount] = useState(() => readCachedAccount());
   const owner = liveOwner ?? (
@@ -61,7 +63,13 @@ export function useAnalytics(input: UseAnalyticsInput): UseAnalyticsReturn {
       ? cachedAccount?.address.toLowerCase() ?? null
       : null
   );
+  const canQueryAnalytics = Boolean(owner && (keyToken || sessionActive || hasSessionAuth(owner)));
   const queryKey = buildAnalyticsQueryKey(owner ?? "", input.rangeId, input.networks, input.filters);
+  const snapshotKey = `${input.rangeId}:${input.networks.join(",")}:${JSON.stringify(input.filters)}`;
+  const persisted = useMemo(
+    () => (owner ? readCachedAnalytics(owner, snapshotKey) : null),
+    [owner, snapshotKey],
+  );
 
   const query = useQuery<
     InferenceAnalytics.InferenceAnalyticsResponse,
@@ -76,18 +84,22 @@ export function useAnalytics(input: UseAnalyticsInput): UseAnalyticsReturn {
         filters: input.filters,
         networks: input.networks,
       });
-      return sdk.analytics.get(filters, { userAddress: owner });
+      const response = await sdk.analytics.get(filters, { userAddress: owner });
+      writeCachedAnalytics(owner, snapshotKey, response);
+      return response;
     },
+    initialData: persisted?.data,
+    initialDataUpdatedAt: persisted?.updatedAt,
     select: summarize,
     staleTime: STALE_TIME,
     gcTime: DURABLE_CACHE_MAX_AGE,
-    enabled: Boolean(owner),
+    enabled: canQueryAnalytics,
     retry: 1,
     meta: durableQueryMeta,
   });
 
   useReconciliation({
-    owner: pair ? liveOwner : null,
+    owner: pair && canQueryAnalytics ? liveOwner : null,
     subscribe: (options) => sdk.analytics.subscribe(options),
     refetch: query.refetch,
   });
