@@ -8,6 +8,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 
 import { compareModelBenchmarks } from "@/lib/benchmarks";
+import { readBenchmarksSnapshot, writeBenchmarksSnapshot } from "@/lib/cache";
 import { DURABLE_CACHE_MAX_AGE, durableQueryMeta } from "@/lib/queryClient";
 import { API_BASE_URL, sdk } from "@/lib/sdk";
 import type {
@@ -53,13 +54,18 @@ async function fetchBenchmarkIndex(): Promise<BenchmarksApiResponse> {
     if (!response.ok) {
         throw new Error(`Failed to load benchmarks: ${response.status}`);
     }
-    return await response.json() as BenchmarksApiResponse;
+    const payload = await response.json() as BenchmarksApiResponse;
+    writeBenchmarksSnapshot(API_BASE_URL, payload);
+    return payload;
 }
 
 function useBenchmarkIndex(enabled = true) {
+    const persisted = useMemo(() => readBenchmarksSnapshot(API_BASE_URL), []);
     return useQuery<BenchmarksApiResponse, Error>({
         queryKey: BENCHMARK_INDEX_KEY,
         queryFn: fetchBenchmarkIndex,
+        initialData: persisted?.data,
+        initialDataUpdatedAt: persisted?.updatedAt,
         enabled,
         staleTime: BENCHMARK_STALE_TIME,
         gcTime: DURABLE_CACHE_MAX_AGE,
