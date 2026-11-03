@@ -2088,6 +2088,8 @@ function decision(value: unknown): Plan["decision"] | undefined {
 
 function artifactFromModelEvent(event: ModelEvent): Artifact {
     const asset = event.asset ?? { kind: "artifact" as const };
+    const assetRec = asset as unknown as Record<string, unknown>;
+    const rawNested = isRecord(assetRec.raw) ? assetRec.raw : undefined;
     const kind = artifactKind(asset.kind);
     const mimeType = asset.mimeType;
     const base64 = asset.base64;
@@ -2104,6 +2106,9 @@ function artifactFromModelEvent(event: ModelEvent): Artifact {
         embedding: embedding(asset.embedding),
         mimeType,
         bytes: asset.bytes,
+        sampleRate: num(assetRec.sampleRate) ?? num(rawNested?.sample_rate) ?? num(rawNested?.sampleRate),
+        channels: num(assetRec.channels) ?? num(rawNested?.channels),
+        revisedPrompt: str(assetRec.revisedPrompt) ?? str(rawNested?.revised_prompt) ?? str(rawNested?.revisedPrompt),
         responseId: asset.responseId ?? event.responseId,
         outputIndex: asset.outputIndex ?? event.outputIndex,
         status: asset.status ?? event.status,
@@ -2112,7 +2117,7 @@ function artifactFromModelEvent(event: ModelEvent): Artifact {
         sourceTool: event.toolCallId,
         ...(event.runId ? { source: "agent" as const } : {}),
         runKey: event.runId,
-        raw: asset as unknown as Record<string, unknown>,
+        raw: assetRec,
     };
 }
 
@@ -2125,6 +2130,8 @@ function artifactKind(value: unknown): Artifact["artifactType"] {
     if (raw === "realtime" || raw === "output_realtime" || raw === "realtime_session") return "realtime";
     if (raw === "file") return "file";
     if (raw === "delivery") return "delivery";
+    if (raw === "document") return "document";
+    if (raw === "code") return "code";
     if (raw === "snippet") return "snippet";
     return "artifact";
 }
