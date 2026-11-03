@@ -6,13 +6,28 @@
  * previously carried private copies of this machinery.
  */
 
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface ThreadKey {
     /** sessionStorage key holding the thread ID. */
     key: string;
     /** Prefix for freshly generated thread IDs. */
     idPrefix: string;
+}
+
+function readWatchableRun(key: string, expectedThreadId: string | null): { threadId: string; rootRunId: string } | null {
+    const raw = sessionStorage.getItem(`${key}:watch`);
+    if (!raw) return null;
+    try {
+        const parsed = JSON.parse(raw) as { threadId?: unknown; rootRunId?: unknown };
+        const threadId = typeof parsed.threadId === "string" ? parsed.threadId.trim() : "";
+        const rootRunId = typeof parsed.rootRunId === "string" ? parsed.rootRunId.trim() : "";
+        if (!threadId || !rootRunId) return null;
+        if (expectedThreadId && threadId !== expectedThreadId) return null;
+        return { threadId, rootRunId };
+    } catch {
+        return null;
+    }
 }
 
 export function useConversationThread(keyFactory: () => ThreadKey | null) {
