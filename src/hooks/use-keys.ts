@@ -14,7 +14,7 @@ import { useReconciliation } from "@/hooks/use-reconciliation";
 import { useSession } from "@/hooks/use-session";
 import { useWalletPair } from "@/hooks/use-pair";
 import { SESSION_BUDGET_PRESETS } from "@/lib/chains";
-import { readCachedAccount } from "@/lib/cache";
+import { readCachedAccount, readCachedKeys, writeCachedKeys } from "@/lib/cache";
 import { durableQueryMeta, DURABLE_CACHE_MAX_AGE } from "@/lib/queryClient";
 import { sdk } from "@/lib/sdk";
 
@@ -59,22 +59,32 @@ export function useKeys(): UseKeysReturn {
   const { owner: liveOwner, pair } = useWalletPair();
   const connectionStatus = useActiveWalletConnectionStatus();
   const [cachedAccount] = useState(() => readCachedAccount());
+  const cachedAddr = cachedAccount?.address?.trim() ?? null;
+  const normalizedCached = cachedAddr
+    ? (/^0x[a-f0-9]{40}$/i.test(cachedAddr) ? cachedAddr.toLowerCase() : cachedAddr)
+    : null;
   const owner = liveOwner ?? (
     connectionStatus !== "disconnected"
-      ? cachedAccount?.address.toLowerCase() ?? null
+      ? normalizedCached
       : null
   );
   const [createdToken, setCreatedToken] = useState<string | null>(null);
   const [createdKeyId, setCreatedKeyId] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
 
+  const persisted = useMemo(() => readCachedKeys(owner), [owner]);
+
   const query = useQuery<KeyRecord[], Error>({
     queryKey: [CACHE_KEY, owner],
     queryFn: async () => {
       if (!owner) throw new Error("An active EVM smart account is required");
       const keys = await sdk.keys.list({ userAddress: owner });
-      return keys.sort((left, right) => right.createdAt - left.createdAt);
+      const sorted = keys.sort((left, right) => right.createdAt - left.createdAt);
+      writeCachedKeys(owner, sorted);
+      return sorted;
     },
+    initialData: persisted?.data,
+    initialDataUpdatedAt: persisted?.updatedAt,
     staleTime: STALE_TIME,
     gcTime: DURABLE_CACHE_MAX_AGE,
     enabled: Boolean(owner),
