@@ -2081,7 +2081,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function decision(value: unknown): Plan["decision"] | undefined {
-    return value === "approved" || value === "rejected" || value === "changes_requested" ? value : undefined;
+    return value === "approved" || value === "rejected" || value === "changes_requested" || value === "clarify"
+        ? value
+        : undefined;
 }
 
 function artifactFromModelEvent(event: ModelEvent): Artifact {
