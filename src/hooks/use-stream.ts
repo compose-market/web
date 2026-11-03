@@ -1997,11 +1997,34 @@ function artifactFromActivityEvent(event: ActivityEvent): Artifact | null {
     if (!isRecord(payload.artifact) || !str(payload.artifactId)) return null;
     const raw = payload.artifact;
     const kind = artifactKind(raw.type);
+    if (kind === "document" || kind === "code") {
+        return {
+            id: str(raw.id) ?? str(payload.artifactId) ?? event.id,
+            artifactType: kind,
+            title: str(raw.title),
+            filename: str(raw.filename),
+            language: str(raw.language),
+            summary: str(raw.summary),
+            provider: str(raw.provider),
+            content: str(raw.content),
+            contentHash: str(raw.contentHash),
+            bytes: num(raw.bytes),
+            mimeType: str(raw.mimeType) ?? (kind === "document" ? "text/markdown" : "text/plain"),
+            status: str(raw.status) ?? "completed",
+            sourceTool: event.target?.name ?? str(raw.sourceTool) ?? "artifact",
+            source: "agent",
+            runKey: str(raw.runId) ?? event.runId,
+            raw,
+        };
+    }
     if (kind === "snippet") {
         return {
             id: str(raw.id) ?? str(payload.artifactId) ?? event.id,
             artifactType: "snippet",
             title: str(raw.title),
+            filename: str(raw.filename),
+            language: str(raw.language),
+            provider: str(raw.provider),
             content: str(raw.content),
             code: str(raw.code),
             bytes: num(raw.bytes),
@@ -2019,6 +2042,7 @@ function artifactFromActivityEvent(event: ActivityEvent): Artifact | null {
             artifactType: "delivery",
             deliverableId: str(raw.deliverableId) ?? str(payload.artifactId),
             title: str(raw.title),
+            filename: str(raw.filename),
             content: str(raw.content),
             summary: str(raw.summary),
             contentHash: str(raw.contentHash),
@@ -2042,6 +2066,7 @@ function artifactFromActivityEvent(event: ActivityEvent): Artifact | null {
         mimeType: str(raw.mimeType),
         bytes: num(raw.bytes),
         responseId: str(raw.responseId),
+        outputIndex: num(raw.outputIndex),
         status: str(raw.status),
         jobId: str(raw.jobId),
         sourceTool: event.target?.name,
