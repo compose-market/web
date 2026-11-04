@@ -254,16 +254,124 @@ function formatBytes(value?: number): string | null {
     return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }
 
-// Inline Plan Gate — compact decision bar in chat.
-// Shows title + state + action buttons only. No markdown body, no task list.
-// Full plan content (markdown, tasks, version carousel) lives in side-panel Mission Control.
+function extractMessageText(message: Message): string {
+    const parts: string[] = [];
+    const blockTexts = (message.blocks ?? [])
+        .filter((b): b is Extract<MessageBlock, { type: "text" }> => b.type === "text" && b.text.trim().length > 0)
+        .map((b) => b.text.trim());
+
+    if (blockTexts.length > 0) {
+        for (const textBlock of blockTexts) {
+            if (!parts.includes(textBlock)) parts.push(textBlock);
+        }
+    } else if (message.content.trim()) {
+        parts.push(message.content.trim());
+    }
+    if (message.artifacts?.length) {
+        for (const item of message.artifacts) {
+            if (item.artifactType === "delivery" || item.artifactType === "snippet") {
+                const raw = item.raw ?? {};
+                const body = (typeof raw.content === "string" && raw.content.trim())
+                    || (typeof raw.markdown === "string" && raw.markdown.trim())
+                    || (typeof raw.source === "string" && raw.source.trim())
+                    || (typeof raw.text === "string" && raw.text.trim())
+                    || "";
+                if (body && !parts.includes(body)) parts.push(body);
+            }
+        }
+    }
+    return parts.join("\n\n");
+}
+
+const ACTIONABLE_PLAN_STATES = new Set(["awaiting_approval", "clarify", "proposed", "pending"]);
+const LIVE_OR_TERMINAL_PLAN_STATES = new Set([
+    "executing",
+    "monitoring",
+    "refining",
+    "completed",
+    "failed",
+    "blocked",
+    "cancelled",
+    "expired",
+]);
+
+function planLifecycleState(plan: Plan): string {
+    return LIVE_OR_TERMINAL_PLAN_STATES.has(plan.state)
+        ? plan.state
+        : (plan.decision || plan.state);
+}
+
+function planTaskCounts(plan: Plan): {
+    total: number;
+    done: number;
+    doing: number;
+    failed: number;
+    activeTask: NonNullable<Plan["tasks"]>[number] | undefined;
+} {
+    const tasks = plan.tasks ?? [];
+    let done = 0;
+    let doing = 0;
+    let failed = 0;
+    let activeTask: NonNullable<Plan["tasks"]>[number] | undefined;
+    for (const task of tasks) {
+        if (task.status === "done") done += 1;
+        else if (task.status === "doing") {
+            doing += 1;
+            if (!activeTask) activeTask = task;
+        } else if (task.status === "failed" || task.status === "blocked") {
+            failed += 1;
+        }
+    }
+    return { total: tasks.length, done, doing, failed, activeTask };
+}
+
+function selectPreviewTasks(tasks: NonNullable<Plan["tasks"]>, limit = 6): NonNullable<Plan["tasks"]> {
+    if (tasks.length <= limit) return tasks;
+    const priority = tasks.filter((t) => t.status === "doing" || t.status === "failed" || t.status === "blocked");
+    const chosen = new Set(priority.slice(0, limit).map((t) => t.id));
+    for (const task of tasks) {
+        if (chosen.size >= limit) break;
+        chosen.add(task.id);
+    }
+    return tasks.filter((t) => chosen.has(t.id));
+}
+
+function formatMissingInputLabel(entry: string | NonNullable<Plan["missingInputs"]>[number]): string {
+    if (typeof entry === "string") return entry;
+    const target = entry.taskTitle || entry.taskId;
+    const model = entry.modelName || entry.modelId;
+    const needs = entry.acceptedInputs?.length ? entry.acceptedInputs.join(" / ") : "input";
+    const head = [target, model ? `(${model})` : ""].filter(Boolean).join(" ");
+    return entry.reason ? `${head}: ${needs} — ${entry.reason}` : `${head}: requires ${needs}`;
+}
+
+// =============================================================================
+// Inline Plan & Clarify Gate
+// =============================================================================
 
 function planSummary(plan: Plan): string {
-    const state = plan.decision || plan.state;
-    if (state === "approved") return `Plan approved \u00B7 v${plan.version}`;
-    if (state === "rejected") return `Plan rejected \u00B7 v${plan.version}`;
-    if (state === "changes_requested") return `Plan changes requested \u00B7 v${plan.version}`;
-    return `Plan proposed \u00B7 v${plan.version}`;
+    if (plan.state === "clarify") {
+        return plan.decision === "clarify"
+            ? `Clarification sent · v${plan.version}`
+            : `Clarification needed · v${plan.version}`;
+    }
+    const state = planLifecycleState(plan);
+    const { total, done } = planTaskCounts(plan);
+    if (state === "approved" || state === "executing" || state === "monitoring") {
+        return total > 0 ? `Executing plan · ${done}/${total} done` : `Executing plan · v${plan.version}`;
+    }
+    if (state === "refining") return `Revising plan · v${plan.version}`;
+    if (state === "rejected") return `Plan rejected · v${plan.version}`;
+    if (state === "changes_requested") return `Changes requested · v${plan.version}`;
+    if (state === "completed") {
+        return total > 0 ? `Plan completed · ${done}/${total} done` : `Plan completed · v${plan.version}`;
+    }
+    if (state === "failed" || state === "blocked") {
+        return total > 0 ? `Plan failed · ${done}/${total} done` : `Plan failed · v${plan.version}`;
+    }
+    if (state === "cancelled") return `Plan cancelled · v${plan.version}`;
+    if (state === "expired") return `Plan expired · v${plan.version}`;
+    return `Plan proposed · v${plan.version}`;
 }
 
 function InlinePlanGate({
