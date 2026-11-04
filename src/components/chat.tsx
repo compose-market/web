@@ -1247,28 +1247,20 @@ function ArtifactBlock({
                     : `${artifactTitle(item.artifactType)} ${index + 1}`;
                 const actionLabel = title || artifactTitle(item.artifactType);
 
-                // Plan delivery: the plan's FINAL DELIVERY artifact frame —
-                // the complete content rides the artifact (visible inline
-                // like a picture); .md + PDF download icons in the frame.
                 if (item.artifactType === "delivery") {
-                    return (
-                        <DeliveryCard
-                            key={item.id}
-                            artifact={item}
-                        />
-                    );
+                    return <DocumentCard key={item.id} artifact={item} variant="document" />;
                 }
 
-                // Snippet: smart-contract source/report artifact frame —
-                // complete content rides the artifact (visible inline);
-                // .sol + .md download icons in the frame.
+                if (item.artifactType === "document") {
+                    return <DocumentCard key={item.id} artifact={item} variant="document" />;
+                }
+
+                if (item.artifactType === "code") {
+                    return <DocumentCard key={item.id} artifact={item} variant="code" />;
+                }
+
                 if (item.artifactType === "snippet") {
-                    return (
-                        <SnippetCard
-                            key={item.id}
-                            artifact={item}
-                        />
-                    );
+                    return <DocumentCard key={item.id} artifact={item} />;
                 }
 
                 if (mediaKind) {
@@ -1287,18 +1279,10 @@ function ArtifactBlock({
                                             onClick={() => setExpanded(item)}
                                             aria-label={`Open ${actionLabel}`}
                                         >
-                                            <SharedStreamMedia
-                                                kind={mediaKind}
-                                                url={item.url}
-                                                partial={partial}
-                                            />
+                                            <StreamMedia kind={mediaKind} url={item.url} partial={partial} />
                                         </button>
                                     ) : (
-                                        <SharedStreamMedia
-                                            kind={mediaKind}
-                                            url={item.url}
-                                            partial={partial}
-                                        />
+                                        <StreamMedia kind={mediaKind} url={item.url} partial={partial} />
                                     )}
                                     {partial && (
                                         <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-md bg-black/15 text-xs font-medium text-white shadow">
@@ -1326,10 +1310,15 @@ function ArtifactBlock({
                                 url={item.url}
                                 onOpen={() => setExpanded(item)}
                             />
+                            {item.revisedPrompt && (
+                                <p className="text-xs text-muted-foreground/80 italic">
+                                    {item.revisedPrompt}
+                                </p>
+                            )}
                             {item.error && (
-                                <SharedStreamNotice tone="error" title="Artifact error">
+                                <NoticeBox tone="error" title="Artifact error">
                                     {item.error}
-                                </SharedStreamNotice>
+                                </NoticeBox>
                             )}
                         </div>
                     );
@@ -1369,16 +1358,19 @@ function ArtifactBlock({
                             </a>
                         ) : null}
                         {item.error && (
-                            <SharedStreamNotice tone="error" title="Artifact error">
+                            <NoticeBox tone="error" title="Artifact error">
                                 {item.error}
-                            </SharedStreamNotice>
+                            </NoticeBox>
                         )}
                     </div>
                 );
             })}
-            <MediaPreview artifact={expanded} onOpenChange={(open) => {
-                if (!open) setExpanded(null);
-            }} />
+            <MediaPreview
+                artifact={expanded}
+                onOpenChange={(open) => {
+                    if (!open) setExpanded(null);
+                }}
+            />
         </div>
     );
 }
@@ -1394,40 +1386,40 @@ function MediaPreview({
     const url = artifact?.url;
     const title = artifact ? artifactTitle(artifact.artifactType) : "Asset";
     return (
-        <Dialog open={Boolean(kind && url)} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-5xl border-cyan-500/30 bg-background/95 p-4">
-                <DialogHeader>
-                    <DialogTitle className="font-display text-sm text-cyan-100">{title}</DialogTitle>
-                </DialogHeader>
-                {kind && url ? (
-                    <div className={cn("flex max-h-[78vh] min-h-0 items-center justify-center", kind === "audio" && "items-stretch")}>
-                        <SharedStreamMedia
-                            kind={kind}
-                            url={url}
-                            className={cn(
-                                kind === "image" && "max-h-[72vh] w-auto",
-                                kind === "video" && "max-h-[72vh]",
-                                kind === "audio" && "w-full",
-                            )}
-                        />
-                    </div>
-                ) : null}
-                {url ? (
-                    <div className="flex justify-end text-xs text-muted-foreground">
-                        <a
-                            className="cm-chat__icon-action inline-flex h-6 w-6 items-center justify-center rounded-full transition-colors"
-                            href={url}
-                            download
-                            rel="noreferrer"
-                            aria-label="Download"
-                            title="Download"
-                        >
-                            <Download className="h-3 w-3" />
-                        </a>
-                    </div>
-                ) : null}
-            </DialogContent>
-        </Dialog>
+        <ShellModal
+            open={Boolean(kind && url)}
+            onClose={() => onOpenChange(false)}
+            title={title}
+            subtitle={artifact?.mimeType}
+            className="cm-media-modal"
+        >
+            {kind && url ? (
+                <div className={cn("flex max-h-[72dvh] min-h-0 items-center justify-center", kind === "audio" && "items-stretch")}>
+                    <StreamMedia
+                        kind={kind}
+                        url={url}
+                        className={cn(
+                            kind === "image" && "max-h-[68dvh] w-auto",
+                            kind === "video" && "max-h-[68dvh]",
+                            kind === "audio" && "w-full",
+                        )}
+                    />
+                </div>
+            ) : null}
+            {url ? (
+                <div className="cm-session-modal__footer">
+                    <a
+                        className="cm-doc-card__btn cm-doc-card__btn--primary"
+                        href={url}
+                        download
+                        rel="noreferrer"
+                    >
+                        <Download className="h-3.5 w-3.5" />
+                        <span>Download</span>
+                    </a>
+                </div>
+            ) : null}
+        </ShellModal>
     );
 }
 
@@ -1476,15 +1468,15 @@ function EmbeddingArtifact({
     };
 
     return (
-        <SharedStreamNode
+        <FoldNode
             title={title}
             defaultOpen={false}
             metadata={
                 <>
                     <StreamMeta values={values} />
                     <button
-                        onClick={copy}
-                        className="cm-chat__icon-action w-fit rounded-full px-2 py-1 text-[11px] transition-colors"
+                        onClick={() => void copy()}
+                        className="cm-chat__icon-action w-fit rounded-full px-2 py-1 text-xs transition-colors"
                         title="Copy raw embedding"
                         type="button"
                     >
@@ -1494,20 +1486,22 @@ function EmbeddingArtifact({
             }
         >
             {vector ? (
-                <pre className="text-xs font-mono text-emerald-300/80 overflow-auto max-h-80 whitespace-pre leading-relaxed">
+                <pre className="text-xs font-mono text-emerald-300/80 overflow-x-auto whitespace-pre leading-relaxed">
                     {formatted}
                 </pre>
             ) : (
-                <SharedStreamNotice tone="warning" title="Embedding data unavailable">
-                    {item.responseId ? `Response ${shortId(item.responseId)} finished, but the vector payload was not returned to the UI.` : "The embedding vector payload was not returned to the UI."}
-                </SharedStreamNotice>
+                <NoticeBox tone="warning" title="Embedding data unavailable">
+                    {item.responseId
+                        ? `Response ${shortId(item.responseId)} finished, but the vector payload was not returned.`
+                        : "The embedding vector payload was not returned."}
+                </NoticeBox>
             )}
             {item.error && (
-                <SharedStreamNotice tone="error" title="Embedding error">
+                <NoticeBox tone="error" title="Embedding error">
                     {item.error}
-                </SharedStreamNotice>
+                </NoticeBox>
             )}
-        </SharedStreamNode>
+        </FoldNode>
     );
 }
 
