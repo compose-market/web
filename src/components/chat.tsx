@@ -195,22 +195,19 @@ const LazyMarkdownRenderer = lazy(() =>
 function EmbeddingBlock({ content }: { content: string }) {
     const [copied, setCopied] = useState(false);
 
-    // Parse embedding content - try to prettify it
     let formattedContent = content;
     let dimensions = 0;
     try {
         const parsed = JSON.parse(content);
         if (Array.isArray(parsed)) {
-            // Handle nested arrays (multiple embeddings)
             if (Array.isArray(parsed[0])) {
                 dimensions = parsed[0].length;
                 formattedContent = parsed.map((emb: number[], idx: number) =>
-                    `[${idx}]:\n  ` + emb.map((v, i) => `[${i}]: ${v.toFixed(8)}`).join('\n  ')
-                ).join('\n\n');
+                    `[${idx}]:\n  ` + emb.map((v, i) => `[${i}]: ${v.toFixed(8)}`).join("\n  ")
+                ).join("\n\n");
             } else {
-                // Single embedding array
                 dimensions = parsed.length;
-                formattedContent = parsed.map((v: number, i: number) => `[${i}]: ${v.toFixed(8)}`).join('\n');
+                formattedContent = parsed.map((v, i) => `[${i}]: ${v.toFixed(8)}`).join("\n");
             }
         }
     } catch {
@@ -224,24 +221,24 @@ function EmbeddingBlock({ content }: { content: string }) {
     };
 
     return (
-        <SharedStreamNode
+        <FoldNode
             title={<>Embedding vector {dimensions > 0 && <span>({dimensions} dimensions)</span>}</>}
             defaultOpen={false}
             metadata={
                 <button
-                    onClick={handleCopy}
-                    className="cm-chat__icon-action w-fit rounded-full px-2 py-1 text-[11px] transition-colors"
+                    onClick={() => void handleCopy()}
+                    className="cm-chat__icon-action rounded-full px-2 py-1 text-xs transition-colors"
                     title="Copy raw embedding"
                     type="button"
                 >
-                    {copied ? "Copied" : "Copy raw embedding"}
+                    {copied ? "Copied" : "Copy raw"}
                 </button>
             }
         >
-            <pre className="text-xs font-mono text-emerald-300/80 overflow-auto max-h-80 whitespace-pre leading-relaxed">
+            <pre className="text-xs font-mono text-emerald-300/80 overflow-x-auto whitespace-pre leading-relaxed">
                 {formattedContent}
             </pre>
-        </SharedStreamNode>
+        </FoldNode>
     );
 }
 
