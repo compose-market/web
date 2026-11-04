@@ -1151,14 +1151,16 @@ export function InlineConnectorGate({
     );
 }
 
-// Inline Activity Chip — compact summary that points to the side panel
+// =============================================================================
+// Inline Activity Summary Chip (opens Surface 3 Trace Sheet)
+// =============================================================================
 
 function InlineActivityChip({
     activity,
-    onFocusMissionControl,
+    onInspectFlow,
 }: {
-    activity?: import("@compose-market/sdk").ActivityState;
-    onFocusMissionControl?: () => void;
+    activity?: ActivityState;
+    onInspectFlow?: (nodeId?: string) => void;
 }) {
     if (!activity) return null;
     const nodes = Object.values(activity.nodes);
@@ -1179,19 +1181,31 @@ function InlineActivityChip({
     const parts: string[] = [];
     if (tools > 0) parts.push(`${tools} tool${tools > 1 ? "s" : ""}`);
     if (agents > 0) parts.push(`${agents} agent${agents > 1 ? "s" : ""}`);
-    if (running > 0) parts.push(`${running} running`);
+    if (running > 0) parts.push(`${running} live`);
     else if (completed > 0) parts.push(`${completed} done`);
-    const summary = parts.join(" \u00B7 ") || `${visible.length} activities`;
+    const summary = parts.join(" · ") || `${visible.length} steps`;
 
     return (
-        <SharedActivityChip
-            status={status}
-            summary={summary}
-            metadata={`${visible.length} updates`}
-            onClick={onFocusMissionControl}
-        />
+        <button
+            type="button"
+            className="cm-activity-chip"
+            data-status={status}
+            onClick={() => onInspectFlow?.()}
+        >
+            {status === "running" ? (
+                <Loader2 className="cm-stream-fold__icon cm-pulse__spin" />
+            ) : (
+                <Activity className="cm-stream-fold__icon" />
+            )}
+            <span className="cm-activity-chip__summary">{summary}</span>
+            <span className="cm-activity-chip__meta">Flow →</span>
+        </button>
     );
 }
+
+// =============================================================================
+// Artifacts, Media, Live PCM16 Audio
+// =============================================================================
 
 function StreamMeta({ values }: { values: Array<string | undefined> }) {
     const items = values.filter((value): value is string => Boolean(value));
