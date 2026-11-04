@@ -1626,6 +1626,8 @@ function artifactTitle(kind: Artifact["artifactType"]): string {
     if (kind === "embedding") return "Embedding";
     if (kind === "realtime") return "Realtime";
     if (kind === "file") return "File";
+    if (kind === "document") return "Document";
+    if (kind === "code") return "Code";
     if (kind === "snippet") return "Snippet";
     return "Artifact";
 }
@@ -1634,25 +1636,40 @@ function artifactMediaKind(kind: Artifact["artifactType"]): "image" | "audio" | 
     return kind === "image" || kind === "audio" || kind === "video" ? kind : null;
 }
 
-// ActivityView was removed and refactored into the new MissionControl component
-
 function numeric(value: unknown): number | undefined {
     return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function liveAudioBase64(item: Artifact): string | undefined {
     const raw = item.raw ?? {};
-    return text(raw.base64) ?? text(raw.data) ?? text(raw.delta) ?? text(raw.audio);
+    const nested = record(raw.raw);
+    return text(raw.base64)
+        ?? text(raw.data)
+        ?? text(raw.delta)
+        ?? text(raw.audio)
+        ?? text(nested?.delta)
+        ?? text(nested?.audio);
 }
 
 function audioSampleRate(item: Artifact): number {
     const raw = item.raw ?? {};
-    return numeric(raw.sampleRate) ?? numeric(raw.sample_rate) ?? numeric(raw.sampleRateHz) ?? 48000;
+    const nested = record(raw.raw);
+    return numeric(item.sampleRate)
+        ?? numeric(raw.sampleRate)
+        ?? numeric(raw.sample_rate)
+        ?? numeric(raw.sampleRateHz)
+        ?? numeric(nested?.sampleRate)
+        ?? numeric(nested?.sample_rate)
+        ?? 24000;
 }
 
 function audioChannels(item: Artifact): number {
     const raw = item.raw ?? {};
-    return numeric(raw.channels) ?? 2;
+    const nested = record(raw.raw);
+    return numeric(item.channels)
+        ?? numeric(raw.channels)
+        ?? numeric(nested?.channels)
+        ?? 1;
 }
 
 function pcm16(bytes: Uint8Array, channels: number, sampleRate: number, context: AudioContext): AudioBuffer | null {
@@ -1760,10 +1777,10 @@ function DirectMedia({ message }: { message: Message }) {
     return (
         <div className="mb-2 space-y-2">
             {message.imageUrl && (
-                <SharedStreamMedia kind="image" url={message.imageUrl} alt="Generated" partial={message.partialImage} />
+                <StreamMedia kind="image" url={message.imageUrl} alt="Generated" partial={message.partialImage} />
             )}
-            {message.audioUrl && <SharedStreamMedia kind="audio" url={message.audioUrl} />}
-            {message.videoUrl && <SharedStreamMedia kind="video" url={message.videoUrl} />}
+            {message.audioUrl && <StreamMedia kind="audio" url={message.audioUrl} />}
+            {message.videoUrl && <StreamMedia kind="video" url={message.videoUrl} />}
         </div>
     );
 }
