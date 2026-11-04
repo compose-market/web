@@ -13,12 +13,10 @@ import type { Agent } from "@/lib/agents";
 import type { ConnectorTool, WorkflowStep } from "@/lib/services";
 import type {
   AgentNodeData,
-  HookNodeData,
   StepNodeData,
-  TriggerNodeData,
 } from "@/components/compose/nodes";
 
-export type WorkflowNode = RFNode<StepNodeData | AgentNodeData | TriggerNodeData | HookNodeData>;
+export type WorkflowNode = RFNode<StepNodeData | AgentNodeData>;
 
 interface UseWorkflowOptions {
   onWarpRequired?: (agent: Agent) => void;
