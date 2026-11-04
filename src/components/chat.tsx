@@ -1540,7 +1540,7 @@ function isVector(value: unknown): value is number[] {
 }
 
 function record(value: unknown): Record<string, unknown> | null {
-    return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+    return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
 
 function formatEmbedding(value: number[] | number[][]): string {
@@ -1564,7 +1564,7 @@ function ArtifactMeta({
     onOpen?: () => void;
 }) {
     return (
-        <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             {title && <span className="font-medium text-foreground">{title}</span>}
             <StreamMeta values={values} />
             {url && (
