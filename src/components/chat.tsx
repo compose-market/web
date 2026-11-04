@@ -92,7 +92,6 @@ import type {
 import { DocumentCard } from "@/components/document";
 import { PoweredByChainGpt, usedWeb3Chatbot } from "@/components/chaingpt";
 
-// Re-export for convenience
 export type { Message, AttachedFile };
 
 // =============================================================================
@@ -188,9 +187,6 @@ function ReasoningBlock({
         </FoldNode>
     );
 }
-const LazyMarkdownRenderer = lazy(() =>
-    import("@/lib/performance/markdown").then((module) => ({ default: module.MarkdownRenderer }))
-);
 
 function EmbeddingBlock({ content }: { content: string }) {
     const [copied, setCopied] = useState(false);
@@ -691,14 +687,6 @@ function InlinePlanGate({
         </div>
     );
 }
-
-// Inline Connector Gate — explicit Connect / Discard decision for a
-// credential-gated connector request. Chat text is never a decision;
-// only these buttons act on the request. Fully self-contained: fetches
-// the connector's credential requirements, takes the key paste, stores it
-// via the backpack, and submits the run-owner decision.
-
-const CONNECTORS_CATALOG_URL = (import.meta.env.VITE_CONNECTORS_URL || "https://connectors.compose.market").replace(/\/+$/, "");
 
 // =============================================================================
 // Inline Connector Gate (supports "account" | "mcp" | "connector")
@@ -1840,22 +1828,21 @@ class MessageBoundary extends React.Component<
     }
 }
 
-
 // =============================================================================
 // Chat Message Item
 // =============================================================================
 
 export interface MessageItemProps {
     message: Message;
-    messages: Message[];
     variant?: "agent" | "workflow" | "playground";
     showActions?: boolean;
     onCopy?: (content: string) => void;
     onRetry?: (content: string) => void;
     onDelete?: (id: string) => void;
     onPlanDecision?: (messageId: string, plan: Plan, decision: NonNullable<Plan["decision"]>, feedback?: string) => void;
+    onConnectorDecided?: (request: ConnectorRequest, decision: "connected" | "discarded") => void;
     onStopRealtime?: () => void;
-    onFocusMissionControl?: () => void;
+    onInspectFlow?: (nodeId?: string, messageId?: string) => void;
     assistantAvatar?: React.ReactNode;
 }
 
@@ -1884,15 +1871,15 @@ export { usedWeb3Chatbot };
 
 function MessageItemInner({
     message,
-    messages,
     variant = "agent",
     showActions = true,
     onCopy,
     onRetry,
     onDelete,
     onPlanDecision,
+    onConnectorDecided,
     onStopRealtime,
-    onFocusMissionControl,
+    onInspectFlow,
     assistantAvatar,
 }: MessageItemProps) {
     const styles = messageVariantStyles[variant];
@@ -1900,9 +1887,6 @@ function MessageItemInner({
     const hasDirectMedia = Boolean(message.imageUrl || message.audioUrl || message.videoUrl);
     const hasStreamMedia = Boolean(message.artifacts?.some((item) => artifactMediaKind(item.artifactType)));
     const hasBlocks = !isUser && Boolean(message.blocks?.length);
-    // Only treat assistant message as "loading" when generating non-text media.
-    // Text "thinking" status is owned exclusively by the activityState bar (see line ~608),
-    // so we don't render a second per-bubble spinner for plain text turns.
     const isLoadingMedia = !hasBlocks
         && !message.content
         && message.role === "assistant"
@@ -1915,6 +1899,34 @@ function MessageItemInner({
     const shouldRenderText = message.type === "embedding"
         || isLoadingMedia
         || (isUser ? hasText || !hasDirectMedia : hasText && !hasBlocks);
+
+    const copyPayload = useMemo(() => extractMessageText(message), [message]);
+    const suppressedMediaSignature = useMemo(() => {
+        const list = message.artifacts ?? [];
+        if (list.length === 0) return "";
+        return list.map((item) => item.url ? normalizeMediaUrl(item.url) : "").filter(Boolean).join("\n");
+    }, [message.artifacts]);
+    const suppressedMediaUrls = useMemo(() => {
+        if (!suppressedMediaSignature) return undefined;
+        return new Set(suppressedMediaSignature.split("\n"));
+    }, [suppressedMediaSignature]);
+    const hasPlanBlock = Boolean(message.proposal);
+    const hasDocBlock = Boolean(message.artifacts?.some(
+        (item) => item.artifactType === "document" || item.artifactType === "code" || item.artifactType === "delivery",
+    ));
+    const isStreamingMessage = Boolean(
+        !isUser && (
+            (message.activity && Object.values(message.activity.nodes).some((node) => node.status === "running"))
+            || message.artifacts?.some((item) => item.partial || item.hydrating)
+        ),
+    );
+    const turnReceipts = useMemo(
+        () => summarizeTurnReceipts(message.receipts, message.receipt),
+        [message.receipt, message.receipts],
+    );
+    const explorerTxUrl = turnReceipts?.primaryTxHash && turnReceipts.primaryNetwork
+        ? getExplorerTxUrl(turnReceipts.primaryNetwork as NetworkId, turnReceipts.primaryTxHash)
+        : null;
 
     const getAssistantIcon = () => {
         if (assistantAvatar) return assistantAvatar;
@@ -1931,25 +1943,19 @@ function MessageItemInner({
             if (!block.text) return null;
             return (
                 <div key={block.id}>
-                    <Suspense fallback={<p className="whitespace-pre-wrap text-sm">{block.text}</p>}>
-                        <LazyMarkdownRenderer content={block.text} />
-                    </Suspense>
+                    <MarkdownRenderer content={block.text} suppressedMediaUrls={suppressedMediaUrls} />
                 </div>
             );
         }
         if (block.type === "reasoning") {
             if (!block.text) return null;
             return (
-                <SharedStreamNode
+                <ReasoningBlock
                     key={block.id}
-                    title="Thinking"
-                    defaultOpen={false}
-                    className="cm-chat-thinking"
-                >
-                    <pre className="whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
-                        {block.text}
-                    </pre>
-                </SharedStreamNode>
+                    text={block.text}
+                    startedAt={block.startedAt}
+                    finishedAt={block.finishedAt}
+                />
             );
         }
         if (block.type === "plan") {
@@ -1960,111 +1966,208 @@ function MessageItemInner({
                     messageId={message.id}
                     plan={message.proposal}
                     onPlanDecision={onPlanDecision}
+                    onInspectFlow={onInspectFlow}
                 />
             );
         }
         if (block.type === "activity") {
-            return <InlineActivityChip key={block.id} activity={message.activity} onFocusMissionControl={onFocusMissionControl} />;
+            return (
+                <InlineActivityChip
+                    key={block.id}
+                    activity={message.activity}
+                    onInspectFlow={onInspectFlow}
+                />
+            );
         }
         if (block.type === "asset") {
             const artifact = message.artifacts?.find((item) => item.id === block.artifactId);
             return artifact ? <ArtifactBlock key={block.id} artifacts={[artifact]} onStopRealtime={onStopRealtime} /> : null;
         }
+        const safeNoticeUrl = block.url && /^https?:\/\//i.test(block.url) ? block.url : undefined;
+        const noticeTone = block.tone === "error" ? "error" : block.tone === "warning" ? "warning" : "info";
+        const noticeTitle = noticeTone === "error" ? "Error" : noticeTone === "warning" ? "Warning" : "Notice";
         return (
-            <SharedStreamNotice
+            <NoticeBox
                 key={block.id}
-                tone={block.tone === "error" ? "error" : undefined}
-                title={block.tone === "error" ? "Error" : "Notice"}
+                tone={noticeTone}
+                title={noticeTitle}
             >
-                {block.text}
-            </SharedStreamNotice>
+                {safeNoticeUrl ? (
+                    <a
+                        href={safeNoticeUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 underline hover:opacity-80"
+                    >
+                        <span>{block.text}</span>
+                        <ExternalLink className="h-3 w-3 shrink-0" />
+                    </a>
+                ) : (
+                    block.text
+                )}
+            </NoticeBox>
         );
     };
 
+    const hasFooter = !isUser && Boolean(turnReceipts || showChainGptAttribution);
+    const hasActionButtons = showActions && Boolean((onCopy && copyPayload) || (isUser && onRetry) || onDelete);
+
+    const actionButtons = hasActionButtons ? (
+        <>
+            {onCopy && copyPayload && (
+                <button
+                    type="button"
+                    onClick={() => onCopy(copyPayload)}
+                    className="cm-msg-action"
+                    title="Copy message"
+                    aria-label="Copy message"
+                >
+                    <Copy className="h-3.5 w-3.5" />
+                </button>
+            )}
+            {isUser && onRetry && (
+                <button
+                    type="button"
+                    onClick={() => onRetry(message.content)}
+                    className="cm-msg-action"
+                    title="Retry this message"
+                    aria-label="Retry this message"
+                >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                </button>
+            )}
+            {onDelete && (
+                <button
+                    type="button"
+                    onClick={() => onDelete(message.id)}
+                    className="cm-msg-action cm-msg-action--danger"
+                    title="Delete message"
+                    aria-label="Delete message"
+                >
+                    <Trash2 className="h-3.5 w-3.5" />
+                </button>
+            )}
+        </>
+    ) : null;
+
     return (
-        <div className={cn("cm-chat-message", isUser && "cm-chat-message--user")}>
+        <div
+            className={cn("cm-chat-message", isUser && "cm-chat-message--user")}
+            data-has-plan={hasPlanBlock ? "true" : undefined}
+            data-has-doc={hasDocBlock ? "true" : undefined}
+            data-streaming={isStreamingMessage ? "true" : undefined}
+        >
             {!isUser && (
                 <Avatar className="cm-chat-message__avatar">
-                    <AvatarFallback className={cn("cm-chat-message__avatar-assistant", styles.assistantAvatar)}>{getAssistantIcon()}</AvatarFallback>
+                    <AvatarFallback className={cn("cm-chat-message__avatar-assistant", styles.assistantAvatar)}>
+                        {getAssistantIcon()}
+                    </AvatarFallback>
                 </Avatar>
             )}
 
-            <div className={cn("cm-chat-message__bubble group", isUser ? styles.user : styles.assistant, isUser && "cm-chat-message__bubble--user")}>
-                {showActions && (
-                    <div className="cm-chat-message__actions">
-                        {onCopy && (
-                            <button
-                                onClick={() => onCopy(message.content)}
-                                className="cm-chat__icon-action rounded-full p-1 transition-colors"
-                                title="Copy message"
-                            >
-                                <Copy className="w-3.5 h-3.5" />
-                            </button>
-                        )}
-                        {isUser && onRetry && (
-                            <button
-                                onClick={() => onRetry(message.content)}
-                                className="cm-chat__icon-action rounded-full p-1 transition-colors"
-                                title="Retry this message"
-                            >
-                                <RefreshCw className="w-3.5 h-3.5" />
-                            </button>
-                        )}
-                        {onDelete && (
-                            <button
-                                onClick={() => onDelete(message.id)}
-                                className="cm-chat__icon-action rounded-full p-1 transition-colors hover:text-red-400"
-                                title="Delete message"
-                            >
-                                <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                        )}
+            <div className="cm-chat-message__col">
+                <div className={cn("cm-chat-message__bubble group", isUser ? styles.user : styles.assistant, isUser && "cm-chat-message__bubble--user")}>
+                    {!hasBlocks && message.proposal && (
+                        <InlinePlanGate
+                            messageId={message.id}
+                            plan={message.proposal}
+                            onPlanDecision={onPlanDecision}
+                            onInspectFlow={onInspectFlow}
+                        />
+                    )}
+
+                    {hasBlocks && message.blocks?.map(renderBlock)}
+
+                    {message.connectorRequests?.map((request) => (
+                        <InlineConnectorGate
+                            key={request.requestId}
+                            request={request}
+                            onDecided={onConnectorDecided}
+                        />
+                    ))}
+
+                    {!hasBlocks && shouldRenderText && message.type === "embedding" ? (
+                        <EmbeddingBlock content={message.content || "..."} />
+                    ) : isLoadingMedia ? (
+                        <PendingMedia
+                            type={message.type as "image" | "audio" | "video"}
+                            status={message.content || undefined}
+                        />
+                    ) : !shouldRenderText ? null : isUser ? (
+                        <p className="whitespace-pre-wrap text-sm">{message.content}</p>
+                    ) : (
+                        <MarkdownRenderer content={message.content} suppressedMediaUrls={suppressedMediaUrls} />
+                    )}
+
+                    {hasDirectMedia && <DirectMedia message={message} />}
+
+                    {!hasBlocks && !!message.artifacts?.length && (
+                        <ArtifactBlock artifacts={message.artifacts} onStopRealtime={onStopRealtime} />
+                    )}
+
+                    {hasFooter && (
+                        <div className="cm-chat-message__footer">
+                            {turnReceipts ? (
+                                <div className="cm-receipt-footer-group">
+                                    <button
+                                        type="button"
+                                        className="cm-receipt-pill"
+                                        data-status={turnReceipts.status}
+                                        onClick={() => onInspectFlow?.("receipt", message.id)}
+                                        title="View settled x402 transactions for this turn"
+                                    >
+                                        {turnReceipts.status === "queued" || turnReceipts.status === "submitted" ? (
+                                            <Loader2 className="cm-stream-fold__icon cm-pulse__spin" />
+                                        ) : (
+                                            <Coins className="cm-stream-fold__icon" />
+                                        )}
+                                        <span>{formatWeiUsd(turnReceipts.totalAmountWei)}</span>
+                                        <span className="cm-receipt-pill__status">
+                                            {turnReceipts.status === "settled"
+                                                ? (turnReceipts.totalCount > 1 ? `${turnReceipts.totalCount} txs` : "Settled")
+                                                : turnReceipts.status === "failed"
+                                                    ? "Failed"
+                                                    : "Settling…"}
+                                        </span>
+                                    </button>
+                                    {turnReceipts.primaryTxHash && explorerTxUrl ? (
+                                        <a
+                                            href={explorerTxUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="cm-receipt-tx"
+                                            title={turnReceipts.primaryTxHash}
+                                        >
+                                            <span>{shortTx(turnReceipts.primaryTxHash)}</span>
+                                            <ExternalLink className="h-3 w-3" />
+                                        </a>
+                                    ) : null}
+                                </div>
+                            ) : <span />}
+                            <div className="cm-chat-message__footer-end">
+                                {showChainGptAttribution ? <PoweredByChainGpt /> : null}
+                                {actionButtons ? (
+                                    <div className="cm-chat-message__actions cm-chat-message__actions--inline">
+                                        {actionButtons}
+                                    </div>
+                                ) : null}
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {!hasFooter && actionButtons ? (
+                    <div className="cm-chat-message__actions cm-chat-message__actions--below">
+                        {actionButtons}
                     </div>
-                )}
-
-                {!hasBlocks && message.proposal && (
-                    <InlinePlanGate
-                        messageId={message.id}
-                        plan={message.proposal}
-                        onPlanDecision={onPlanDecision}
-                    />
-                )}
-
-                {hasBlocks && message.blocks?.map(renderBlock)}
-
-                {message.connectorRequests?.map((request) => (
-                    <InlineConnectorGate key={request.requestId} request={request} />
-                ))}
-
-                {!hasBlocks && shouldRenderText && message.type === "embedding" ? (
-                    <EmbeddingBlock content={message.content || "..."} />
-                ) : isLoadingMedia ? (
-                    <PendingMedia
-                        type={message.type as "image" | "audio" | "video"}
-                        status={message.content || undefined}
-                    />
-                ) : !shouldRenderText ? null : isUser ? (
-                    <p className="whitespace-pre-wrap text-sm">{message.content}</p>
-                ) : (
-                    <Suspense fallback={<p className="whitespace-pre-wrap text-sm">{message.content}</p>}>
-                        <LazyMarkdownRenderer content={message.content} />
-                    </Suspense>
-                )}
-
-                {hasDirectMedia && <DirectMedia message={message} />}
-
-                {!hasBlocks && !!message.artifacts?.length && <ArtifactBlock artifacts={message.artifacts} onStopRealtime={onStopRealtime} />}
-
-                {showChainGptAttribution && (
-                    <div className="mt-2 pt-1.5 border-t border-border/30 flex items-center justify-end">
-                        <PoweredByChainGpt />
-                    </div>
-                )}
+                ) : null}
             </div>
 
             {isUser && (
                 <Avatar className="cm-chat-message__avatar">
-                    <AvatarFallback className={cn("cm-chat-message__avatar-user", styles.userAvatar)}><User className="w-4 h-4" /></AvatarFallback>
+                    <AvatarFallback className={cn("cm-chat-message__avatar-user", styles.userAvatar)}>
+                        <User className="w-4 h-4" />
+                    </AvatarFallback>
                 </Avatar>
             )}
         </div>
@@ -2076,6 +2179,53 @@ export const MessageItem = memo(function MessageItem(props: MessageItemProps) {
         <MessageBoundary>
             <MessageItemInner {...props} />
         </MessageBoundary>
+    );
+});
+
+const MessageList = memo(function MessageList({
+    messages,
+    variant,
+    showActions,
+    onCopy,
+    onRetry,
+    onDelete,
+    onPlanDecision,
+    onConnectorDecided,
+    onStopRealtime,
+    onInspectFlow,
+    messagesEndRef,
+}: {
+    messages: Message[];
+    variant: "agent" | "workflow" | "playground";
+    showActions: boolean;
+    onCopy?: (content: string) => void;
+    onRetry?: (content: string) => void;
+    onDelete?: (id: string) => void;
+    onPlanDecision?: MessageItemProps["onPlanDecision"];
+    onConnectorDecided?: MessageItemProps["onConnectorDecided"];
+    onStopRealtime?: () => void;
+    onInspectFlow?: (nodeId?: string, messageId?: string) => void;
+    messagesEndRef?: React.RefObject<HTMLDivElement | null>;
+}) {
+    return (
+        <div className="cm-chat__messages">
+            {messages.map((msg) => (
+                <MessageItem
+                    key={msg.id}
+                    message={msg}
+                    variant={variant}
+                    showActions={showActions}
+                    onCopy={onCopy}
+                    onRetry={onRetry}
+                    onDelete={onDelete}
+                    onPlanDecision={onPlanDecision}
+                    onConnectorDecided={onConnectorDecided}
+                    onStopRealtime={onStopRealtime}
+                    onInspectFlow={onInspectFlow}
+                />
+            ))}
+            <div ref={messagesEndRef} />
+        </div>
     );
 });
 
@@ -2096,10 +2246,15 @@ export interface MultimodalCanvasProps {
     emptyStateText?: string;
     emptyStateSubtext?: string;
     emptyStateIcon?: React.ReactNode;
+    emptyStage?: React.ReactNode;
     showHeader?: boolean;
     placeholder?: string;
     status?: "idle" | "paying" | "waiting" | "streaming";
     activityState?: ChatActivityState;
+    activePlan?: Plan;
+    stepCount?: number;
+    latestReceipt?: Receipt;
+    latestReceipts?: Receipt[];
     error?: string | null;
     sessionActive?: boolean;
     onStartSession?: () => void;
@@ -2120,9 +2275,11 @@ export interface MultimodalCanvasProps {
     onRetryMessage?: (content: string) => void;
     onDeleteMessage?: (id: string) => void;
     onPlanDecision?: (messageId: string, plan: Plan, decision: NonNullable<Plan["decision"]>, feedback?: string) => void;
+    onConnectorDecided?: (request: ConnectorRequest, decision: "connected" | "discarded") => void;
     onClearChat?: () => void;
     onKnowledgeUpload?: () => void;
-    onFocusMissionControl?: () => void;
+    onStop?: () => void;
+    onInspectFlow?: (nodeId?: string, messageId?: string) => void;
     scrollContainerRef?: React.RefObject<HTMLDivElement | null>;
     messagesEndRef?: React.RefObject<HTMLDivElement | null>;
     height?: string;
@@ -2135,7 +2292,6 @@ const canvasVariantConfig = {
         headerText: "text-cyan-400",
         headerIcon: <Bot className="w-4 h-4 text-cyan-400" />,
         sendButton: "bg-cyan-500 hover:bg-cyan-600 text-black",
-        accentColor: "cyan",
     },
     workflow: {
         border: "border-fuchsia-500/30",
@@ -2143,7 +2299,6 @@ const canvasVariantConfig = {
         headerText: "text-fuchsia-400",
         headerIcon: <Layers className="w-4 h-4 text-fuchsia-400" />,
         sendButton: "bg-fuchsia-500 hover:bg-fuchsia-600 text-white",
-        accentColor: "fuchsia",
     },
     playground: {
         border: "border-cyan-500/20",
@@ -2151,11 +2306,10 @@ const canvasVariantConfig = {
         headerText: "text-cyan-400",
         headerIcon: <Bot className="w-4 h-4 text-cyan-400" />,
         sendButton: "bg-cyan-500 hover:bg-cyan-600 text-black",
-        accentColor: "cyan",
     },
 };
 
-export function MultimodalCanvas({
+export const MultimodalCanvas = memo(function MultimodalCanvas({
     messages,
     inputValue,
     onInputChange,
@@ -2168,10 +2322,15 @@ export function MultimodalCanvas({
     emptyStateText = "Start a conversation",
     emptyStateSubtext,
     emptyStateIcon,
+    emptyStage,
     showHeader = true,
     placeholder,
     status = "idle",
     activityState,
+    activePlan,
+    stepCount = 0,
+    latestReceipt,
+    latestReceipts,
     error,
     attachedFiles = [],
     imageRequired = false,
@@ -2189,23 +2348,24 @@ export function MultimodalCanvas({
     onRetryMessage,
     onDeleteMessage,
     onPlanDecision,
+    onConnectorDecided,
     onClearChat,
     onKnowledgeUpload,
-    onFocusMissionControl,
+    onStop,
+    onInspectFlow,
     scrollContainerRef,
     messagesEndRef,
     height = "",
 }: MultimodalCanvasProps) {
     const config = canvasVariantConfig[variant];
-    const activeTools = activityState?.tools.filter((t) => t.status === "running") || [];
-    const shouldShowActivity = status !== "idle" || Boolean(activityState && activityState.phase !== "idle");
     const nearBottomRef = useRef(true);
+    const showJumpRef = useRef(false);
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const [showJump, setShowJump] = useState(false);
     const [selectedSlashCommands, setSelectedSlashCommands] = useState<string[]>([]);
     const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
     const slashMatches = useMemo(
-        () => variant === "workflow" ? [] : slashCommandMatches(inputValue),
+        () => (variant === "workflow" ? [] : slashCommandMatches(inputValue)),
         [inputValue, variant],
     );
 
@@ -2213,14 +2373,34 @@ export function MultimodalCanvas({
         setSlashSelectedIndex(0);
     }, [inputValue]);
 
+    const pendingConnector = useMemo<ConnectorRequest | undefined>(() => {
+        for (let i = messages.length - 1; i >= 0; i -= 1) {
+            const list = messages[i]?.connectorRequests;
+            if (!list?.length) continue;
+            for (let j = list.length - 1; j >= 0; j -= 1) {
+                const req = list[j];
+                if (req && (req.state === "requested" || req.state === "escalated")) {
+                    return req;
+                }
+            }
+        }
+        return undefined;
+    }, [messages]);
+
+    const handlePulseConnect = useCallback((request: ConnectorRequest) => {
+        const el = scrollContainerRef?.current?.querySelector(`[data-connector-request-id="${CSS.escape(request.requestId)}"]`);
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+        window.dispatchEvent(new CustomEvent("cm:open-connector-gate", { detail: request.requestId }));
+    }, [scrollContainerRef]);
+
     const hasReadyImage = attachedFiles.some((file) => file.type === "image" && !file.uploading && Boolean(file.url));
     const imageRequirementMissing = imageRequired && !hasReadyImage;
     const imageRequirementId = React.useId();
     const canSend = (!sending || continuous)
-        && (inputValue.trim() || attachedFiles.length > 0)
+        && (Boolean(inputValue.trim()) || attachedFiles.length > 0)
         && !submitDisabled
         && !imageRequirementMissing;
-    const isUploading = attachedFiles.some(f => f.uploading);
+    const isUploading = attachedFiles.some((f) => f.uploading);
 
     const focusTextarea = useCallback(() => {
         requestAnimationFrame(() => textareaRef.current?.focus());
@@ -2288,42 +2468,68 @@ export function MultimodalCanvas({
     }, [scrollContainerRef]);
 
     const scrollToBottom = useCallback(() => {
-        messagesEndRef?.current?.scrollIntoView({ behavior: "smooth" });
+        const el = scrollContainerRef?.current;
+        if (el) {
+            el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+        } else {
+            messagesEndRef?.current?.scrollIntoView({ behavior: "smooth" });
+        }
         nearBottomRef.current = true;
-        setShowJump(false);
-    }, [messagesEndRef]);
+        if (showJumpRef.current) {
+            showJumpRef.current = false;
+            setShowJump(false);
+        }
+    }, [messagesEndRef, scrollContainerRef]);
 
     useEffect(() => {
         const el = scrollContainerRef?.current;
         if (!el) return;
-        const update = () => {
+        let rafId: number | null = null;
+        const measure = () => {
+            rafId = null;
             const near = isNearBottom();
             nearBottomRef.current = near;
-            if (near) setShowJump(false);
+            if (near && showJumpRef.current) {
+                showJumpRef.current = false;
+                setShowJump(false);
+            }
         };
-        update();
-        el.addEventListener("scroll", update, { passive: true });
-        return () => el.removeEventListener("scroll", update);
+        const onScroll = () => {
+            if (rafId !== null) return;
+            rafId = requestAnimationFrame(measure);
+        };
+        measure();
+        el.addEventListener("scroll", onScroll, { passive: true });
+        return () => {
+            el.removeEventListener("scroll", onScroll);
+            if (rafId !== null) cancelAnimationFrame(rafId);
+        };
     }, [isNearBottom, scrollContainerRef]);
 
     useEffect(() => {
         if (nearBottomRef.current) {
-            setShowJump(false);
+            if (showJumpRef.current) {
+                showJumpRef.current = false;
+                setShowJump(false);
+            }
             return;
         }
-        if (messages.length > 0) {
+        if (messages.length > 0 && !showJumpRef.current) {
+            showJumpRef.current = true;
             setShowJump(true);
         }
     }, [messages]);
 
     return (
-        <div className={cn(
-            "cm-chat",
-            config.border,
-            variant === "workflow" && "shadow-[0_0_30px_-5px_hsl(292_85%_55%/0.1)]",
-            !showHeader && "cm-chat--bare",
-            height
-        )}>
+        <div
+            className={cn(
+                "cm-chat",
+                config.border,
+                variant === "workflow" && "shadow-xl shadow-fuchsia-500/10",
+                !showHeader && "cm-chat--bare",
+                height,
+            )}
+        >
             {showHeader && (
                 <div className={cn("cm-chat__header", config.headerBg)}>
                     <div className="flex items-center gap-2">
@@ -2335,35 +2541,33 @@ export function MultimodalCanvas({
 
             <div ref={scrollContainerRef} className="cm-chat__body">
                 {messages.length === 0 ? (
-                    <div className="cm-chat__empty text-sm">
-                        {emptyStateIcon || (variant === "workflow" ? (
-                            <Play className={cn("w-12 h-12 mx-auto mb-4 opacity-50", config.headerText)} />
+                    <div className={cn("cm-chat__empty", emptyStage && "cm-chat__empty--stage")}>
+                        {emptyStage ? (
+                            <div className="cm-chat__empty-stage">{emptyStage}</div>
                         ) : (
-                            <Bot className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                        ))}
-                        <p>{emptyStateText}</p>
-                        {emptyStateSubtext && <p className="text-xs mt-1 text-muted-foreground/70">{emptyStateSubtext}</p>}
+                            emptyStateIcon || (variant === "workflow" ? (
+                                <Play className={cn("w-10 h-10 mx-auto mb-3 opacity-50", config.headerText)} />
+                            ) : (
+                                <Bot className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                            ))
+                        )}
+                        <p className="cm-chat__empty-title">{emptyStateText}</p>
+                        {emptyStateSubtext && <p className="cm-chat__empty-sub">{emptyStateSubtext}</p>}
                     </div>
                 ) : (
-                    <div className="cm-chat__messages">
-                        {messages.map((msg) => (
-                            <React.Fragment key={msg.id}>
-                                <MessageItem
-                                    message={msg}
-                                    messages={messages}
-                                    variant={variant}
-                                    showActions={showMessageActions}
-                                    onCopy={onCopyMessage}
-                                    onRetry={onRetryMessage}
-                                    onDelete={onDeleteMessage}
-                                    onPlanDecision={onPlanDecision}
-                                    onStopRealtime={onStopRecording}
-                                    onFocusMissionControl={onFocusMissionControl}
-                                />
-                            </React.Fragment>
-                        ))}
-                        <div ref={messagesEndRef} />
-                    </div>
+                    <MessageList
+                        messages={messages}
+                        variant={variant}
+                        showActions={showMessageActions}
+                        onCopy={onCopyMessage}
+                        onRetry={onRetryMessage}
+                        onDelete={onDeleteMessage}
+                        onPlanDecision={onPlanDecision}
+                        onConnectorDecided={onConnectorDecided}
+                        onStopRealtime={onStopRecording}
+                        onInspectFlow={onInspectFlow}
+                        messagesEndRef={messagesEndRef}
+                    />
                 )}
                 {showJump ? (
                     <button type="button" className="cm-chat__jump" onClick={scrollToBottom}>
@@ -2373,49 +2577,43 @@ export function MultimodalCanvas({
                 ) : null}
             </div>
 
-            {shouldShowActivity && (
-                <div className="cm-chat__activity">
-                    <Loader2 className={cn("w-3 h-3", (status === "paying" || status === "waiting" || status === "streaming" || activityState?.phase === "thinking" || activityState?.phase === "tool" || activityState?.phase === "streaming") && "animate-spin", config.headerText)} />
-                    <span className="text-muted-foreground">
-                        {status === "paying" && <><span className="text-yellow-400">Paying...</span> Processing x402 payment</>}
-                        {status === "waiting" && <><span className="text-orange-400">Waiting...</span> Awaiting response</>}
-                        {status === "streaming" && activityState?.label ? <><span className={config.headerText}>Live...</span> {activityState.label}</> : null}
-                        {status === "streaming" && !activityState?.label && <><span className={config.headerText}>Streaming...</span> Receiving response</>}
-                        {status === "idle" && activityState?.phase === "streaming" && <><span className={config.headerText}>Live...</span> {activityState.label || "Receiving response"}</>}
-                        {status === "idle" && activityState?.phase === "thinking" && <><span className={config.headerText}>Thinking...</span> {activityState.label || "Planning next step"}</>}
-                        {status === "idle" && activityState?.phase === "tool" && <><span className={config.headerText}>Tool...</span> {activityState.label || "Using tools"}</>}
-                        {status === "idle" && activityState?.phase === "error" && <><span className="text-red-400">Error...</span> {activityState.label || "Execution failed"}</>}
-                    </span>
-                    {activeTools.length > 0 && (
-                        <div className="ml-auto flex flex-wrap items-center gap-1">
-                            {activeTools.map((tool) => (
-                                <span
-                                    key={tool.id}
-                                    className={cn(
-                                        "cm-chat__tool-chip",
-                                        tool.status === "running" && "cm-chat__tool-chip--running",
-                                        tool.status === "completed" && "cm-chat__tool-chip--completed",
-                                        tool.status === "error" && "cm-chat__tool-chip--error",
-                                    )}
-                                    title={tool.summary || tool.displayName || tool.toolName}
-                                >
-                                    {tool.displayName || tool.toolName}
-                                </span>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            )}
+            {/* Surface 2 — Above-Composer Real-Time Action Rail (0px height when idle) */}
+            <Pulse
+                status={status}
+                sending={sending}
+                activityState={activityState}
+                activePlan={activePlan}
+                pendingConnector={pendingConnector}
+                stepCount={stepCount}
+                receipt={latestReceipt}
+                receipts={latestReceipts}
+                onStop={onStop}
+                onConnect={handlePulseConnect}
+                onInspect={onInspectFlow}
+            />
 
             <div className="cm-chat__composer">
-                {error && <div className="text-xs text-red-400 mb-2 p-2 bg-red-500/10 rounded">{error}</div>}
+                {variant !== "workflow" && (
+                    <SlashCommandPopover
+                        input={inputValue}
+                        selectedIndex={slashSelectedIndex}
+                        onSelect={selectSlashCommand}
+                        onHighlight={setSlashSelectedIndex}
+                    />
+                )}
+                {error && (
+                    <div className="cm-chat__error" role="alert">
+                        <CircleAlert className="cm-stream-notice__icon" aria-hidden="true" />
+                        <span>{error}</span>
+                    </div>
+                )}
 
                 {imageRequirementMissing && onFileSelect && (
                     <div
                         id={imageRequirementId}
                         role="alert"
                         aria-live="polite"
-                        className="mb-3 flex flex-col gap-3 rounded-md border-2 border-amber-400/70 bg-amber-400/15 p-3 shadow-[0_0_24px_hsl(45_100%_55%/0.12)] sm:flex-row sm:items-center"
+                        className="mb-3 flex flex-col gap-3 rounded-md border-2 border-amber-400/70 bg-amber-400/15 p-3 shadow-lg shadow-amber-400/15 sm:flex-row sm:items-center"
                     >
                         <CircleAlert className="h-6 w-6 shrink-0 text-amber-300" aria-hidden="true" />
                         <div className="min-w-0 flex-1">
@@ -2462,10 +2660,12 @@ export function MultimodalCanvas({
                                 </div>
                                 {onRemoveFile && (
                                     <button
+                                        type="button"
                                         onClick={() => onRemoveFile(file.file)}
-                                        className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full border border-primary/20 bg-background/90 text-muted-foreground hover:text-foreground"
+                                        aria-label={`Remove ${file.file.name}`}
+                                        className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-primary/20 bg-background/90 text-muted-foreground hover:text-foreground"
                                     >
-                                        <X className="h-2.5 w-2.5" />
+                                        <X className="h-3 w-3" />
                                     </button>
                                 )}
                             </div>
@@ -2480,7 +2680,7 @@ export function MultimodalCanvas({
 
                 <div className="cm-chat__composer-row">
                     {onClearChat && (
-                        <Button variant="ghost" size="icon" onClick={onClearChat} disabled={sending && !continuous} className="cm-chat__icon-action shrink-0" title="Clear chat">
+                        <Button variant="ghost" size="icon" onClick={onClearChat} disabled={sending && !continuous} className="cm-chat__icon-action shrink-0" title="Clear chat" aria-label="Clear chat">
                             <Trash2 className="w-4 h-4" />
                         </Button>
                     )}
@@ -2507,6 +2707,7 @@ export function MultimodalCanvas({
                             disabled={(sending && !continuous) || !recordingSupported}
                             className={cn("cm-chat__icon-action shrink-0 cursor-pointer transition-colors", isRecording && "text-red-500 hover:text-red-400 animate-pulse")}
                             title={isRecording ? "Stop microphone" : "Start microphone"}
+                            aria-label={isRecording ? "Stop microphone" : "Start microphone"}
                         >
                             {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                         </Button>
@@ -2516,7 +2717,7 @@ export function MultimodalCanvas({
                         <TooltipProvider>
                             <Tooltip>
                                 <TooltipTrigger asChild>
-                                    <Button variant="ghost" size="icon" onClick={onKnowledgeUpload} disabled={sending} className="cm-chat__icon-action shrink-0 cursor-pointer">
+                                    <Button variant="ghost" size="icon" onClick={onKnowledgeUpload} disabled={sending} className="cm-chat__icon-action shrink-0 cursor-pointer" aria-label="Upload knowledge">
                                         <BookOpen className="w-4 h-4" />
                                     </Button>
                                 </TooltipTrigger>
@@ -2525,18 +2726,10 @@ export function MultimodalCanvas({
                         </TooltipProvider>
                     )}
 
-                    <div className="relative flex-1">
-                        {variant !== "workflow" && (
-                            <SlashCommandPopover
-                                input={inputValue}
-                                selectedIndex={slashSelectedIndex}
-                                onSelect={selectSlashCommand}
-                                onHighlight={setSlashSelectedIndex}
-                            />
-                        )}
+                    <div className="relative flex-1 min-w-0">
                         <Textarea
                             ref={textareaRef}
-                            placeholder={placeholder || (variant === "workflow" ? "Enter workflow parameters or instruction..." : "Type your message or use / for commands...")}
+                            placeholder={placeholder || (variant === "workflow" ? "Enter workflow parameters or instruction..." : "Message or / for commands...")}
                             value={inputValue}
                             onChange={(e) => onInputChange(e.target.value)}
                             onKeyDown={handleKeyDown}
@@ -2548,21 +2741,41 @@ export function MultimodalCanvas({
                         />
                     </div>
 
-                    <Button
-                        onClick={() => void handleSend()}
-                        disabled={!canSend || isUploading}
-                        className={cn("cm-chat__send", config.sendButton)}
-                        aria-describedby={imageRequirementMissing ? imageRequirementId : undefined}
-                        title={imageRequirementMissing ? "Upload an image to continue" : undefined}
-                    >
-                        {sending && !continuous ? <Loader2 className="w-4 h-4 animate-spin" /> : variant === "workflow" ? <Play className="w-4 h-4" /> : <Send className="w-4 h-4" />}
-                    </Button>
+                    {sending && !continuous && onStop ? (
+                        <Button
+                            type="button"
+                            onClick={onStop}
+                            className={cn("cm-chat__send", config.sendButton)}
+                            title="Stop"
+                            aria-label="Stop"
+                        >
+                            <Square className="w-4 h-4" />
+                        </Button>
+                    ) : (
+                        <Button
+                            type="button"
+                            onClick={() => void handleSend()}
+                            disabled={!canSend || isUploading}
+                            className={cn("cm-chat__send", config.sendButton)}
+                            aria-describedby={imageRequirementMissing ? imageRequirementId : undefined}
+                            title={imageRequirementMissing ? "Upload an image to continue" : "Send"}
+                            aria-label="Send message"
+                        >
+                            {sending && !continuous ? <Loader2 className="w-4 h-4 animate-spin" /> : variant === "workflow" ? <Play className="w-4 h-4" /> : <Send className="w-4 h-4" />}
+                        </Button>
+                    )}
                 </div>
 
                 {fileInputRef && onFileInputChange && (
-                    <input type="file" ref={fileInputRef} onChange={onFileInputChange} accept={imageRequired ? "image/*" : "image/*,audio/*,video/*,application/pdf,.pdf,.txt,.md,.json,.csv,.html,.xml,text/*,application/json,.sol"} className="hidden" />
+                    <input
+                        type="file"
+                        ref={fileInputRef}
+                        onChange={onFileInputChange}
+                        accept={imageRequired ? "image/*" : "image/*,audio/*,video/*,application/pdf,.pdf,.txt,.md,.json,.csv,.html,.xml,text/*,application/json,.sol"}
+                        className="hidden"
+                    />
                 )}
             </div>
         </div>
     );
-}
+});
