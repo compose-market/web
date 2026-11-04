@@ -170,3 +170,247 @@ function overallStatus(nodes: ActivityNode[], plan?: Plan): "idle" | "running" |
   if (nodes.length > 0 || plan?.state === "completed") return "completed";
   return "idle";
 }
+
+const ExpandableBlock = memo(function ExpandableBlock({
+  label,
+  content,
+  markdown = false,
+  defaultExpanded = false,
+}: {
+  label: string;
+  content: string;
+  markdown?: boolean;
+  defaultExpanded?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  const clean = content.trim();
+  if (!clean) return null;
+  const isLong = clean.length > 220 || clean.includes("\n");
+
+  return (
+    <div className="cm-trace-field">
+      <div className="cm-trace-field__head">
+        <span className="cm-trace-field__label">{label}</span>
+        {isLong && (
+          <button
+            type="button"
+            className="cm-trace-field__toggle"
+            onClick={() => setExpanded((e) => !e)}
+          >
+            {expanded ? "Collapse" : "Read full"}
+          </button>
+        )}
+      </div>
+      <div className={cn("cm-trace-field__body", !expanded && isLong && "cm-trace-field__body--preview")}>
+        {markdown && expanded ? (
+          <MarkdownRenderer content={clean} />
+        ) : (
+          <p className="cm-trace-field__text">{clean}</p>
+        )}
+      </div>
+    </div>
+  );
+});
+
+const EMPTY_VISITED = new Set<string>();
+
+const TraceNodeCard = memo(function TraceNodeCard({
+  node,
+  childrenMap,
+  focusedNodeId,
+  depth = 0,
+  visited = EMPTY_VISITED,
+}: {
+  node: ActivityNode;
+  childrenMap: Map<string, ActivityNode[]>;
+  focusedNodeId?: string | null;
+  depth?: number;
+  visited?: Set<string>;
+}) {
+  const isFocused = focusedNodeId === node.id;
+  const [open, setOpen] = useState<boolean>(isFocused || node.status === "running" || node.status === "failed" || depth === 0);
+
+  useEffect(() => {
+    if (isFocused) setOpen(true);
+  }, [isFocused]);
+
+  const payload = rec(node.payload);
+  const inputText = useMemo(
+    () => (payload?.input !== undefined ? readableValue(payload.input) : ""),
+    [payload?.input],
+  );
+  const outputText = useMemo(
+    () => (payload?.output !== undefined
+      ? readableValue(payload.output)
+      : payload?.result !== undefined
+        ? readableValue(payload.result)
+        : ""),
+    [payload?.output, payload?.result],
+  );
+
+  if (visited.has(node.id)) return null;
+  const nextVisited = new Set(visited);
+  nextVisited.add(node.id);
+
+  const kids = (childrenMap.get(node.id) ?? []).filter((child) => isDisplayableNode(child) && !nextVisited.has(child.id));
+  const notesText = str(payload?.notes) ?? str(payload?.reasoning);
+  const errorText = str(payload?.error) ?? (node.status === "failed" ? str(payload?.message) : undefined);
+  const summaryText = node.target?.summary ?? str(payload?.message);
+  const modelName = str(payload?.model) ?? str(rec(node.target?.details)?.model);
+  const wallMs = formatMs(num(payload?.wallMs));
+  const toolBatches = num(payload?.toolBatches);
+  const candidates = Array.isArray(rec(node.target?.details)?.candidates)
+    ? (rec(node.target?.details)?.candidates as unknown[])
+    : [];
+  const memoryRec = rec(payload?.memory);
+  const hasBody = Boolean(
+    node.text
+    || summaryText
+    || inputText
+    || outputText
+    || notesText
+    || errorText
+    || candidates.length > 0
+    || memoryRec
+    || kids.length > 0,
+  );
+
+  return (
+    <article
+      className={cn("cm-trace-node", isFocused && "cm-trace-node--focused")}
+      data-kind={node.kind}
+      data-status={node.status}
+      style={{ "--cm-trace-depth": Math.min(depth, 4) } as React.CSSProperties}
+    >
+      <button
+        type="button"
+        className="cm-trace-node__head"
+        onClick={() => hasBody && setOpen((o) => !o)}
+        aria-expanded={hasBody ? open : undefined}
+      >
+        <span className="cm-trace-node__chev" aria-hidden="true">
+          {hasBody ? (open ? <ChevronDown className="cm-trace__icon-xs" /> : <ChevronRight className="cm-trace__icon-xs" />) : null}
+        </span>
+        <span className="cm-trace-node__icon">{laneIcon(node)}</span>
+        <span className="cm-trace-node__titles">
+          <span className="cm-trace-node__title-line">
+            <strong className="cm-trace-node__title">{nodeTitle(node)}</strong>
+            <span className="cm-trace-node__lane">{laneLabel(node)}</span>
+          </span>
+          {!open && summaryText && (
+            <span className="cm-trace-node__preview">{summaryText}</span>
+          )}
+        </span>
+        <span className="cm-trace-node__meta">
+          {modelName && <span className="cm-trace-node__tag">{modelName}</span>}
+          {wallMs && <span className="cm-trace-node__tag"><Clock className="cm-trace__icon-xs" />{wallMs}</span>}
+          {toolBatches !== undefined && toolBatches > 0 && (
+            <span className="cm-trace-node__tag">{toolBatches} batch{toolBatches > 1 ? "es" : ""}</span>
+          )}
+          <span className="cm-trace-node__status" data-status={node.status}>
+            {node.status === "running" && <Loader2 className="cm-trace__icon-xs cm-pulse__spin" />}
+            {node.status === "completed" && <CheckCircle2 className="cm-trace__icon-xs" />}
+            {node.status === "failed" && <XCircle className="cm-trace__icon-xs" />}
+            <span>{node.status}</span>
+          </span>
+        </span>
+      </button>
+
+      {open && hasBody && (
+        <div className="cm-trace-node__body">
+          {errorText && (
+            <div className="cm-trace-node__error" role="alert">
+              <XCircle className="cm-trace__icon-xs" />
+              <span>{errorText}</span>
+            </div>
+          )}
+
+          {summaryText && summaryText !== errorText && (
+            <ExpandableBlock label="Summary" content={summaryText} />
+          )}
+
+          {inputText && (
+            <ExpandableBlock label={node.kind === "agent" ? "Delegated Brief" : "Request"} content={inputText} />
+          )}
+
+          {notesText && (
+            <ExpandableBlock label="Notes & Reasoning" content={notesText} markdown />
+          )}
+
+          {node.text && (
+            <ExpandableBlock
+              label={node.kind === "thinking" ? "Chain of Thought" : "Output"}
+              content={node.text}
+              markdown={node.kind === "message"}
+              defaultExpanded={node.text.length <= 420}
+            />
+          )}
+
+          {outputText && outputText !== node.text && (
+            <ExpandableBlock label="Result" content={outputText} markdown />
+          )}
+
+          {candidates.length > 0 && (
+            <div className="cm-trace-field">
+              <span className="cm-trace-field__label">Evaluated Candidates ({candidates.length})</span>
+              <div className="cm-trace-candidates">
+                {candidates.map((cand, idx) => {
+                  const c = rec(cand);
+                  const label = str(c?.name) ?? str(c?.id) ?? str(c?.slug) ?? readableValue(cand);
+                  const score = num(c?.score);
+                  return (
+                    <span key={idx} className="cm-trace-candidate">
+                      {label}
+                      {score !== undefined ? ` (${score.toFixed(2)})` : ""}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {memoryRec && (
+            <div className="cm-trace-field">
+              <span className="cm-trace-field__label">Six-Layer Memory</span>
+              <p className="cm-trace-field__text">{readableValue(memoryRec)}</p>
+            </div>
+          )}
+
+          {kids.length > 0 && (
+            <div className="cm-trace-node__children">
+              {kids.map((child) => (
+                <TraceNodeCard
+                  key={child.id}
+                  node={child}
+                  childrenMap={childrenMap}
+                  focusedNodeId={focusedNodeId}
+                  depth={depth + 1}
+                  visited={nextVisited}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </article>
+  );
+});
+
+function BillTree({ bills, depth = 0 }: { bills: Bill[]; depth?: number }) {
+  return (
+    <div className="cm-trace-bills" style={{ "--cm-trace-depth": depth } as React.CSSProperties}>
+      {bills.map((bill, idx) => (
+        <div key={`${bill.kind}-${bill.name ?? idx}-${idx}`} className="cm-trace-bill">
+          <div className="cm-trace-bill__row">
+            <span className="cm-trace-bill__kind">{bill.kind}</span>
+            <span className="cm-trace-bill__name">{bill.name || bill.model || bill.action || bill.subject || "Execution"}</span>
+            <strong className="cm-trace-bill__amount">{formatWeiUsd(bill.amountWei)}</strong>
+          </div>
+          {bill.children && bill.children.length > 0 && (
+            <BillTree bills={bill.children} depth={depth + 1} />
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
