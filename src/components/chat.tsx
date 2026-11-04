@@ -1832,11 +1832,9 @@ class MessageBoundary extends React.Component<
         if (!this.state.error) return this.props.children;
         return (
             <div className="cm-chat__error-boundary">
-                <SharedStreamNode title="Render error" kind="error" status="failed">
-                    <SharedStreamNotice tone="error" title="Render error">
-                        {this.state.error}
-                    </SharedStreamNotice>
-                </SharedStreamNode>
+                <NoticeBox tone="error" title="Render error">
+                    {this.state.error}
+                </NoticeBox>
             </div>
         );
     }
