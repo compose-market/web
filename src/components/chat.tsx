@@ -1,32 +1,26 @@
 /**
- * Unified Chat Component
- * 
+ * Unified Chat Component (Surface 1 + Surface 2 Pulse Integration)
+ *
  * Consolidates:
- * - MultimodalCanvas (chat container with input, attachments, recording)
- * - MessageItem (message bubbles with actions)
- * - MarkdownRenderer (rich content with Mermaid, LaTeX, code)
- * 
+ * - MultimodalCanvas (chat container with input, attachments, recording, 3D empty stage, Pulse action rail)
+ * - MessageItem (rich streamed blocks: CoT, Plan/Clarify gates, Connector gates, media/deliveries, x402 receipts)
+ * - MarkdownRenderer (lazy-loaded rich content with Mermaid, LaTeX, code)
+ *
  * Used by: agent.tsx, workflow.tsx, playground.tsx
  */
-import React, { Suspense, lazy, useState, memo, useCallback, useEffect, useRef, useMemo } from "react";
-import {
-    StreamMedia as SharedStreamMedia,
-    StreamNode as SharedStreamNode,
-    StreamNotice as SharedStreamNotice,
-    PlanGate as SharedPlanGate,
-    PlanActions as SharedPlanActions,
-    ActivityChip as SharedActivityChip,
-} from "@compose-market/theme";
+import React, { useState, memo, useCallback, useEffect, useRef, useMemo } from "react";
+import { StreamMedia } from "@/components/media";
+import { Pulse } from "@/components/pulse";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-} from "@/components/ui/dialog";
+    ShellButton,
+    ShellInput,
+    ShellModal,
+    ShellNotice,
+} from "@compose-market/theme/shell";
 import {
     Tooltip,
     TooltipContent,
@@ -34,37 +28,49 @@ import {
     TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
+    Activity,
     Bot,
-    User,
+    Brain,
+    Check,
+    ChevronDown,
+    ChevronRight,
+    CircleAlert,
+    Coins,
+    Copy,
+    Download,
+    ExternalLink,
+    FileText,
+    GitBranch,
+    HelpCircle,
+    Image as ImageIcon,
+    ImagePlus,
+    KeyRound,
+    Layers,
     Loader2,
-    Send,
-    Play,
-    Paperclip,
+    Maximize2,
     Mic,
     MicOff,
     Music,
+    Paperclip,
+    Play,
+    Plug,
+    RefreshCw,
+    Send,
     Square,
+    Trash2,
+    User,
     Video,
     X,
-    Layers,
-    Trash2,
     BookOpen,
-    Copy,
-    RefreshCw,
-    ChevronDown,
-    FileText,
-    Image as ImageIcon,
-    ImagePlus,
-    CircleAlert,
-    Maximize2,
-    Download,
-    KeyRound,
-    ExternalLink,
 } from "lucide-react";
-import type { ActivityNode, ActivityState } from "@compose-market/sdk";
+import type { ActivityState, Receipt } from "@compose-market/sdk";
+import type { NetworkId } from "@compose-market/sdk/chains";
 import { sdk } from "@/lib/sdk";
+import { formatWeiUsd, shortTx } from "@/lib/receipts";
+import { getExplorerTxUrl } from "@/lib/chains";
 import { useToast } from "@/hooks/use-toast";
-import { Input } from "@/components/ui/input";
+import { summarizeTurnReceipts } from "@/hooks/use-receipts";
+import { MarkdownRenderer, normalizeMediaUrl, safeHref } from "@/lib/performance/markdown";
 import {
     SlashCommandPopover,
     SelectedSlashCommandBadges,
@@ -74,13 +80,114 @@ import {
     slashCommandMatches,
     withoutSelectedSlashCommand,
 } from "@/components/slash-commands";
-import type { Artifact, AttachedFile, ChatActivityState, ConnectorRequest, Message, MessageBlock, Plan } from "@/hooks/use-chat";
-import { DeliveryCard } from "@/components/delivery";
-import { SnippetCard } from "@/components/snippet";
+import type {
+    Artifact,
+    AttachedFile,
+    ChatActivityState,
+    ConnectorRequest,
+    Message,
+    MessageBlock,
+    Plan,
+} from "@/hooks/use-chat";
+import { DocumentCard } from "@/components/document";
 import { PoweredByChainGpt, usedWeb3Chatbot } from "@/components/chaingpt";
 
 // Re-export for convenience
 export type { Message, AttachedFile };
+
+// =============================================================================
+// Local Stream Primitives (owned cleanly by web/, zero theme bloat)
+// =============================================================================
+
+function FoldNode({
+    title,
+    icon,
+    metadata,
+    tone,
+    defaultOpen = false,
+    className,
+    children,
+}: {
+    title: React.ReactNode;
+    icon?: React.ReactNode;
+    metadata?: React.ReactNode;
+    tone?: "default" | "error" | "reasoning";
+    defaultOpen?: boolean;
+    className?: string;
+    children?: React.ReactNode;
+}) {
+    const [open, setOpen] = useState(defaultOpen);
+    return (
+        <div className={cn("cm-stream-fold", className)} data-tone={tone ?? "default"} data-open={open ? "true" : "false"}>
+            <div className="cm-stream-fold__head">
+                <button
+                    type="button"
+                    className="cm-stream-fold__toggle"
+                    onClick={() => setOpen((o) => !o)}
+                    aria-expanded={open}
+                >
+                    <span className="cm-stream-fold__chev" aria-hidden="true">
+                        {open ? <ChevronDown className="cm-stream-fold__icon" /> : <ChevronRight className="cm-stream-fold__icon" />}
+                    </span>
+                    {icon ? <span className="cm-stream-fold__lead" aria-hidden="true">{icon}</span> : null}
+                    <span className="cm-stream-fold__title">{title}</span>
+                </button>
+                {metadata ? <div className="cm-stream-fold__meta">{metadata}</div> : null}
+            </div>
+            {open && children ? <div className="cm-stream-fold__body">{children}</div> : null}
+        </div>
+    );
+}
+
+function NoticeBox({
+    tone = "info",
+    title,
+    children,
+}: {
+    tone?: "info" | "warning" | "error";
+    title: string;
+    children: React.ReactNode;
+}) {
+    return (
+        <div className="cm-stream-notice" data-tone={tone} role={tone === "error" ? "alert" : "status"}>
+            <div className="cm-stream-notice__title">
+                <CircleAlert className="cm-stream-notice__icon" aria-hidden="true" />
+                <span>{title}</span>
+            </div>
+            <div className="cm-stream-notice__body">{children}</div>
+        </div>
+    );
+}
+
+function ReasoningBlock({
+    text: content,
+    startedAt,
+    finishedAt,
+}: {
+    text: string;
+    startedAt?: number;
+    finishedAt?: number;
+}) {
+    const live = startedAt !== undefined && finishedAt === undefined;
+    const duration = startedAt !== undefined && finishedAt !== undefined
+        ? `${Math.max(0.1, (finishedAt - startedAt) / 1000).toFixed(1)}s`
+        : live
+            ? "Thinking..."
+            : undefined;
+
+    return (
+        <FoldNode
+            title="Reasoning"
+            icon={<Brain className="cm-stream-fold__icon" />}
+            tone="reasoning"
+            defaultOpen={false}
+            className="cm-chat-thinking"
+            metadata={duration ? <span className="cm-stream-fold__badge">{duration}</span> : undefined}
+        >
+            <pre className="cm-chat-thinking__pre">{content}</pre>
+        </FoldNode>
+    );
+}
 const LazyMarkdownRenderer = lazy(() =>
     import("@/lib/performance/markdown").then((module) => ({ default: module.MarkdownRenderer }))
 );
