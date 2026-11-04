@@ -700,33 +700,78 @@ function InlinePlanGate({
 
 const CONNECTORS_CATALOG_URL = (import.meta.env.VITE_CONNECTORS_URL || "https://connectors.compose.market").replace(/\/+$/, "");
 
-export function InlineConnectorGate({ request }: { request: ConnectorRequest }) {
+// =============================================================================
+// Inline Connector Gate (supports "account" | "mcp" | "connector")
+// =============================================================================
+
+export function InlineConnectorGate({
+    request,
+    onDecided,
+}: {
+    request: ConnectorRequest;
+    onDecided?: (request: ConnectorRequest, decision: "connected" | "discarded") => void;
+}) {
     const { toast } = useToast();
     const [localState, setLocalState] = useState<ConnectorRequest["state"] | null>(null);
     const [pending, setPending] = useState(false);
+    const [waitingForPopup, setWaitingForPopup] = useState(false);
     const [dialogOpen, setDialogOpen] = useState(false);
     const [credentials, setCredentials] = useState<Array<{ varName: string; description?: string; obtainUrl?: string }> | null>(null);
     const [vars, setVars] = useState<Record<string, string>>({});
     const [dialogError, setDialogError] = useState<string | null>(null);
+    const authPollRef = useRef<{ timer: ReturnType<typeof setInterval> | null; controller: AbortController | null; busy: boolean }>({
+        timer: null,
+        controller: null,
+        busy: false,
+    });
+
+    const stopAuthPolling = useCallback(() => {
+        if (authPollRef.current.timer) {
+            clearInterval(authPollRef.current.timer);
+            authPollRef.current.timer = null;
+        }
+        if (authPollRef.current.controller) {
+            authPollRef.current.controller.abort();
+            authPollRef.current.controller = null;
+        }
+        authPollRef.current.busy = false;
+        setWaitingForPopup(false);
+    }, []);
+
+    useEffect(() => {
+        return () => {
+            stopAuthPolling();
+        };
+    }, [stopAuthPolling]);
 
     const state = localState ?? request.state;
-    const decided = state === "connected" || state === "discarded";
-    const actionable = Boolean(request.agentWallet && request.runId);
+    const decided = state === "connected" || state === "granted" || state === "discarded" || state === "denied";
+    const isServerRequest = Boolean(request.agentWallet && request.runId && !request.requestId.startsWith("tool-auth:"));
+    const actionable = Boolean(request.slug);
+    const isAccount = request.kind === "account"
+        || request.origin === "account"
+        || request.authMode === "oauth"
+        || Boolean(request.bindingId?.toLowerCase().startsWith("account:"));
+    const accountToolkit = request.toolkit || request.slug;
+    const displayName = request.name || request.slug;
 
     const submitDecision = useCallback(async (decision: "connected" | "discarded") => {
-        if (!request.agentWallet || !request.runId) return;
+        stopAuthPolling();
         setPending(true);
         try {
-            await sdk.agent.decideConnector({
-                agentWallet: request.agentWallet,
-                runId: request.runId,
-                requestId: request.requestId,
-                decision,
-                ...(request.userAddress ? { userAddress: request.userAddress } : {}),
-            });
+            if (isServerRequest && request.agentWallet && request.runId) {
+                await sdk.agent.decideConnector({
+                    agentWallet: request.agentWallet,
+                    runId: request.runId,
+                    requestId: request.requestId,
+                    decision,
+                    ...(request.userAddress ? { userAddress: request.userAddress } : {}),
+                });
+            }
             setLocalState(decision);
+            onDecided?.(request, decision);
             toast({
-                title: decision === "connected" ? "Connector connected" : "Connector discarded",
+                title: decision === "connected" ? `${displayName} connected` : "Connector discarded",
             });
         } catch (error) {
             toast({
@@ -737,23 +782,173 @@ export function InlineConnectorGate({ request }: { request: ConnectorRequest }) 
         } finally {
             setPending(false);
         }
-    }, [request.agentWallet, request.runId, request.requestId, request.userAddress, toast]);
+    }, [displayName, isServerRequest, onDecided, request, stopAuthPolling, toast]);
+
+    const handleApproveAccount = useCallback(async () => {
+        stopAuthPolling();
+        setPending(true);
+        setDialogError(null);
+        try {
+            const list = await sdk.connectors.accounts.list(
+                request.userAddress ? { userAddress: request.userAddress, toolkit: accountToolkit } : { toolkit: accountToolkit },
+            );
+            const existing = (list.connections || []).find(
+                (conn) => conn.slug.toLowerCase() === accountToolkit.toLowerCase() && conn.connected,
+            );
+            if (existing) {
+                await sdk.connectors.accounts.grant({
+                    ...(request.userAddress ? { userAddress: request.userAddress } : {}),
+                    toolkit: accountToolkit,
+                });
+                await submitDecision("connected");
+                return;
+            }
+
+            const connectRes = await sdk.connectors.accounts.connect({
+                ...(request.userAddress ? { userAddress: request.userAddress } : {}),
+                toolkit: accountToolkit,
+            });
+            if (connectRes.status === "ACTIVE") {
+                await sdk.connectors.accounts.grant({
+                    ...(request.userAddress ? { userAddress: request.userAddress } : {}),
+                    toolkit: accountToolkit,
+                });
+                await submitDecision("connected");
+                return;
+            }
+            const redirectUrl = safeHref(connectRes.redirectUrl) ?? safeHref(request.authUrl);
+            if (!redirectUrl) {
+                throw new Error("No valid authentication redirect URL returned from server.");
+            }
+            const popup = window.open(redirectUrl, `Connect ${displayName}`, "noopener,noreferrer,popup=yes,width=560,height=700,scrollbars=yes");
+            if (!popup) {
+                throw new Error("Allow browser popups to connect this account.");
+            }
+
+            const controller = new AbortController();
+            authPollRef.current.controller = controller;
+            setWaitingForPopup(true);
+            toast({
+                title: "Authentication started",
+                description: `Complete sign-in for ${displayName} in the popup window.`,
+            });
+
+            let attempts = 0;
+            authPollRef.current.timer = setInterval(() => {
+                if (controller.signal.aborted || authPollRef.current.busy) return;
+                authPollRef.current.busy = true;
+                attempts += 1;
+                void (async () => {
+                    try {
+                        const statusRes = await sdk.connectors.accounts.status(
+                            {
+                                ...(request.userAddress ? { userAddress: request.userAddress } : {}),
+                                toolkit: accountToolkit,
+                                connectedAccountId: connectRes.connectedAccountId,
+                            },
+                            { signal: controller.signal },
+                        );
+                        if (statusRes.connected || statusRes.status === "ACTIVE") {
+                            stopAuthPolling();
+                            if (!popup.closed) popup.close();
+                            await sdk.connectors.accounts.grant({
+                                ...(request.userAddress ? { userAddress: request.userAddress } : {}),
+                                toolkit: accountToolkit,
+                            });
+                            await submitDecision("connected");
+                            return;
+                        }
+                        if (popup.closed) {
+                            stopAuthPolling();
+                            setPending(false);
+                            toast({
+                                title: "Connection window closed",
+                                description: `Sign-in for ${displayName} was closed before completion.`,
+                                variant: "destructive",
+                            });
+                            return;
+                        }
+                        if (attempts >= 120) {
+                            stopAuthPolling();
+                            if (!popup.closed) popup.close();
+                            setPending(false);
+                            toast({
+                                title: "Authentication timed out",
+                                description: "Sign-in was not completed in time. Click Connect to try again.",
+                                variant: "destructive",
+                            });
+                        }
+                    } catch (pollErr) {
+                        if (!controller.signal.aborted && attempts >= 120) {
+                            stopAuthPolling();
+                            setPending(false);
+                            toast({
+                                title: "Account authorization failed",
+                                description: pollErr instanceof Error ? pollErr.message : String(pollErr),
+                                variant: "destructive",
+                            });
+                        }
+                    } finally {
+                        authPollRef.current.busy = false;
+                    }
+                })();
+            }, 1500);
+        } catch (error) {
+            stopAuthPolling();
+            setPending(false);
+            toast({
+                title: "Account authorization failed",
+                description: error instanceof Error ? error.message : String(error),
+                variant: "destructive",
+            });
+        }
+    }, [accountToolkit, displayName, request.authUrl, request.userAddress, stopAuthPolling, submitDecision, toast]);
 
     const openConnectDialog = useCallback(async () => {
-        setDialogOpen(true);
+        if (isAccount) {
+            await handleApproveAccount();
+            return;
+        }
         setDialogError(null);
+        // Mirror man0: check if this connector is already connected in Backpack and auto-grant
+        if (request.userAddress) {
+            try {
+                const status = await sdk.connectors.status({ userAddress: request.userAddress });
+                const matched = status?.connectors?.find(
+                    (entry) => entry.slug.toLowerCase() === request.slug.toLowerCase(),
+                );
+                if (matched?.connected && (matched.missingVars?.length ?? 0) === 0) {
+                    if (!matched.allowed) {
+                        await sdk.connectors.gated.grant({
+                            userAddress: request.userAddress,
+                            slug: matched.slug,
+                        }).catch(() => undefined);
+                    }
+                    await submitDecision("connected");
+                    return;
+                }
+            } catch {
+                // Fall through to credential dialog
+            }
+        }
+        setDialogOpen(true);
+        if (request.missingVars && request.missingVars.length > 0) {
+            const preset = request.missingVars
+                .filter((entry) => typeof entry.varName === "string" && entry.varName.trim().length > 0)
+                .map((entry) => ({
+                    varName: entry.varName.trim(),
+                    ...(entry.description ? { description: entry.description } : {}),
+                    ...(entry.obtainUrl ? { obtainUrl: entry.obtainUrl } : {}),
+                }));
+            if (preset.length > 0) {
+                setCredentials(preset);
+                setVars(Object.fromEntries(preset.map((credential) => [credential.varName, ""])));
+                return;
+            }
+        }
         setCredentials(null);
         try {
-            const response = await fetch(`${CONNECTORS_CATALOG_URL}/mcps/${encodeURIComponent(request.slug)}`, {
-                headers: { Accept: "application/json" },
-                signal: AbortSignal.timeout(8000),
-            });
-            if (!response.ok) {
-                throw new Error(`Connector catalog entry unavailable (${response.status}).`);
-            }
-            const card = await response.json() as {
-                credentials?: Array<{ varName?: string; description?: string; obtainUrl?: string }>;
-            };
+            const card = await sdk.connectors.mcps.get(request.slug, { timeoutMs: 8000 });
             const parsed = (card.credentials || [])
                 .filter((entry): entry is { varName: string; description?: string; obtainUrl?: string } =>
                     typeof entry?.varName === "string" && entry.varName.trim().length > 0)
@@ -767,10 +962,21 @@ export function InlineConnectorGate({ request }: { request: ConnectorRequest }) 
         } catch (error) {
             setDialogError(error instanceof Error ? error.message : "Could not load connector requirements.");
         }
-    }, [request.slug]);
+    }, [handleApproveAccount, isAccount, request.missingVars, request.slug, request.userAddress, submitDecision]);
+
+    useEffect(() => {
+        const onTrigger = (event: Event) => {
+            const targetId = (event as CustomEvent<string>).detail;
+            if (targetId === request.requestId && !decided) {
+                void openConnectDialog();
+            }
+        };
+        window.addEventListener("cm:open-connector-gate", onTrigger);
+        return () => window.removeEventListener("cm:open-connector-gate", onTrigger);
+    }, [decided, openConnectDialog, request.requestId]);
 
     const submitConnect = useCallback(async () => {
-        if (!credentials || !request.agentWallet) return;
+        if (!credentials) return;
         setPending(true);
         setDialogError(null);
         try {
@@ -780,12 +986,17 @@ export function InlineConnectorGate({ request }: { request: ConnectorRequest }) 
                 if (!value) throw new Error(`${credential.varName} is required.`);
                 payload[credential.varName] = value;
             }
-            await sdk.gated.connect({
-                ...(request.userAddress ? { userAddress: request.userAddress } : {}),
-                slug: request.slug,
-                vars: payload,
-                agentWallet: request.agentWallet,
-            });
+            if (credentials.length > 0) {
+                await sdk.connectors.gated.connect({
+                    ...(request.userAddress ? { userAddress: request.userAddress } : {}),
+                    slug: request.slug,
+                    vars: payload,
+                });
+                await sdk.connectors.gated.grant({
+                    ...(request.userAddress ? { userAddress: request.userAddress } : {}),
+                    slug: request.slug,
+                }).catch(() => undefined);
+            }
             setDialogOpen(false);
             await submitDecision("connected");
         } catch (error) {
@@ -793,103 +1004,149 @@ export function InlineConnectorGate({ request }: { request: ConnectorRequest }) 
         } finally {
             setPending(false);
         }
-    }, [credentials, request.agentWallet, request.slug, request.userAddress, submitDecision, vars]);
+    }, [credentials, request.slug, request.userAddress, submitDecision, vars]);
 
-    const actions = !decided && actionable ? (
-        <SharedPlanActions
-            onApprove={() => void openConnectDialog()}
-            onReject={() => void submitDecision("discarded")}
-            disabled={pending}
-        />
-    ) : decided ? (
-        <SharedPlanActions state={state === "connected" ? "connected" : "discarded"} />
-    ) : undefined;
+    const normalizedState = state === "requested" || state === "escalated"
+        ? "pending"
+        : state === "granted"
+            ? "connected"
+            : state === "denied"
+                ? "discarded"
+                : state;
 
     return (
         <>
-            <SharedPlanGate
-                title={`Connector connection requested: ${request.slug}`}
-                state={state === "requested" ? "pending" : state}
-                subtitle={decided
-                    ? undefined
-                    : request.reason || "Connect stores this connector's API key in your backpack and grants it to the run. Discard drops it from the plan."}
-                metadata={
-                    <>
-                        {request.bindingId && <span>{request.bindingId}</span>}
-                        {request.actions?.length ? <span>{request.actions.length} actions</span> : undefined}
-                    </>
-                }
-                actions={actions}
-                defaultOpen={!decided}
-            />
-
-            <Dialog open={dialogOpen} onOpenChange={(nextOpen) => { if (!nextOpen && !pending) setDialogOpen(false); }}>
-                <DialogContent className="sm:max-w-md">
-                    <DialogHeader>
-                        <DialogTitle>Connect {request.slug}</DialogTitle>
-                        <p className="text-xs text-muted-foreground">
-                            Credentials are encrypted at rest and injected blind at execution time. They are never shown again.
-                        </p>
-                    </DialogHeader>
-
-                    <div className="space-y-3 py-1">
-                        {credentials === null && !dialogError && (
-                            <div className="flex items-center justify-center py-4 text-muted-foreground text-sm">
-                                <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                                Loading credential requirements...
+            <div className="cm-chat-plan" data-state={normalizedState} data-connector-request-id={request.requestId}>
+                <div className="cm-chat-plan__head">
+                    <div className="cm-chat-plan__titles">
+                        <span className="cm-chat-plan__icon" aria-hidden="true">
+                            <Plug className="cm-stream-fold__icon" />
+                        </span>
+                        <div className="min-w-0">
+                            <div className="cm-chat-plan__title">
+                                {displayName}
                             </div>
+                            <div className="cm-chat-plan__meta">
+                                <span>{isAccount ? "OAuth account" : "Credentials"}</span>
+                                {request.actions?.length ? <span>{request.actions.length} actions</span> : null}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {!decided && (
+                    <p className="cm-chat-plan__subtitle">
+                        {waitingForPopup
+                            ? `Waiting for sign-in in popup for ${displayName}...`
+                            : request.reason || `Connect ${displayName} to continue.`}
+                    </p>
+                )}
+
+                {!decided && request.missingVars && request.missingVars.length > 0 && (
+                    <div className="cm-chat-plan__vars">
+                        {request.missingVars.map((v) => (
+                            <span key={v.varName} className="cm-chat-plan__var-chip">{v.varName}</span>
+                        ))}
+                    </div>
+                )}
+
+                {!decided && actionable ? (
+                    <div className="cm-chat-plan__actions">
+                        <button
+                            type="button"
+                            className="cm-plan-btn cm-plan-btn--approve"
+                            disabled={pending && !waitingForPopup}
+                            onClick={() => void openConnectDialog()}
+                        >
+                            {waitingForPopup ? "Waiting for login..." : `Connect ${displayName}`}
+                        </button>
+                        {isServerRequest && (
+                            <button
+                                type="button"
+                                className="cm-plan-btn cm-plan-btn--reject"
+                                disabled={pending && !waitingForPopup}
+                                onClick={() => void submitDecision("discarded")}
+                            >
+                                Discard
+                            </button>
                         )}
-                        {credentials?.length === 0 && (
-                            <p className="text-sm text-muted-foreground">This connector declares no credential variables.</p>
-                        )}
-                        {credentials?.map((credential) => (
-                            <div key={credential.varName} className="space-y-1">
-                                <div className="flex items-center justify-between">
-                                    <label className="text-xs font-mono text-foreground">{credential.varName}</label>
-                                    {credential.obtainUrl && (
+                    </div>
+                ) : decided ? (
+                    <div className="cm-chat-plan__settled">
+                        <Check className="cm-stream-fold__icon" />
+                        <span>{normalizedState}</span>
+                    </div>
+                ) : null}
+            </div>
+
+            <ShellModal
+                open={dialogOpen}
+                onClose={() => { if (!pending) setDialogOpen(false); }}
+                title={`Connect ${request.name || request.slug}`}
+                subtitle="Credentials are encrypted at rest and injected blind at execution time. They are never shown again."
+                className="cm-connector-modal"
+            >
+                <div className="space-y-3">
+                    {credentials === null && !dialogError && (
+                        <div className="flex items-center justify-center py-4 text-muted-foreground text-sm">
+                            <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                            Loading credential requirements...
+                        </div>
+                    )}
+                    {credentials?.length === 0 && (
+                        <p className="text-sm text-muted-foreground">This connector declares no credential variables.</p>
+                    )}
+                    {credentials?.map((credential) => (
+                        <div key={credential.varName} className="space-y-1.5">
+                            <div className="flex items-center justify-between gap-2">
+                                <label className="text-xs font-mono text-foreground">{credential.varName}</label>
+                                {(() => {
+                                    const obtainHref = safeHref(credential.obtainUrl);
+                                    return obtainHref ? (
                                         <a
-                                            href={credential.obtainUrl}
+                                            href={obtainHref}
                                             target="_blank"
                                             rel="noopener noreferrer"
                                             className="text-xs text-fuchsia-400 hover:underline inline-flex items-center gap-1"
                                         >
                                             Get key <ExternalLink className="w-3 h-3" />
                                         </a>
-                                    )}
-                                </div>
-                                {credential.description && (
-                                    <p className="text-xs text-muted-foreground">{credential.description}</p>
-                                )}
-                                <Input
-                                    type="password"
-                                    autoComplete="off"
-                                    value={vars[credential.varName] || ""}
-                                    onChange={(e) => setVars((current) => ({ ...current, [credential.varName]: e.target.value }))}
-                                    placeholder={credential.varName}
-                                    className="h-9 text-sm bg-background/70 font-mono"
-                                />
+                                    ) : null;
+                                })()}
                             </div>
-                        ))}
-                        {dialogError && (
-                            <p className="text-xs text-destructive">{dialogError}</p>
-                        )}
-                    </div>
+                            {credential.description && (
+                                <p className="text-xs text-muted-foreground">{credential.description}</p>
+                            )}
+                            <ShellInput
+                                type="password"
+                                autoComplete="off"
+                                value={vars[credential.varName] || ""}
+                                onChange={(e) => setVars((current) => ({ ...current, [credential.varName]: e.target.value }))}
+                                placeholder={credential.varName}
+                                className="font-mono"
+                            />
+                        </div>
+                    ))}
+                    {dialogError && (
+                        <ShellNotice tone="error">{dialogError}</ShellNotice>
+                    )}
+                </div>
 
-                    <div className="flex justify-end gap-2">
-                        <Button variant="outline" size="sm" onClick={() => setDialogOpen(false)} disabled={pending}>
-                            Cancel
-                        </Button>
-                        <Button
-                            size="sm"
-                            onClick={() => void submitConnect()}
-                            disabled={pending || credentials === null || credentials.some((credential) => !(vars[credential.varName] || "").trim())}
-                        >
-                            {pending ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <KeyRound className="w-4 h-4 mr-1.5" />}
-                            Connect
-                        </Button>
-                    </div>
-                </DialogContent>
-            </Dialog>
+                <div className="cm-session-modal__footer">
+                    <ShellButton tone="ghost" size="sm" onClick={() => setDialogOpen(false)} disabled={pending}>
+                        Cancel
+                    </ShellButton>
+                    <ShellButton
+                        tone="primary"
+                        size="sm"
+                        onClick={() => void submitConnect()}
+                        disabled={pending || credentials === null || credentials.some((credential) => !(vars[credential.varName] || "").trim())}
+                    >
+                        {pending ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
+                        <span>Connect</span>
+                    </ShellButton>
+                </div>
+            </ShellModal>
         </>
     );
 }
