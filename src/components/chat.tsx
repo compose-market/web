@@ -378,58 +378,317 @@ function InlinePlanGate({
     messageId,
     plan,
     onPlanDecision,
+    onInspectFlow,
 }: {
     messageId: string;
     plan: Plan;
     onPlanDecision?: MessageItemProps["onPlanDecision"];
+    onInspectFlow?: (nodeId?: string) => void;
 }) {
     const [feedbackOpen, setFeedbackOpen] = useState(false);
     const [feedback, setFeedback] = useState("");
-    const decided = plan.decision || plan.state === "approved" || plan.state === "rejected" || plan.state === "changes_requested";
+    const [answer, setAnswer] = useState("");
+    useEffect(() => {
+        setFeedbackOpen(false);
+        setFeedback("");
+        setAnswer("");
+    }, [plan.proposalId, plan.version, plan.state]);
+    const isClarify = plan.state === "clarify";
+    const actionableState = ACTIONABLE_PLAN_STATES.has(plan.state);
+    const decided = Boolean(plan.decision) || !actionableState;
     const canAct = Boolean(onPlanDecision) && !plan.pending && !decided;
-
-    const actions = canAct ? (
-        <SharedPlanActions
-            onApprove={() => onPlanDecision?.(messageId, plan, "approved")}
-            onReject={() => onPlanDecision?.(messageId, plan, "rejected", feedback.trim() || undefined)}
-            onRequestChanges={() => {
-                if (!feedbackOpen) {
-                    setFeedbackOpen(true);
-                    return;
-                }
-                onPlanDecision?.(messageId, plan, "changes_requested", feedback.trim());
-            }}
-            disabled={plan.pending}
-            hasFeedbackInput={feedbackOpen}
-        />
-    ) : decided ? (
-        <SharedPlanActions state={plan.decision || plan.state} />
-    ) : undefined;
+    const state = planLifecycleState(plan);
+    const isExecuting = state === "approved" || state === "executing" || state === "monitoring" || state === "refining";
+    const isFailed = state === "failed" || state === "blocked";
+    const isCompleted = state === "completed";
+    const { total, done, activeTask } = planTaskCounts(plan);
+    const previewTasks = plan.tasks && plan.tasks.length > 0 ? selectPreviewTasks(plan.tasks, 6) : [];
+    const clarifyObj = plan.clarify && typeof plan.clarify !== "string" ? plan.clarify : undefined;
+    const clarifyContext = typeof plan.clarify === "string" ? plan.clarify : clarifyObj?.context;
+    const clarifyItems = clarifyObj?.items ?? [];
+    const plainQuestions = clarifyItems.length > 0 ? [] : (plan.questions ?? clarifyObj?.questions ?? []);
+    const missingInputs = plan.missingInputs ?? clarifyObj?.missingInputs ?? [];
 
     return (
-        <SharedPlanGate
-            title={planSummary(plan)}
-            state={plan.decision || plan.state}
-            subtitle={plan.error ? plan.error : decided ? undefined : "Review full plan in Mission Control \u2192"}
-            metadata={
-                <>
-                    <span>v{plan.version}</span>
-                    {plan.proposalId && <span>{shortId(plan.proposalId)}</span>}
-                </>
-            }
-            actions={actions}
-            defaultOpen={!decided}
+        <div
+            className="cm-chat-plan"
+            data-state={isExecuting ? "executing" : state}
+            data-clarify={isClarify ? "true" : "false"}
         >
-            {feedbackOpen && canAct && (
-                <textarea
-                    value={feedback}
-                    onChange={(e) => setFeedback(e.target.value)}
-                    placeholder="Feedback for the revised plan"
-                    className="cm-plan-feedback-input"
-                    rows={3}
+            <div className="cm-chat-plan__head">
+                <div className="cm-chat-plan__titles">
+                    <span className="cm-chat-plan__icon" aria-hidden="true">
+                        {isClarify ? (
+                            <HelpCircle className="cm-stream-fold__icon" />
+                        ) : isExecuting ? (
+                            <Loader2 className="cm-stream-fold__icon cm-pulse__spin" />
+                        ) : isFailed ? (
+                            <CircleAlert className="cm-stream-fold__icon" />
+                        ) : isCompleted ? (
+                            <Check className="cm-stream-fold__icon" />
+                        ) : (
+                            <GitBranch className="cm-stream-fold__icon" />
+                        )}
+                    </span>
+                    <div className="min-w-0">
+                        <div className="cm-chat-plan__title">{planSummary(plan)}</div>
+                        <div className="cm-chat-plan__meta">
+                            <span>v{plan.version}</span>
+                            {total > 0 ? (
+                                <span>{isExecuting || isCompleted || isFailed ? `${done}/${total} steps` : `${total} steps`}</span>
+                            ) : null}
+                            {plan.proposalId ? <span>{shortId(plan.proposalId)}</span> : null}
+                        </div>
+                    </div>
+                </div>
+
+                {onInspectFlow ? (
+                    <button
+                        type="button"
+                        className="cm-chat-plan__inspect"
+                        onClick={() => onInspectFlow()}
+                    >
+                        <span>Inspect Flow</span>
+                        <ChevronRight className="cm-stream-fold__icon" />
+                    </button>
+                ) : null}
+            </div>
+
+            {isExecuting ? (
+                <progress
+                    className="cm-chat-plan__progress"
+                    {...(total > 0 && done > 0 ? { value: done, max: total } : {})}
+                    aria-label={total > 0 ? `Plan progress: ${done} of ${total} steps completed` : "Executing plan"}
                 />
+            ) : null}
+
+            {plan.error ? (
+                <NoticeBox tone="error" title="Decision error">{plan.error}</NoticeBox>
+            ) : null}
+
+            {/* Clarify Gate: display structured questions, options & missing inputs with inline answer composer */}
+            {isClarify ? (
+                <div className="cm-chat-plan__clarify">
+                    {clarifyContext ? (
+                        <p className="cm-chat-plan__subtitle">{clarifyContext}</p>
+                    ) : null}
+                    {clarifyItems.length > 0 ? (
+                        <ul className="cm-chat-plan__questions">
+                            {clarifyItems.map((item) => (
+                                <li key={item.id}>
+                                    <div>
+                                        {item.stepTitle ? <strong>{item.stepTitle}: </strong> : null}
+                                        <span>{item.question}</span>
+                                        {item.defaultHint ? (
+                                            <span className="text-muted-foreground"> (Default: {item.defaultHint})</span>
+                                        ) : null}
+                                    </div>
+                                    {canAct && item.options?.length ? (
+                                        <div className="flex flex-wrap gap-1.5 mt-1.5">
+                                            {item.options.map((option) => (
+                                                <button
+                                                    key={option}
+                                                    type="button"
+                                                    className="cm-plan-btn cm-plan-btn--changes"
+                                                    onClick={() => setAnswer((prev) => (prev.trim() ? `${prev.trim()}\n${option}` : option))}
+                                                >
+                                                    {option}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    ) : null}
+                                </li>
+                            ))}
+                        </ul>
+                    ) : plainQuestions.length > 0 ? (
+                        <ul className="cm-chat-plan__questions">
+                            {plainQuestions.map((question, idx) => (
+                                <li key={idx}>{question}</li>
+                            ))}
+                        </ul>
+                    ) : null}
+                    {missingInputs.length > 0 ? (
+                        <div className="cm-chat-plan__missing">
+                            Missing inputs: {missingInputs.map(formatMissingInputLabel).join("; ")}
+                        </div>
+                    ) : null}
+                    {canAct ? (
+                        <div className="cm-chat-plan__clarify-form">
+                            <textarea
+                                value={answer}
+                                onChange={(e) => setAnswer(e.target.value)}
+                                placeholder="Provide the missing details so the agent can proceed..."
+                                className="cm-plan-feedback-input"
+                                rows={2}
+                            />
+                            <div className="cm-chat-plan__actions">
+                                <button
+                                    type="button"
+                                    className="cm-plan-btn cm-plan-btn--approve"
+                                    disabled={plan.pending || !answer.trim()}
+                                    onClick={() => {
+                                        onPlanDecision?.(messageId, plan, "clarify", answer.trim());
+                                        setAnswer("");
+                                    }}
+                                >
+                                    Send Answer
+                                </button>
+                                {clarifyObj?.canSkipWithDefaults ? (
+                                    <button
+                                        type="button"
+                                        className="cm-plan-btn cm-plan-btn--changes"
+                                        disabled={plan.pending}
+                                        onClick={() => {
+                                            onPlanDecision?.(messageId, plan, "clarify", "Proceed using the suggested defaults.");
+                                            setAnswer("");
+                                        }}
+                                    >
+                                        Use Defaults
+                                    </button>
+                                ) : null}
+                                <button
+                                    type="button"
+                                    className="cm-plan-btn cm-plan-btn--reject"
+                                    disabled={plan.pending}
+                                    onClick={() => onPlanDecision?.(messageId, plan, "cancelled")}
+                                >
+                                    Cancel Plan
+                                </button>
+                            </div>
+                        </div>
+                    ) : null}
+                </div>
+            ) : (
+                <>
+                    {previewTasks.length > 0 && (
+                        <ol className="cm-chat-plan__task-preview">
+                            {previewTasks.map((task) => (
+                                <li key={task.id} data-status={task.status}>
+                                    <span className="cm-chat-plan__task-row">
+                                        <span className="cm-chat-plan__task-icon" aria-hidden="true">
+                                            {task.status === "doing" ? (
+                                                <Loader2 className="cm-stream-fold__icon cm-pulse__spin" />
+                                            ) : task.status === "done" ? (
+                                                <Check className="cm-stream-fold__icon" />
+                                            ) : task.status === "failed" || task.status === "blocked" ? (
+                                                <CircleAlert className="cm-stream-fold__icon" />
+                                            ) : (
+                                                <span className="cm-chat-plan__task-dot" />
+                                            )}
+                                        </span>
+                                        <span className="cm-chat-plan__task-title">{task.title}</span>
+                                        {task.ownerName ? (
+                                            <span className="cm-chat-plan__task-owner">{task.ownerName}</span>
+                                        ) : null}
+                                    </span>
+                                </li>
+                            ))}
+                            {plan.tasks && plan.tasks.length > previewTasks.length && (
+                                <li className="cm-chat-plan__more">+{plan.tasks.length - previewTasks.length} more steps in Flow</li>
+                            )}
+                        </ol>
+                    )}
+
+                    {feedbackOpen && canAct && (
+                        <textarea
+                            value={feedback}
+                            onChange={(e) => setFeedback(e.target.value)}
+                            placeholder="Tell the agent what to revise..."
+                            className="cm-plan-feedback-input"
+                            rows={3}
+                        />
+                    )}
+
+                    {canAct ? (
+                        <div className="cm-chat-plan__actions">
+                            <button
+                                type="button"
+                                className="cm-plan-btn cm-plan-btn--approve"
+                                disabled={plan.pending}
+                                onClick={() => onPlanDecision?.(messageId, plan, "approved")}
+                            >
+                                Approve
+                            </button>
+                            <button
+                                type="button"
+                                className="cm-plan-btn cm-plan-btn--changes"
+                                disabled={plan.pending || (feedbackOpen && !feedback.trim())}
+                                onClick={() => {
+                                    if (!feedbackOpen) {
+                                        setFeedbackOpen(true);
+                                        return;
+                                    }
+                                    const trimmed = feedback.trim();
+                                    if (!trimmed) return;
+                                    onPlanDecision?.(messageId, plan, "changes_requested", trimmed);
+                                    setFeedback("");
+                                    setFeedbackOpen(false);
+                                }}
+                            >
+                                {feedbackOpen ? "Send Feedback" : "Request Changes"}
+                            </button>
+                            <button
+                                type="button"
+                                className="cm-plan-btn cm-plan-btn--reject"
+                                disabled={plan.pending}
+                                onClick={() => onPlanDecision?.(messageId, plan, "rejected", feedback.trim() || undefined)}
+                            >
+                                Reject
+                            </button>
+                        </div>
+                    ) : plan.pending ? (
+                        <div
+                            className="cm-chat-plan__settled"
+                            data-state="executing"
+                            role="status"
+                            aria-live="polite"
+                        >
+                            <Loader2 className="cm-stream-fold__icon cm-pulse__spin" aria-hidden="true" />
+                            <span>Submitting decision…</span>
+                        </div>
+                    ) : decided ? (
+                        <div
+                            className="cm-chat-plan__settled"
+                            data-state={isExecuting ? "executing" : isFailed ? "failed" : state}
+                            role="status"
+                            aria-live="polite"
+                        >
+                            {isExecuting ? (
+                                <>
+                                    <Loader2 className="cm-stream-fold__icon cm-pulse__spin" aria-hidden="true" />
+                                    <span>
+                                        {activeTask
+                                            ? `Running: ${activeTask.title}`
+                                            : total > 0
+                                                ? `Executing · ${done}/${total} steps done`
+                                                : "Executing plan…"}
+                                    </span>
+                                </>
+                            ) : isFailed ? (
+                                <>
+                                    <CircleAlert className="cm-stream-fold__icon" aria-hidden="true" />
+                                    <span>
+                                        {state === "blocked" && !plan.failureReason
+                                            ? "Waiting for connection"
+                                            : (plan.failureReason || String(state).replace(/_/g, " "))}
+                                    </span>
+                                </>
+                            ) : isCompleted ? (
+                                <>
+                                    <Check className="cm-stream-fold__icon" aria-hidden="true" />
+                                    <span>{total > 0 ? `Completed · ${done}/${total} steps` : "Completed"}</span>
+                                </>
+                            ) : (
+                                <>
+                                    <Check className="cm-stream-fold__icon" aria-hidden="true" />
+                                    <span>{String(state).replace(/_/g, " ")}</span>
+                                </>
+                            )}
+                        </div>
+                    ) : null}
+                </>
             )}
-        </SharedPlanGate>
+        </div>
     );
 }
 
