@@ -159,3 +159,14 @@ function isDisplayableNode(node: ActivityNode): boolean {
   if (node.kind === "message" && !node.parentId) return false;
   return true;
 }
+
+function overallStatus(nodes: ActivityNode[], plan?: Plan): "idle" | "running" | "gated" | "completed" | "failed" | "cancelled" {
+  if (plan?.state === "awaiting_approval" || plan?.state === "clarify") return "gated";
+  if (nodes.some((n) => n.kind === "connector" && n.status === "pending")) return "gated";
+  if (nodes.some((n) => n.status === "running")) return "running";
+  if (plan?.state === "executing" || plan?.state === "monitoring" || plan?.state === "refining") return "running";
+  if (nodes.some((n) => n.status === "failed") || plan?.state === "failed" || plan?.state === "blocked") return "failed";
+  if (nodes.some((n) => n.status === "cancelled") || plan?.state === "cancelled") return "cancelled";
+  if (nodes.length > 0 || plan?.state === "completed") return "completed";
+  return "idle";
+}
