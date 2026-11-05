@@ -337,7 +337,7 @@ export function SessionIndicator({
 }
 
 function SessionManageDialog({ open, onOpenChange }: SessionManageDialogProps) {
-  const { account } = useWalletAccount();
+  const { userAddress } = useSelectedUserAddress();
   const { session, ensureKeyToken } = useSession();
   const [sessions, setSessions] = useState<KeyRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -345,119 +345,152 @@ function SessionManageDialog({ open, onOpenChange }: SessionManageDialogProps) {
   const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
 
   const fetchSessions = useCallback(async () => {
-    if (!account?.address) {
-      return;
-    }
-
+    if (!userAddress) return;
     setLoading(true);
     try {
       const keyToken = await ensureKeyToken();
-      if (!keyToken) {
-        throw new Error("Compose Key token unavailable");
-      }
-      const keys = await sdk.keys.list({ userAddress: account.address });
+      if (!keyToken) throw new Error("Compose Key token unavailable");
+      const keys = await sdk.keys.list({ userAddress });
       setSessions(keys.filter((key) => key.purpose === "api" && isActiveKey(key)));
     } catch (error) {
       console.error("Failed to fetch sessions:", error);
-      toast.error("Failed to fetch sessions");
+      toast({ title: "Failed to fetch sessions", variant: "destructive" });
     } finally {
       setLoading(false);
     }
-  }, [account?.address, ensureKeyToken]);
+  }, [userAddress, ensureKeyToken]);
 
   useEffect(() => {
-    if (open) {
-      void fetchSessions();
-    }
+    if (open) void fetchSessions();
   }, [fetchSessions, open]);
 
   const handleRevoke = async (keyId: string) => {
-    if (!account?.address) {
-      return;
-    }
-
+    if (!userAddress) return;
     try {
       const keyToken = await ensureKeyToken();
-      if (!keyToken) {
-        throw new Error("Compose Key token unavailable");
-      }
+      if (!keyToken) throw new Error("Compose Key token unavailable");
       await sdk.keys.revoke(keyId);
-      toast.success("Session revoked");
+      toast({ title: "Session revoked" });
       void fetchSessions();
     } catch (error) {
       console.error(error);
-      toast.error("Failed to revoke session");
+      toast({ title: "Failed to revoke session", variant: "destructive" });
     }
   };
 
   const handleCopyKey = async (keyId: string) => {
-    await navigator.clipboard.writeText(`compose-${keyId.slice(0, 8)}***`);
+    await navigator.clipboard.writeText(keyId);
     setCopiedKeyId(keyId);
-    toast.success("Key ID copied to clipboard");
+    toast({ title: "Key ID copied to clipboard" });
     window.setTimeout(() => setCopiedKeyId(null), 2000);
   };
 
   const keys: SessionManageKey[] = sessions.map((sessionKey) => ({
     id: sessionKey.keyId,
     title: sessionKey.name || "Unnamed Key",
-    maskedValue: `compose-${sessionKey.keyId.slice(0, 8)}***`,
+    maskedValue: `compose-${sessionKey.keyId.slice(0, 8)}…`,
     summaryRows: [
-      {
-        label: "Budget",
-        value: `${formatWeiUsd(sessionKey.budgetRemaining)} / ${formatWeiUsd(sessionKey.budgetLimit)}`,
-      },
-      {
-        label: "Expires",
-        value: formatTimeRemaining(sessionKey.expiresAt),
-      },
+      { label: "Budget", value: `${formatWeiUsd(sessionKey.budgetRemaining)} / ${formatWeiUsd(sessionKey.budgetLimit)}` },
+      { label: "Expires", value: formatTimeRemaining(sessionKey.expiresAt) },
     ],
-    copyIcon: <Copy size={14} />,
-    copiedIcon: <Check size={14} />,
-    revokeIcon: <Trash2 size={14} />,
     copied: copiedKeyId === sessionKey.keyId,
     onCopy: () => void handleCopyKey(sessionKey.keyId),
     onRevoke: () => void handleRevoke(sessionKey.keyId),
   }));
 
+  const currentSessionRows: SessionSummaryRow[] = session.isActive ? [
+    { label: "Remaining", value: `$${(session.budgetRemaining / 1_000_000).toFixed(2)}` },
+    { label: "Expires", value: session.expiresAt ? formatTimeRemaining(session.expiresAt) : "Never" },
+  ] : [];
+
   return (
     <>
-      <SessionManageDialogShell
+      <ShellModal
         open={open}
-        title="Manage Sessions"
+        title={(
+          <span className="cm-session-modal__title-wrap">
+            <Wallet className="cm-session-icon cm-session-icon--lg" />
+            Manage Sessions
+          </span>
+        )}
         subtitle="View and manage your active API sessions and keys."
-        titleIcon={<Wallet size={18} />}
-        currentSessionTitle="Current Session"
-        currentSessionIcon={<Zap size={14} />}
-        currentSessionRows={session.isActive ? [
-          {
-            label: "Remaining",
-            value: `$${(session.budgetRemaining / 1_000_000).toFixed(2)}`,
-          },
-          {
-            label: "Expires",
-            value: session.expiresAt ? formatTimeRemaining(session.expiresAt) : "Never",
-          },
-        ] : []}
-        sectionLabel="API Keys"
-        newKeyLabel="New Key"
-        newKeyIcon={<Plus size={14} />}
-        loading={loading}
-        keys={keys}
-        emptyState={{
-          title: "No API keys created yet.",
-          actionLabel: "Generate your first key",
-          onAction: () => setCreateDialogOpen(true),
-        }}
         onClose={() => onOpenChange(false)}
-        onCreateKey={() => setCreateDialogOpen(true)}
-      />
+        className="cm-session-modal"
+        contentClassName="cm-session-modal__body"
+      >
+        {currentSessionRows.length > 0 ? (
+          <ShellPanel className="cm-session-current">
+            <div className="cm-session-current__title">
+              <Zap className="cm-session-icon" />
+              Current Session
+            </div>
+            <div className="cm-session-current__grid">
+              {currentSessionRows.map((row, index) => (
+                <div key={index} className="cm-session-current__cell">
+                  <span>{row.label}</span>
+                  <strong>{row.value}</strong>
+                </div>
+              ))}
+            </div>
+          </ShellPanel>
+        ) : null}
+
+        <div className="cm-session-manage__header">
+          <span>API Keys</span>
+          <ShellButton tone="ghost" size="sm" onClick={() => setCreateDialogOpen(true)}>
+            <Plus className="cm-session-icon" />
+            New Key
+          </ShellButton>
+        </div>
+
+        {loading ? (
+          <div className="cm-session-empty">Loading sessions...</div>
+        ) : keys.length === 0 ? (
+          <div className="cm-session-empty">
+            <div>No API keys created yet.</div>
+            <button
+              type="button"
+              className="cm-session-empty__action"
+              onClick={() => setCreateDialogOpen(true)}
+            >
+              Generate your first key
+            </button>
+          </div>
+        ) : (
+          <div className="cm-session-key-list">
+            {keys.map((key) => (
+              <ShellPanel key={key.id} className="cm-session-key">
+                <div className="cm-session-key__header">
+                  <strong>{key.title}</strong>
+                  <div className="cm-session-key__actions">
+                    <button type="button" className="cm-session-key__icon" onClick={key.onCopy} title="Copy key">
+                      {key.copied ? <Check className="cm-session-icon" /> : <Copy className="cm-session-icon" />}
+                    </button>
+                    <button type="button" className="cm-session-key__icon danger" onClick={key.onRevoke} title="Revoke key">
+                      <Trash2 className="cm-session-icon" />
+                    </button>
+                  </div>
+                </div>
+                <div className="cm-session-key__id">{key.maskedValue}</div>
+                <div className="cm-session-key__grid">
+                  {key.summaryRows.map((row, index) => (
+                    <div key={index} className="cm-session-key__cell">
+                      <span>{row.label}</span>
+                      <strong>{row.value}</strong>
+                    </div>
+                  ))}
+                </div>
+              </ShellPanel>
+            ))}
+          </div>
+        )}
+      </ShellModal>
+
       <KeyDialog
         open={createDialogOpen}
         onOpenChange={(nextOpen) => {
           setCreateDialogOpen(nextOpen);
-          if (!nextOpen) {
-            void fetchSessions();
-          }
+          if (!nextOpen) void fetchSessions();
         }}
       />
     </>
