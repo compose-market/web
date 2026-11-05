@@ -84,3 +84,100 @@ export async function loadAgentThread(
   if (!response.ok) return null;
   return (await response.json()) as HydratedThread;
 }
+
+export function hydrateThreadMessages(data: HydratedThread): Message[] {
+  const base: Message[] = (data.messages ?? []).map((item) => ({
+    id: item.id,
+    role: item.role,
+    content: item.content,
+    timestamp: item.timestamp,
+  }));
+
+  const rawPlan = data.plan as Record<string, unknown> | undefined;
+  const planState = rawPlan && typeof rawPlan.state === "string" ? rawPlan.state : "awaiting_approval";
+  const rawProposal = rawPlan?.proposal as Record<string, unknown> | undefined;
+  const planTasks = Array.isArray(rawPlan?.tasks)
+    ? (rawPlan.tasks as Plan["tasks"])
+    : Array.isArray(rawProposal?.tasks)
+      ? (rawProposal.tasks as Plan["tasks"])
+      : undefined;
+  const rawClarify = rawPlan?.clarify as Plan["clarify"] | undefined;
+  const rawQuestions = Array.isArray(rawPlan?.questions)
+    ? (rawPlan.questions.filter((q): q is string => typeof q === "string"))
+    : undefined;
+  const rawMissingInputs = Array.isArray(rawPlan?.missingInputs)
+    ? (rawPlan.missingInputs as Plan["missingInputs"])
+    : undefined;
+  const isActionable = ACTIONABLE_PLAN_STATES.has(planState);
+  const rawDecision = typeof rawPlan?.decision === "string" ? (rawPlan.decision as Plan["decision"]) : undefined;
+  const proposal: Plan | undefined = rawPlan && typeof rawPlan.proposalId === "string"
+    ? {
+      type: planState === "awaiting_approval"
+        ? "approval.requested"
+        : planState === "clarify"
+          ? "plan.feedback_requested"
+          : "approval.decided",
+      proposalId: rawPlan.proposalId,
+      version: typeof rawPlan.proposalVersion === "number"
+        ? rawPlan.proposalVersion
+        : typeof rawPlan.version === "number"
+          ? rawPlan.version
+          : 1,
+      state: planState,
+      ...(isActionable ? {} : rawDecision ? { decision: rawDecision } : {}),
+      runId: typeof rawPlan.runId === "string" ? rawPlan.runId : data.runId,
+      rootRunId: typeof rawPlan.rootRunId === "string" ? rawPlan.rootRunId : data.rootRunId,
+      approvalId: typeof rawPlan.approvalId === "string" ? rawPlan.approvalId : undefined,
+      tasks: planTasks,
+      proposal: rawPlan.proposal as Plan["proposal"],
+      markdown: typeof rawPlan.markdown === "string" ? rawPlan.markdown : undefined,
+      clarify: rawClarify,
+      questions: rawQuestions && rawQuestions.length > 0 ? rawQuestions : undefined,
+      missingInputs: rawMissingInputs && rawMissingInputs.length > 0 ? rawMissingInputs : undefined,
+      feedback: typeof rawPlan.feedback === "string" ? rawPlan.feedback : undefined,
+      updatedAt: typeof rawPlan.updatedAt === "number" ? rawPlan.updatedAt : undefined,
+      failureReason: typeof rawPlan.lastError === "string" ? rawPlan.lastError : undefined,
+    }
+    : undefined;
+
+  const connectorRequests: ConnectorRequest[] = (data.connectorRequests ?? [])
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry.requestId === "string" && typeof entry.slug === "string"))
+    .map((entry) => ({
+      requestId: String(entry.requestId),
+      slug: String(entry.slug),
+      name: typeof entry.name === "string" ? entry.name : String(entry.slug),
+      bindingId: typeof entry.bindingId === "string" ? entry.bindingId : undefined,
+      kind: typeof entry.bindingId === "string" && entry.bindingId.startsWith("account:") ? "account" : "connector",
+      runId: typeof entry.runId === "string" ? entry.runId : data.runId,
+      rootRunId: typeof entry.rootRunId === "string" ? entry.rootRunId : data.rootRunId,
+      userAddress: typeof entry.userAddress === "string" ? entry.userAddress : undefined,
+      agentWallet: typeof entry.agentWallet === "string" ? entry.agentWallet : undefined,
+      actions: Array.isArray(entry.actions) ? entry.actions.filter((a): a is string => typeof a === "string") : undefined,
+      reason: typeof entry.reason === "string" ? entry.reason : undefined,
+      state: (entry.state as ConnectorRequest["state"]) ?? "requested",
+      ts: typeof entry.requestedAt === "number" ? entry.requestedAt : undefined,
+    }));
+
+  if (proposal || connectorRequests.length > 0) {
+    const lastAssistantIdx = [...base].reverse().findIndex((m) => m.role === "assistant");
+    if (lastAssistantIdx >= 0) {
+      const targetIdx = base.length - 1 - lastAssistantIdx;
+      base[targetIdx] = {
+        ...base[targetIdx],
+        ...(proposal ? { proposal } : {}),
+        ...(connectorRequests.length > 0 ? { connectorRequests } : {}),
+      };
+    } else {
+      base.push({
+        id: `hist-${data.threadId}-gate`,
+        role: "assistant",
+        content: "",
+        timestamp: Date.now(),
+        ...(proposal ? { proposal } : {}),
+        ...(connectorRequests.length > 0 ? { connectorRequests } : {}),
+      });
+    }
+  }
+
+  return base;
+}
