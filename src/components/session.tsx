@@ -247,32 +247,88 @@ export function SessionIndicator({
   triggerClassName?: string;
 } = {}) {
   const { session } = useSession();
+  const [menuOpen, setMenuOpen] = useState(false);
   const [keyDialogOpen, setKeyDialogOpen] = useState(false);
   const [manageDialogOpen, setManageDialogOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!rootRef.current || rootRef.current.contains(event.target as Node)) return;
+      setMenuOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuOpen(false);
+    };
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [menuOpen]);
 
   if (!session.isActive) {
     return <SessionBudgetDialog triggerClassName={triggerClassName ?? className} />;
   }
 
   const remainingUsdc = session.budgetRemaining / 1_000_000;
+  const expiresLabel = session.expiresAt ? formatTimeRemaining(session.expiresAt) : "Never";
 
   return (
     <>
-      <SessionIndicatorShell
-        className={className}
-        active
-        budgetLabel={`$${remainingUsdc.toFixed(2)}`}
-        expiresLabel={session.expiresAt ? formatTimeRemaining(session.expiresAt) : "Never"}
-        mobileBudgetLabel={`$${remainingUsdc.toFixed(0)}`}
-        activeLabel="Session"
-        leadingIcon={<Zap size={14} />}
-        trailingIcon={<ChevronDown size={12} />}
-        keyIcon={<Key size={14} />}
-        manageIcon={<Wallet size={14} />}
-        onStart={() => undefined}
-        onOpenKey={() => setKeyDialogOpen(true)}
-        onOpenManage={() => setManageDialogOpen(true)}
-      />
+      <div className={cn("cm-session-menu", className)} ref={rootRef}>
+        <ShellButton
+          tone="secondary"
+          size="sm"
+          className="cm-session-trigger cm-session-trigger--active"
+          onClick={() => setMenuOpen((current) => !current)}
+          aria-expanded={menuOpen}
+        >
+          <Zap className="cm-session-icon" />
+          <span>Session</span>
+          <span className="cm-session-trigger__mobile">${remainingUsdc.toFixed(0)}</span>
+          <ChevronDown className="cm-session-icon cm-session-icon--sm" />
+        </ShellButton>
+
+        {menuOpen ? (
+          <ShellPanel className="cm-session-menu__dropdown" padded={false}>
+            <div className="cm-session-menu__header">
+              <div className="cm-session-menu__row">
+                <span>Budget</span>
+                <strong>${remainingUsdc.toFixed(2)}</strong>
+              </div>
+              <div className="cm-session-menu__row">
+                <span>Expires</span>
+                <strong>{expiresLabel}</strong>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="cm-session-menu__item"
+              onClick={() => {
+                setMenuOpen(false);
+                setKeyDialogOpen(true);
+              }}
+            >
+              <Key className="cm-session-icon" />
+              <span>Generate API Key</span>
+            </button>
+            <button
+              type="button"
+              className="cm-session-menu__item"
+              onClick={() => {
+                setMenuOpen(false);
+                setManageDialogOpen(true);
+              }}
+            >
+              <Wallet className="cm-session-icon" />
+              <span>Manage Sessions</span>
+            </button>
+          </ShellPanel>
+        ) : null}
+      </div>
 
       <KeyDialog open={keyDialogOpen} onOpenChange={setKeyDialogOpen} />
       <SessionManageDialog open={manageDialogOpen} onOpenChange={setManageDialogOpen} />
