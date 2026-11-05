@@ -145,28 +145,27 @@ export function SessionBudgetDialog({
   const open = isControlled ? controlledOpen : internalOpen;
   const setOpen = isControlled ? (controlledOnOpenChange || (() => undefined)) : setInternalOpen;
 
-  if (!isConnected) {
-    return null;
-  }
+  if (!isConnected) return null;
 
   const handleCreate = async () => {
     const budgetUsdc = selectedBudget / 1_000_000;
     const result = await createSession(budgetUsdc, duration);
     for (const transaction of result.transactions) {
       const explorerUrl = getExplorerTxUrl(transaction.network, transaction.transactionHash);
-      toast.success(transaction.title, {
+      toast({
+        title: transaction.title,
         description: transaction.description,
-        ...(explorerUrl !== "#" ? {
-          action: {
-            label: "View transaction",
-            onClick: () => window.open(explorerUrl, "_blank", "noopener,noreferrer"),
-          },
-        } : {}),
+        action: explorerUrl !== "#" ? (
+          <ToastAction
+            altText="View transaction"
+            onClick={() => window.open(explorerUrl, "_blank", "noopener,noreferrer")}
+          >
+            View
+          </ToastAction>
+        ) : undefined,
       });
     }
-    if (result.success) {
-      setOpen(false);
-    }
+    if (result.success) setOpen(false);
   };
 
   return (
@@ -178,37 +177,64 @@ export function SessionBudgetDialog({
           className={cn("cm-session-trigger", triggerClassName)}
           onClick={() => setOpen(true)}
         >
-          <Zap size={14} />
+          <Zap className="cm-session-icon" />
           {session.isActive ? "Session Active" : "Start Session"}
         </ShellButton>
       ) : null}
-      <SessionBudgetDialogShell
+
+      <ShellModal
         open={open}
-        title="Session Budget"
+        title={(
+          <span className="cm-session-modal__title-wrap">
+            <Shield className="cm-session-icon cm-session-icon--lg" />
+            Session Budget
+          </span>
+        )}
         subtitle="Set a spending limit to skip wallet signatures for each AI call. One approval, unlimited inference within your budget."
-        titleIcon={<Shield size={18} />}
-        budgetLabel="Budget Limit"
-        budgetIcon={<Wallet size={14} />}
-        durationLabel="Session Duration"
-        durationIcon={<Clock size={14} />}
-        budgetChoices={budgetPresets.map((preset) => ({
-          label: preset.label,
-          active: selectedBudget === preset.value,
-          onSelect: () => setSelectedBudget(preset.value),
-        }))}
-        durationChoices={[1, 6, 12, 24].map((hours) => ({
-          label: `${hours}h`,
-          active: duration === hours,
-          onSelect: () => setDuration(hours),
-        }))}
-        summaryRows={budgetRows(selectedBudget, duration)}
-        error={error || undefined}
         onClose={() => setOpen(false)}
-        onSubmit={() => void handleCreate()}
-        submitting={isCreating}
-        submitLabel="Approve & Start Session"
-        submittingLabel="Creating Session..."
-      />
+        className="cm-session-modal"
+        contentClassName="cm-session-modal__body"
+      >
+        <div className="cm-session-section">
+          <div className="cm-session-section__label">
+            <Wallet className="cm-session-icon" />
+            Budget Limit
+          </div>
+          <SessionChoiceGrid
+            choices={budgetPresets.map((preset) => ({
+              label: preset.label,
+              active: selectedBudget === preset.value,
+              onSelect: () => setSelectedBudget(preset.value),
+            }))}
+          />
+        </div>
+
+        <div className="cm-session-section">
+          <div className="cm-session-section__label">
+            <Clock className="cm-session-icon" />
+            Session Duration
+          </div>
+          <SessionChoiceGrid
+            choices={[1, 6, 12, 24].map((hours) => ({
+              label: `${hours}h`,
+              active: duration === hours,
+              onSelect: () => setDuration(hours),
+            }))}
+          />
+        </div>
+
+        <SessionSummary rows={budgetRows(selectedBudget, duration)} />
+        {error ? <ShellNotice tone="error">{error}</ShellNotice> : null}
+
+        <div className="cm-session-modal__footer">
+          <ShellButton tone="ghost" onClick={() => setOpen(false)} disabled={isCreating}>
+            Cancel
+          </ShellButton>
+          <ShellButton tone="primary" onClick={() => void handleCreate()} disabled={isCreating}>
+            {isCreating ? "Creating Session..." : "Approve & Start Session"}
+          </ShellButton>
+        </div>
+      </ShellModal>
     </>
   );
 }
