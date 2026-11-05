@@ -414,3 +414,534 @@ function BillTree({ bills, depth = 0 }: { bills: Bill[]; depth?: number }) {
     </div>
   );
 }
+
+function TaskStatusPill({ status }: { status: Task["status"] }) {
+  const mapped = status === "done"
+    ? "completed"
+    : status === "doing"
+      ? "running"
+      : status === "failed" || status === "blocked"
+        ? "failed"
+        : "pending";
+  return (
+    <span className="cm-trace-node__status" data-status={mapped}>
+      {mapped === "running" && <Loader2 className="cm-trace__icon-xs cm-pulse__spin" />}
+      {mapped === "completed" && <Check className="cm-trace__icon-xs" />}
+      {mapped === "failed" && <XCircle className="cm-trace__icon-xs" />}
+      <span>{status}</span>
+    </span>
+  );
+}
+
+const TraceInner = memo(function TraceInner({
+  open,
+  onClose,
+  activity,
+  plan,
+  planVersions = [],
+  receipt,
+  receipts,
+  usage,
+  focusedNodeId,
+  onPlanDecision,
+  mode = "sheet",
+  className,
+}: TraceProps) {
+  const [versionIndex, setVersionIndex] = useState(0);
+  const [feedback, setFeedback] = useState("");
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [clarifyAnswer, setClarifyAnswer] = useState("");
+
+  const versions = useMemo(() => {
+    if (planVersions.length > 0) return planVersions;
+    return plan ? [plan] : [];
+  }, [plan, planVersions]);
+
+  useEffect(() => {
+    if (versions.length > 0) setVersionIndex(versions.length - 1);
+  }, [versions.length]);
+
+  const activePlan = versions[versionIndex] ?? plan;
+
+  useEffect(() => {
+    setFeedback("");
+    setFeedbackOpen(false);
+    setClarifyAnswer("");
+  }, [activePlan?.proposalId, activePlan?.version, activePlan?.state]);
+
+  useEffect(() => {
+    if (!open || mode !== "sheet") return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, mode, onClose]);
+
+  const { roots, childrenMap, visibleNodes } = useMemo(() => {
+    if (!activity) {
+      return { roots: [] as ActivityNode[], childrenMap: new Map<string, ActivityNode[]>(), visibleNodes: [] as ActivityNode[] };
+    }
+    // Preserve stable creation/insertion order instead of re-sorting live by updatedAt
+    const all = Object.values(activity.nodes);
+    const byId = new Map(all.map((n) => [n.id, n]));
+    const visible = all.filter(isDisplayableNode);
+    const map = new Map<string, ActivityNode[]>();
+    const top: ActivityNode[] = [];
+
+    for (const node of visible) {
+      if (node.parentId && byId.has(node.parentId) && isDisplayableNode(byId.get(node.parentId)!)) {
+        const list = map.get(node.parentId) ?? [];
+        list.push(node);
+        map.set(node.parentId, list);
+      } else {
+        top.push(node);
+      }
+    }
+    return { roots: top, childrenMap: map, visibleNodes: visible };
+  }, [activity]);
+
+  const status = overallStatus(visibleNodes, activePlan);
+  const completedCount = visibleNodes.filter((n) => n.status === "completed").length;
+  const failedCount = visibleNodes.filter((n) => n.status === "failed").length;
+  const turnSummary = useMemo(
+    () => summarizeTurnReceipts(receipts, receipt),
+    [receipt, receipts],
+  );
+  const isClarifyPlan = activePlan?.state === "clarify";
+  const actionablePlan = Boolean(
+    activePlan
+    && !activePlan.decision
+    && !activePlan.pending
+    && (activePlan.state === "awaiting_approval"
+      || activePlan.state === "clarify"
+      || activePlan.state === "proposed"
+      || activePlan.state === "pending"),
+  );
+  const activeClarifyObj = activePlan?.clarify && typeof activePlan.clarify !== "string"
+    ? activePlan.clarify
+    : undefined;
+  const activeClarifyItems = activeClarifyObj?.items ?? [];
+  const activeClarifyQuestions = activeClarifyItems.length > 0
+    ? []
+    : (activePlan?.questions ?? activeClarifyObj?.questions ?? []);
+  const activeMissingInputs = activePlan?.missingInputs ?? activeClarifyObj?.missingInputs ?? [];
+
+  const content = (
+    <section
+      className={cn("cm-trace", mode === "inline" && "cm-trace--inline", className)}
+      data-status={status}
+      aria-label="Execution flow trace"
+    >
+      <header className="cm-trace__header">
+        <div className="cm-trace__heading">
+          <GitBranch className="cm-trace__icon" />
+          <div>
+            <h2 className="cm-trace__title">Activity</h2>
+            <p className="cm-trace__subtitle">
+              {visibleNodes.length > 0
+                ? `${completedCount}/${visibleNodes.length} steps done${failedCount > 0 ? ` · ${failedCount} failed` : ""}`
+                : activePlan
+                  ? `Plan v${activePlan.version} · ${activePlan.state.replace(/_/g, " ")}`
+                  : turnSummary
+                    ? `Total ${formatWeiUsd(turnSummary.totalAmountWei)} · ${turnSummary.status}`
+                    : "Steps, plans, tools & cost"}
+            </p>
+          </div>
+        </div>
+
+        <div className="cm-trace__header-actions">
+          <span className="cm-trace-node__status" data-status={status}>
+            {status === "running" && <Loader2 className="cm-trace__icon-xs cm-pulse__spin" />}
+            <span>{status}</span>
+          </span>
+          {mode === "sheet" && (
+            <button type="button" className="cm-trace__close" onClick={onClose} aria-label="Close activity">
+              <X className="cm-trace__icon" />
+            </button>
+          )}
+        </div>
+      </header>
+
+      <div className="cm-trace__body">
+        {/* Plan & Tasks Section */}
+        {activePlan && (
+          <div className="cm-trace-section">
+            <div className="cm-trace-section__head">
+              <span className="cm-trace-section__title">
+                <Activity className="cm-trace__icon-xs" />
+                Plan · v{activePlan.version}
+              </span>
+              {versions.length > 1 && (
+                <div className="cm-trace-versions">
+                  <button
+                    type="button"
+                    disabled={versionIndex <= 0}
+                    onClick={() => setVersionIndex((i) => Math.max(0, i - 1))}
+                  >
+                    Prev
+                  </button>
+                  <span>v{activePlan.version} / {versions.length}</span>
+                  <button
+                    type="button"
+                    disabled={versionIndex >= versions.length - 1}
+                    onClick={() => setVersionIndex((i) => Math.min(versions.length - 1, i + 1))}
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {activePlan.failureReason && (
+              <div className="cm-trace-node__error" role="alert">
+                <XCircle className="cm-trace__icon-xs" />
+                <span>{activePlan.failureReason}</span>
+              </div>
+            )}
+
+            {activePlan.markdown && (
+              <div className="cm-trace-plan-md">
+                <MarkdownRenderer content={activePlan.markdown} />
+              </div>
+            )}
+
+            {activePlan.tasks && activePlan.tasks.length > 0 && (
+              <div className="cm-trace-tasks">
+                {activePlan.tasks.map((task, idx) => (
+                  <div key={task.id} className="cm-trace-task" data-status={task.status}>
+                    <span className="cm-trace-task__index">{idx + 1}</span>
+                    <div className="cm-trace-task__copy">
+                      <strong>{task.title}</strong>
+                      {task.ownerName ? (
+                        <p className="text-xs text-muted-foreground">Owner: {task.ownerName}</p>
+                      ) : null}
+                      {task.instructions ? (
+                        <p>{task.instructions}</p>
+                      ) : task.completionCriteria ? (
+                        <p>{task.completionCriteria}</p>
+                      ) : null}
+                      {task.error ? (
+                        <p className="text-xs text-red-400">{task.error}</p>
+                      ) : null}
+                    </div>
+                    <TaskStatusPill status={task.status} />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {isClarifyPlan && (
+              <div className="cm-chat-plan__clarify">
+                {typeof activePlan.clarify === "string" ? (
+                  <p className="cm-chat-plan__subtitle">{activePlan.clarify}</p>
+                ) : activeClarifyObj?.context ? (
+                  <p className="cm-chat-plan__subtitle">{activeClarifyObj.context}</p>
+                ) : null}
+                {activeClarifyItems.length > 0 ? (
+                  <ul className="cm-chat-plan__questions">
+                    {activeClarifyItems.map((item) => (
+                      <li key={item.id}>
+                        <div>
+                          {item.stepTitle ? <strong>{item.stepTitle}: </strong> : null}
+                          <span>{item.question}</span>
+                          {item.defaultHint ? <span className="text-muted-foreground"> (Default: {item.defaultHint})</span> : null}
+                        </div>
+                        {onPlanDecision && actionablePlan && item.options?.length ? (
+                          <div className="flex flex-wrap gap-1.5 mt-1.5">
+                            {item.options.map((opt) => (
+                              <button
+                                key={opt}
+                                type="button"
+                                className="cm-plan-btn cm-plan-btn--changes"
+                                onClick={() => setClarifyAnswer((prev) => (prev.trim() ? `${prev.trim()}\n${opt}` : opt))}
+                              >
+                                {opt}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                ) : activeClarifyQuestions.length > 0 ? (
+                  <ul className="cm-chat-plan__questions">
+                    {activeClarifyQuestions.map((q, idx) => (
+                      <li key={idx}>{q}</li>
+                    ))}
+                  </ul>
+                ) : null}
+                {activeMissingInputs.length > 0 ? (
+                  <div className="cm-chat-plan__missing">
+                    Missing inputs: {activeMissingInputs.map((entry) => (
+                      typeof entry === "string"
+                        ? entry
+                        : `${entry.taskTitle || entry.taskId}${entry.modelName || entry.modelId ? ` (${entry.modelName || entry.modelId})` : ""}: ${entry.acceptedInputs.join(" / ")}${entry.reason ? ` — ${entry.reason}` : ""}`
+                    )).join("; ")}
+                  </div>
+                ) : null}
+              </div>
+            )}
+
+            {onPlanDecision && actionablePlan && (
+              <div className="cm-trace-plan-actions">
+                {isClarifyPlan ? (
+                  <>
+                    <textarea
+                      value={clarifyAnswer}
+                      onChange={(e) => setClarifyAnswer(e.target.value)}
+                      placeholder="Provide the missing details so the agent can proceed..."
+                      rows={3}
+                      className="cm-plan-feedback-input"
+                    />
+                    <div className="cm-trace-plan-btns">
+                      <button
+                        type="button"
+                        className="cm-plan-btn cm-plan-btn--approve"
+                        disabled={!clarifyAnswer.trim()}
+                        onClick={() => {
+                          const trimmed = clarifyAnswer.trim();
+                          if (!trimmed) return;
+                          onPlanDecision(activePlan, "clarify", trimmed);
+                          setClarifyAnswer("");
+                        }}
+                      >
+                        Send Answer
+                      </button>
+                      {activeClarifyObj?.canSkipWithDefaults ? (
+                        <button
+                          type="button"
+                          className="cm-plan-btn cm-plan-btn--changes"
+                          onClick={() => {
+                            onPlanDecision(activePlan, "clarify", "Proceed using the suggested defaults.");
+                            setClarifyAnswer("");
+                          }}
+                        >
+                          Use Defaults
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="cm-plan-btn cm-plan-btn--reject"
+                        onClick={() => onPlanDecision(activePlan, "cancelled")}
+                      >
+                        Cancel Plan
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {feedbackOpen && (
+                      <textarea
+                        value={feedback}
+                        onChange={(e) => setFeedback(e.target.value)}
+                        placeholder="Tell the agent what to revise..."
+                        rows={3}
+                        className="cm-plan-feedback-input"
+                      />
+                    )}
+                    <div className="cm-trace-plan-btns">
+                      <button
+                        type="button"
+                        className="cm-plan-btn cm-plan-btn--approve"
+                        onClick={() => onPlanDecision(activePlan, "approved")}
+                      >
+                        Approve Plan
+                      </button>
+                      <button
+                        type="button"
+                        className="cm-plan-btn cm-plan-btn--changes"
+                        disabled={feedbackOpen && !feedback.trim()}
+                        onClick={() => {
+                          if (!feedbackOpen) {
+                            setFeedbackOpen(true);
+                            return;
+                          }
+                          const trimmed = feedback.trim();
+                          if (!trimmed) return;
+                          onPlanDecision(activePlan, "changes_requested", trimmed);
+                          setFeedback("");
+                          setFeedbackOpen(false);
+                        }}
+                      >
+                        {feedbackOpen ? "Send Feedback" : "Request Changes"}
+                      </button>
+                      <button
+                        type="button"
+                        className="cm-plan-btn cm-plan-btn--reject"
+                        onClick={() => onPlanDecision(activePlan, "rejected", feedback.trim() || undefined)}
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Live Interaction Tree */}
+        {roots.length > 0 ? (
+          <div className="cm-trace-section">
+            <div className="cm-trace-section__head">
+              <span className="cm-trace-section__title">
+                <Bot className="cm-trace__icon-xs" />
+                Steps ({visibleNodes.length})
+              </span>
+            </div>
+            <div className="cm-trace-list">
+              {roots.map((node) => (
+                <TraceNodeCard
+                  key={node.id}
+                  node={node}
+                  childrenMap={childrenMap}
+                  focusedNodeId={focusedNodeId}
+                />
+              ))}
+            </div>
+          </div>
+        ) : !activePlan && !turnSummary ? (
+          <div className="cm-trace-empty">
+            <Activity className="cm-trace-empty__icon" />
+            <p>Send a message to see live steps, tools, and cost.</p>
+          </div>
+        ) : null}
+
+        {/* Usage & Real x402 Settlement Breakdown */}
+        {(turnSummary || usage) && (
+          <div className="cm-trace-section" id="cm-trace-receipt">
+            <div className="cm-trace-section__head">
+              <span className="cm-trace-section__title">
+                <Coins className="cm-trace__icon-xs" />
+                Settlements{turnSummary && turnSummary.totalCount > 1 ? ` (${turnSummary.totalCount})` : ""}
+              </span>
+              {turnSummary && (
+                <div className="flex items-center gap-2">
+                  <span className="cm-trace-receipt__status" data-tone={settlementTone(turnSummary.status)}>
+                    {turnSummary.status === "settled"
+                      ? "settled"
+                      : turnSummary.status === "failed"
+                        ? "failed"
+                        : `${turnSummary.settledCount}/${turnSummary.totalCount} settled`}
+                  </span>
+                  <strong className="cm-trace-total">{formatWeiUsd(turnSummary.totalAmountWei)}</strong>
+                </div>
+              )}
+            </div>
+
+            {usage && (
+              <div className="cm-trace-usage">
+                {Object.entries(usage)
+                  .filter(([, val]) => typeof val === "number" && Number.isFinite(val))
+                  .map(([key, val]) => (
+                    <span key={key} className="cm-trace-usage__item">
+                      <span>{key.replace(/_/g, " ")}</span>
+                      <strong>{Number(val).toLocaleString()}</strong>
+                    </span>
+                  ))}
+              </div>
+            )}
+
+            {turnSummary && (
+              <div className="cm-trace-receipt">
+                <div className="cm-trace-receipt__meta">
+                  {turnSummary.primaryNetwork && <span>Network: <b>{turnSummary.primaryNetwork}</b></span>}
+                  {BigInt(turnSummary.providerAmountWei) > 0n && (
+                    <span>Provider: <b>{formatWeiUsd(turnSummary.providerAmountWei)}</b></span>
+                  )}
+                  {BigInt(turnSummary.platformFeeWei) > 0n && (
+                    <span>Platform fee: <b>{formatWeiUsd(turnSummary.platformFeeWei)}</b></span>
+                  )}
+                </div>
+
+                <div className="cm-trace-receipt__list">
+                  {turnSummary.items.map((item, idx) => {
+                    const hash = item.settleTxHash ?? item.txHash;
+                    const explorer = hash && item.network ? getExplorerTxUrl(item.network as NetworkId, hash) : null;
+                    const rowStatus = item.settlementStatus ?? (hash ? "settled" : "queued");
+                    return (
+                      <div key={item.id ?? item.paymentIntentId ?? idx} className="cm-trace-receipt__row">
+                        <div className="cm-trace-receipt__row-head">
+                          <span className="cm-trace-bill__kind">{item.service || "x402"}</span>
+                          <span className="cm-trace-bill__name" title={item.subject || item.action}>
+                            {item.subject || item.action || "Settlement"}
+                          </span>
+                          <span className="cm-trace-receipt__status" data-tone={settlementTone(rowStatus)}>
+                            {rowStatus}
+                          </span>
+                          <strong className="cm-trace-bill__amount">{formatWeiUsd(item.finalAmountWei)}</strong>
+                        </div>
+
+                        <div className="cm-trace-receipt__row-meta">
+                          {item.providerAmountWei ? <span>Provider {formatWeiUsd(item.providerAmountWei)}</span> : null}
+                          {item.platformFeeWei ? <span>Fee {formatWeiUsd(item.platformFeeWei)}</span> : null}
+                          {item.settledAt && item.settledAt > 0 ? <span>{timeAgo(item.settledAt)}</span> : null}
+                          {hash && explorer ? (
+                            <a
+                              href={explorer}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="cm-trace-receipt__tx"
+                              title={hash}
+                            >
+                              <span>{shortTx(hash)}</span>
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          ) : hash ? (
+                            <span className="cm-trace-receipt__tx" title={hash}>{shortTx(hash)}</span>
+                          ) : null}
+                        </div>
+
+                        {item.bills && item.bills.length > 0 && (
+                          <BillTree bills={item.bills} />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+
+  return content;
+});
+
+export const Trace = memo(function Trace(props: TraceProps) {
+  if (props.mode === "inline") {
+    return <TraceInner {...props} />;
+  }
+
+  return (
+    <AnimatePresence>
+      {props.open ? (
+        <motion.div
+          key="cm-trace-backdrop"
+          className="cm-trace-backdrop"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) props.onClose();
+          }}
+        >
+          <motion.div
+            key="cm-trace-drawer"
+            className="cm-trace-drawer"
+            initial={{ x: "100%" }}
+            animate={{ x: 0 }}
+            exit={{ x: "100%" }}
+            transition={{ type: "spring", stiffness: 360, damping: 36 }}
+          >
+            <TraceInner {...props} />
+          </motion.div>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
+  );
+});
