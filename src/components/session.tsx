@@ -116,6 +116,19 @@ function SessionChoiceGrid({ choices }: { choices: SessionChoice[] }) {
   );
 }
 
+function SessionSummary({ rows }: { rows: SessionSummaryRow[] }) {
+  return (
+    <div className="cm-session-summary">
+      {rows.map((row, index) => (
+        <div key={index} className="cm-session-summary__row">
+          <span>{row.label}</span>
+          <strong>{row.value}</strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function SessionBudgetDialog({
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
