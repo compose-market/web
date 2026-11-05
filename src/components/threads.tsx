@@ -65,3 +65,22 @@ export async function listAgentThreads(
   const body = (await response.json()) as { threads?: ThreadSummary[] };
   return Array.isArray(body.threads) ? body.threads : [];
 }
+
+export async function loadAgentThread(
+  agentWallet: string,
+  threadId: string,
+  userAddress: string,
+  options?: { signal?: AbortSignal },
+): Promise<HydratedThread | null> {
+  if (!agentWallet || !threadId) return null;
+  const url = new URL(
+    `${RUNTIME_BASE_URL}/agent/${encodeURIComponent(agentWallet)}/threads/${encodeURIComponent(threadId)}`,
+  );
+  if (userAddress) url.searchParams.set("userAddress", userAddress);
+  const response = await sdk.fetch(url.toString(), {
+    signal: options?.signal,
+    ...(userAddress ? { userAddress } : {}),
+  });
+  if (!response.ok) return null;
+  return (await response.json()) as HydratedThread;
+}
