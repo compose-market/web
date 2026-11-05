@@ -99,6 +99,23 @@ function budgetRows(selectedBudget: number, duration: number): SessionSummaryRow
   ];
 }
 
+function SessionChoiceGrid({ choices }: { choices: SessionChoice[] }) {
+  return (
+    <div className="cm-session-choice-grid">
+      {choices.map((choice, index) => (
+        <button
+          key={index}
+          type="button"
+          className={cn("cm-session-choice", choice.active && "active")}
+          onClick={choice.onSelect}
+        >
+          {choice.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function SessionBudgetDialog({
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
