@@ -1,23 +1,46 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import * as React from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, Clock, Copy, Key, Plus, Shield, Trash2, Wallet, Zap } from "lucide-react";
 import {
-  KeyDialogShell,
-  SessionBudgetDialogShell,
-  SessionIndicatorShell,
-  SessionManageDialogShell,
-  type SessionManageKey,
-  type SessionSummaryRow,
-} from "@compose-market/theme/session";
-import { ShellButton } from "@compose-market/theme/shell";
+  ShellButton,
+  ShellInput,
+  ShellModal,
+  ShellNotice,
+  ShellPanel,
+} from "@compose-market/theme/shell";
 import { useSession } from "@/hooks/use-session.tsx";
+import { useSelectedUserAddress } from "@/hooks/use-address";
+import { useChain } from "@/contexts/Network";
 import { useWalletAccount } from "@/hooks/use-wallet";
-import { toast } from "sonner";
+import { toast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
 import { sdk } from "@/lib/sdk";
 import { cn } from "@/lib/utils";
 import { getExplorerTxUrl } from "@/lib/chains";
 import type { KeyRecord } from "@compose-market/sdk";
+
+interface SessionChoice {
+  label: React.ReactNode;
+  active?: boolean;
+  onSelect: () => void;
+}
+
+interface SessionSummaryRow {
+  label: React.ReactNode;
+  value: React.ReactNode;
+}
+
+interface SessionManageKey {
+  id: string;
+  title: React.ReactNode;
+  maskedValue: React.ReactNode;
+  summaryRows: SessionSummaryRow[];
+  copied?: boolean;
+  onCopy: () => void;
+  onRevoke: () => void;
+}
 
 interface SessionBudgetDialogProps {
   open?: boolean;
@@ -38,9 +61,7 @@ interface KeyDialogProps {
 
 function formatTimeRemaining(expiresAt: number): string {
   const remaining = expiresAt - Date.now();
-  if (remaining <= 0) {
-    return "Expired";
-  }
+  if (remaining <= 0) return "Expired";
 
   const hours = Math.floor(remaining / (1000 * 60 * 60));
   const minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
@@ -49,9 +70,7 @@ function formatTimeRemaining(expiresAt: number): string {
     const days = Math.floor(hours / 24);
     return `${days}d ${hours % 24}h`;
   }
-  if (hours > 0) {
-    return `${hours}h ${minutes}m`;
-  }
+  if (hours > 0) return `${hours}h ${minutes}m`;
   return `${minutes}m`;
 }
 
@@ -74,18 +93,9 @@ function toBudgetWeiString(value: number): string {
 
 function budgetRows(selectedBudget: number, duration: number): SessionSummaryRow[] {
   return [
-    {
-      label: "Max Spend",
-      value: `$${(selectedBudget / 1_000_000).toFixed(2)} USDC`,
-    },
-    {
-      label: "Expires After",
-      value: `${duration} hours`,
-    },
-    {
-      label: "Approvals Required",
-      value: "1 (now)",
-    },
+    { label: "Max Spend", value: `$${(selectedBudget / 1_000_000).toFixed(2)} USDC` },
+    { label: "Expires After", value: `${duration} hours` },
+    { label: "Approvals Required", value: "1 (now)" },
   ];
 }
 
