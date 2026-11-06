@@ -100,3 +100,178 @@ function formatDuration(startedAt: number, endedAt?: number): string {
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
 }
+
+export function Pulse({
+  status,
+  sending,
+  activityState,
+  activePlan,
+  pendingConnector,
+  stepCount = 0,
+  receipt,
+  receipts,
+  onStop,
+  onConnect,
+  onInspect,
+  className,
+}: PulseProps) {
+  const tools: ChatToolActivity[] = activityState?.tools ?? [];
+  const turnSummary = React.useMemo(
+    () => summarizeTurnReceipts(receipts, receipt),
+    [receipt, receipts],
+  );
+  const progress = React.useMemo(() => planProgress(activePlan), [activePlan]);
+  const isActive = progress.running
+    || status === "paying"
+    || activityState?.phase === "thinking"
+    || activityState?.phase === "tool"
+    || activityState?.phase === "streaming"
+    || tools.some((t) => t.status === "running");
+
+  const isError = activityState?.phase === "error";
+  const hasSteps = stepCount > 0 || tools.length > 0 || Boolean(activePlan) || Boolean(pendingConnector);
+  const visible = isActive || isError || hasSteps || Boolean(turnSummary);
+  const canStop = (isActive || sending) && Boolean(onStop);
+
+  const [now, setNow] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    if (!isActive) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 250);
+    return () => window.clearInterval(timer);
+  }, [isActive]);
+
+  const totalBadgeCount = Math.max(stepCount, tools.length, progress.total);
+
+  return (
+    <AnimatePresence initial={false}>
+      {visible ? (
+        <motion.div
+          key="cm-pulse"
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 4 }}
+          transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+          className={cn("cm-pulse", className)}
+          data-state={isError ? "error" : isActive ? "live" : "settled"}
+          role="status"
+          aria-live="polite"
+        >
+          <div className="cm-pulse__lead">
+            <span className="cm-pulse__beacon" aria-hidden="true">
+              {isError ? (
+                <XCircle className="cm-pulse__lead-icon" />
+              ) : isActive ? (
+                <Loader2 className="cm-pulse__lead-icon cm-pulse__spin" />
+              ) : (
+                <Activity className="cm-pulse__lead-icon" />
+              )}
+            </span>
+            <span className="cm-pulse__label" title={phaseText(status, activityState, progress.label)}>
+              {phaseText(status, activityState, progress.label)}
+            </span>
+            {progress.running ? (
+              <progress
+                className="cm-pulse__progress"
+                {...(progress.total > 0 && progress.done > 0 ? { value: progress.done, max: progress.total } : {})}
+                aria-label={
+                  progress.total > 0
+                    ? `Plan progress: ${progress.done} of ${progress.total} steps completed`
+                    : "Executing plan"
+                }
+              />
+            ) : null}
+          </div>
+
+          {tools.length > 0 && (
+            <div className="cm-pulse__pills cm-snap-x" role="list" aria-label="Live execution steps">
+              {tools.slice(-10).map((tool) => (
+                <button
+                  key={tool.id}
+                  type="button"
+                  role="listitem"
+                  className="cm-pulse__pill cm-snap-item"
+                  data-status={tool.status}
+                  data-kind={tool.kind ?? "tool"}
+                  onClick={() => onInspect?.(tool.nodeId)}
+                  title={tool.summary || tool.displayName || tool.toolName}
+                >
+                  {tool.status === "running" ? (
+                    <Loader2 className="cm-pulse__pill-icon cm-pulse__spin" />
+                  ) : tool.status === "error" ? (
+                    <XCircle className="cm-pulse__pill-icon" />
+                  ) : (
+                    actionIcon(tool.kind)
+                  )}
+                  <span className="cm-pulse__pill-name">{tool.displayName || tool.toolName}</span>
+                  <span className="cm-pulse__pill-time">
+                    {formatDuration(tool.startedAt, tool.endedAt ?? (tool.status === "running" ? now : tool.startedAt))}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="cm-pulse__actions">
+            {pendingConnector && onConnect && (
+              <button
+                type="button"
+                className="cm-pulse__connect-btn"
+                onClick={() => onConnect(pendingConnector)}
+                title={`Connect ${pendingConnector.name || pendingConnector.slug}`}
+              >
+                <Plug className="cm-pulse__pill-icon" aria-hidden="true" />
+                <span>Connect {pendingConnector.name || pendingConnector.slug}</span>
+              </button>
+            )}
+
+            {turnSummary && !isActive && (
+              <button
+                type="button"
+                className="cm-pulse__receipt"
+                data-status={turnSummary.status}
+                onClick={() => onInspect?.("receipt")}
+                title="View settled x402 transactions"
+              >
+                {turnSummary.status === "settled" ? (
+                  <Check className="cm-pulse__pill-icon" />
+                ) : turnSummary.status === "failed" ? (
+                  <XCircle className="cm-pulse__pill-icon" />
+                ) : (
+                  <Loader2 className="cm-pulse__pill-icon cm-pulse__spin" />
+                )}
+                <span>{formatWeiUsd(turnSummary.totalAmountWei)}</span>
+                {turnSummary.status !== "settled" ? (
+                  <span>{turnSummary.status === "failed" ? "Failed" : "Settling"}</span>
+                ) : null}
+              </button>
+            )}
+
+            {onInspect && (hasSteps || turnSummary) && (
+              <button
+                type="button"
+                className="cm-pulse__flow-btn"
+                onClick={() => onInspect?.()}
+              >
+                <GitBranch className="cm-pulse__pill-icon" />
+                <span>Activity{totalBadgeCount > 0 ? ` (${totalBadgeCount})` : ""}</span>
+              </button>
+            )}
+
+            {canStop && (
+              <button
+                type="button"
+                className="cm-pulse__stop-btn"
+                onClick={onStop}
+                aria-label="Stop generation"
+                title="Stop generation"
+              >
+                <Square className="cm-pulse__stop-icon" />
+                <span>Stop</span>
+              </button>
+            )}
+          </div>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
+  );
+}
