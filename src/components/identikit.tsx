@@ -121,3 +121,44 @@ function resolveAvatarUrl(agent: OnchainAgent): string | null {
   const avatarUrl = (agent.metadata as { avatarUrl?: string | null } | undefined)?.avatarUrl;
   return typeof avatarUrl === "string" && /^(https?:\/\/|data:image\/|blob:)/i.test(avatarUrl) ? avatarUrl : null;
 }
+
+function chain(agent: OnchainAgent): number | undefined {
+  const network = agent.network ?? agent.metadata?.network;
+  if (!network?.startsWith("eip155:")) return undefined;
+  const value = Number.parseInt(network.slice("eip155:".length), 10);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function conf(chainId: number | undefined): (typeof CHAIN_CONFIG)[number] | undefined {
+  return typeof chainId === "number" && Object.prototype.hasOwnProperty.call(CHAIN_CONFIG, chainId)
+    ? CHAIN_CONFIG[chainId]
+    : undefined;
+}
+
+function chainLabel(agent: OnchainAgent): string {
+  const chainId = chain(agent);
+  const chainInfo = conf(chainId);
+  if (chainInfo) return chainInfo.name;
+  return agent.network ?? agent.metadata?.network ?? "Network";
+}
+
+function NetworkMark({ agent, tooltip = true }: { agent: OnchainAgent; tooltip?: boolean }) {
+  const network = agent.network ?? agent.metadata?.network;
+  const logo = network ? NETWORK_LOGOS[network] : undefined;
+  if (!logo) return null;
+  const label = chainLabel(agent);
+  const badge = (
+    <span className="cm-agent-card__network" aria-label={label} title={tooltip ? undefined : label}>
+      <img
+        className="cm-agent-card__network-image"
+        src={logo}
+        alt=""
+        width={18}
+        height={18}
+        loading="lazy"
+        decoding="async"
+      />
+    </span>
+  );
+  return tooltip ? <Hint label={label}>{badge}</Hint> : badge;
+}
