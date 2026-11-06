@@ -22,6 +22,8 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useSession } from "@/hooks/use-session";
+import { hasSessionAuth } from "@/lib/sdk";
+import { safeHref } from "@/lib/performance/markdown";
 import {
     BACKPACK_CLOUD_PERMISSION_TYPES,
     BACKPACK_GC_TIME,
@@ -76,8 +78,6 @@ import {
 import { sdk } from "@/lib/sdk";
 import { useSelectedUserAddress } from "@/hooks/use-address";
 import { useAgentCatalog } from "@/hooks/use-agents";
-import { hasSessionAuth } from "@/lib/sdk";
-import { safeHref } from "@/lib/performance/markdown";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import type {
@@ -92,6 +92,8 @@ import {
     type BackpackTab,
     type OpenBackpackDetail,
 } from "@/components/layout/Layout";
+
+export { OPEN_BACKPACK_EVENT, type BackpackTab, type OpenBackpackDetail };
 
 export function openGlobalBackpack(detail: OpenBackpackDetail = {}): void {
     if (typeof window !== "undefined") {
@@ -111,50 +113,24 @@ interface Permission {
     granted: boolean;
 }
 
-/** Provider display info — slugs match Composio toolkit slugs */
 interface ProviderDisplay {
-    slug: string;        // Composio toolkit slug (e.g., "gmail", "github")
-    name: string;        // Human-readable name
-    logo: string;        // Brand logo URL
-    color: string;       // Brand color (for subtle tinting)
-    description: string; // Short description of what connects
-    connectionType?: "oauth" | "channel" | "disabled"; // how to connect
-    badge?: string;      // optional badge label (e.g., "Business Only")
-}
-
-interface ConnectionStatus {
     slug: string;
     name: string;
-    connected: boolean;
-    accountId?: string;
-    connectedAccountId?: string;
+    logo: string;
+    color: string;
+    description: string;
+    badge?: string;
 }
 
 interface ToolkitResult {
     slug: string;
     name: string;
-    logo: string;
-    description: string;
-    categories: string[];
-    authSchemes: string[];
-}
-
-const CONNECTORS_URL = (import.meta.env.VITE_CONNECTORS_URL || "https://connectors.compose.market").replace(/\/+$/, "");
-
-interface ConnectorVarSpec {
-    varName: string;
+    logo?: string;
     description?: string;
-    obtainUrl?: string;
-}
-
-interface ConnectorRow {
-    slug: string;
-    name: string;
-    connected: boolean;
-    allowed: boolean;
-    status: string;
-    missingVars: ConnectorVarSpec[];
-    actions?: string[];
+    categories?: string[];
+    authMode?: "oauth" | "api_key" | "no_auth";
+    noAuth?: boolean;
+    toolsCount?: number;
 }
 
 interface ConnectorCatalogEntry {
@@ -162,8 +138,6 @@ interface ConnectorCatalogEntry {
     name: string;
     description?: string;
 }
-
-type StatusMap = Partial<Record<ChannelName, ChannelStatusResponse>>;
 
 type WhatsAppState = {
     socket: string;
@@ -174,6 +148,8 @@ type WhatsAppState = {
 };
 
 const CHANNELS_LIST = ["telegram", "whatsapp", "slack", "discord"] as const satisfies readonly ChannelName[];
+const INITIAL_CATALOG_WINDOW = 60;
+const CATALOG_WINDOW_STEP = 60;
 
 const CHANNEL_META: Record<ChannelName, {
     label: string;
@@ -333,6 +309,8 @@ const FEATURED_PROVIDERS: ProviderDisplay[] = [
     },
 ];
 
+const FEATURED_SLUGS = new Set(FEATURED_PROVIDERS.map((p) => p.slug));
+
 // =============================================================================
 // Component
 // =============================================================================
@@ -340,6 +318,7 @@ const FEATURED_PROVIDERS: ProviderDisplay[] = [
 interface BackpackDialogProps {
     userAddress?: string;
     agentWallet?: string;
+    initialTab?: BackpackTab;
     open?: boolean;
     onOpenChange?: (open: boolean) => void;
     showTrigger?: boolean;
@@ -349,81 +328,229 @@ interface BackpackDialogProps {
 export function BackpackDialog({
     userAddress,
     agentWallet,
+    initialTab,
     open,
     onOpenChange,
     showTrigger = true,
-    agentName
+    agentName,
 }: BackpackDialogProps) {
     const { toast } = useToast();
-    const isMobile = useIsMobile();
+    const { keyToken, sessionActive } = useSession();
+    const queryClient = useQueryClient();
     const [isOpen, setIsOpen] = useState(false);
-    const [activeTab, setActiveTab] = useState("permissions");
+    const [activeTab, setActiveTab] = useState<string>(() => initialTab ?? (agentWallet ? "permissions" : "accounts"));
+    const [selectedAgentWallet, setSelectedAgentWallet] = useState<string>(agentWallet || "");
     const [loadingPermission, setLoadingPermission] = useState<string | null>(null);
     const [loadingAccount, setLoadingAccount] = useState<string | null>(null);
-    const [refreshing, setRefreshing] = useState(false);
+    const [manualRefreshingAccounts, setManualRefreshingAccounts] = useState(false);
+    const [manualRefreshingConnectors, setManualRefreshingConnectors] = useState(false);
 
-    // Search state
+    // Search & progressive windowing
     const [searchQuery, setSearchQuery] = useState("");
-    const [searchResults, setSearchResults] = useState<ToolkitResult[]>([]);
-    const [searching, setSearching] = useState(false);
+    const deferredAccountSearch = useDeferredValue(searchQuery);
+    const [accountsWindow, setAccountsWindow] = useState(INITIAL_CATALOG_WINDOW);
 
-    // WhatsApp connect screen state
-    const [whatsappScreen, setWhatsappScreen] = useState<null | "qr">(null);
-    const [whatsappQr, setWhatsappQr] = useState<string | null>(null);
-    const [whatsappQrLoading, setWhatsappQrLoading] = useState(false);
-    const [whatsappPairingCode, setWhatsappPairingCode] = useState<string | null>(null);
-    const [whatsappPhoneInput, setWhatsappPhoneInput] = useState("");
-    const whatsappWsRef = useRef<WebSocket | null>(null);
-    const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const searchAbortRef = useRef<AbortController | null>(null);
-    const connectionsAbortRef = useRef<AbortController | null>(null);
-    const statusPollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-    const statusPollAbortRef = useRef<AbortController | null>(null);
-    const statusPollBusyRef = useRef(false);
+    const [connectorSearchQuery, setConnectorSearchQuery] = useState("");
+    const deferredConnectorSearch = useDeferredValue(connectorSearchQuery);
+    const [connectorsWindow, setConnectorsWindow] = useState(INITIAL_CATALOG_WINDOW);
 
-    // Channels states
-    const [channelStatuses, setChannelStatuses] = useState<StatusMap>({});
-    const [loadingChannels, setLoadingChannels] = useState(false);
     const [busyChannel, setBusyChannel] = useState<ChannelName | null>(null);
-    const [disconnectingChannel, setDisconnectingChannel] = useState<string | null>(null);
-
     const [whatsappChannelState, setWhatsappChannelState] = useState<WhatsAppState | null>(null);
-    const channelsPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-    const channelsAbortRef = useRef<AbortController | null>(null);
-    const channelsWsRef = useRef<WebSocket | null>(null);
-
-    // Permission states (cached locally, sourced from Backpack)
-    const [permissions, setPermissions] = useState<Record<string, boolean>>(() => {
-        const cached = new Set(getCachedBackpackPermissions(agentWallet));
-        return Object.fromEntries(
-            PERMISSION_TYPES.map((permission) => [permission.type, cached.has(permission.type as BackpackCloudPermission)]),
-        );
-    });
-
-    // Connection states fetched from Composio via backend
-    const [connections, setConnections] = useState<Record<string, ConnectionStatus>>({});
-
-    // Credential-gated connector states (user-scoped backpack)
-    const [connectorRows, setConnectorRows] = useState<ConnectorRow[]>([]);
-    const [loadingConnectors, setLoadingConnectors] = useState(false);
     const [connectorBusy, setConnectorBusy] = useState<string | null>(null);
-    const [gatedCatalog, setGatedCatalog] = useState<ConnectorCatalogEntry[]>([]);
-    const [connectPanel, setConnectPanel] = useState<null | { slug: string; name: string; credentials: ConnectorVarSpec[] }>(null);
+    const [connectPanel, setConnectPanel] = useState<null | { slug: string; name: string; credentials: BackpackConnectorVarSpec[] }>(null);
     const [connectVars, setConnectVars] = useState<Record<string, string>>({});
     const [connectSubmitting, setConnectSubmitting] = useState(false);
     const [connectError, setConnectError] = useState<string | null>(null);
 
-    // Connector catalog search (same pattern as the accounts toolkit search)
-    const [connectorSearchQuery, setConnectorSearchQuery] = useState("");
-    const [connectorSearchResults, setConnectorSearchResults] = useState<ConnectorCatalogEntry[]>([]);
-    const [searchingConnectors, setSearchingConnectors] = useState(false);
-    const connectorSearchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const connectorSearchAbortRef = useRef<AbortController | null>(null);
+    const statusPollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const statusPollAbortRef = useRef<AbortController | null>(null);
+    const statusPollBusyRef = useRef(false);
+    const channelsPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const channelsAbortRef = useRef<AbortController | null>(null);
+    const channelsWsRef = useRef<WebSocket | null>(null);
 
     const handleOpen = open !== undefined ? open : isOpen;
     const handleOpenChange = onOpenChange || setIsOpen;
 
-    const agentLabel = agentName || (agentWallet ? `${agentWallet.slice(0, 6)}...${agentWallet.slice(-4)}` : "Agent");
+    useEffect(() => {
+        if (agentWallet) setSelectedAgentWallet(agentWallet);
+    }, [agentWallet]);
+
+    useEffect(() => {
+        if (handleOpen && initialTab) setActiveTab(initialTab);
+    }, [handleOpen, initialTab]);
+
+    const { userAddress: selectedWalletAddress } = useSelectedUserAddress();
+    const effectiveUserId = (userAddress || selectedWalletAddress || "").trim();
+
+    // Agent list for per-agent tabs (already backed by synchronous agent snapshot)
+    const { agents: catalogAgents } = useAgentCatalog({
+        enabled: handleOpen && !agentWallet && (activeTab === "permissions" || activeTab === "channels"),
+    });
+    const manowarAgents = useMemo(
+        () => catalogAgents.filter((card): card is DirectoryAgent & { walletAddress: string } =>
+            typeof card.walletAddress === "string" && card.walletAddress.length > 0),
+        [catalogAgents],
+    );
+    const effectiveAgentWallet = agentWallet || selectedAgentWallet || manowarAgents[0]?.walletAddress || undefined;
+    const selectedCatalogAgent = useMemo(
+        () => manowarAgents.find((card) => card.walletAddress === effectiveAgentWallet),
+        [effectiveAgentWallet, manowarAgents],
+    );
+    const agentLabel = agentName
+        || selectedCatalogAgent?.name
+        || (effectiveAgentWallet ? `${effectiveAgentWallet.slice(0, 6)}...${effectiveAgentWallet.slice(-4)}` : "Agent");
+
+    // Shared Connectors catalog snapshot (0 ms cached, eliminates /accounts?limit=200 and /mcps?limit=100)
+    const catalogSnap = useConnectorCatalogSnapshot(
+        handleOpen && (activeTab === "accounts" || activeTab === "connectors"),
+    );
+
+    const allConnectableToolkits = useMemo<ToolkitResult[]>(() => {
+        if (!catalogSnap.hasData) return [];
+        return catalogSnap.accountServers
+            .filter((s) => !s.noAuth && s.authMode !== "no_auth")
+            .map((s) => ({
+                slug: s.slug,
+                name: s.name,
+                logo: s.logo,
+                description: s.description,
+                categories: s.tags,
+                authMode: s.authMode,
+                noAuth: s.noAuth,
+                toolsCount: s.toolCount,
+            }));
+    }, [catalogSnap.accountServers, catalogSnap.hasData]);
+
+    const accountsTotal = allConnectableToolkits.length || (catalogSnap.meta?.accountsServers ?? 0);
+
+    const browseableCatalogToolkits = useMemo(
+        () => allConnectableToolkits.filter((tk) => !FEATURED_SLUGS.has(tk.slug)),
+        [allConnectableToolkits],
+    );
+
+    const gatedCatalog = useMemo<ConnectorCatalogEntry[]>(() => {
+        if (!catalogSnap.hasData) return [];
+        return catalogSnap.mcpServers
+            .filter((s) => s.status === "credential_gated")
+            .map((s) => ({
+                slug: s.slug,
+                name: s.name || s.slug,
+                ...(s.description ? { description: s.description } : {}),
+            }));
+    }, [catalogSnap.hasData, catalogSnap.mcpServers]);
+
+    // ==========================================================================
+    // Cached Tab Queries (Owner Snapshots + TanStack Query)
+    // ==========================================================================
+
+    const accountsSnapshot = useMemo(() => readBackpackAccountsCache(effectiveUserId), [effectiveUserId]);
+    const accountsQuery = useQuery<Record<string, BackpackConnectionInfo>, Error>({
+        queryKey: backpackAccountsQueryKey(effectiveUserId),
+        queryFn: ({ signal }) => fetchBackpackAccountsMap(effectiveUserId, { signal }),
+        initialData: accountsSnapshot?.data,
+        initialDataUpdatedAt: accountsSnapshot?.updatedAt,
+        staleTime: BACKPACK_STALE_TIME,
+        gcTime: BACKPACK_GC_TIME,
+        enabled: handleOpen && Boolean(effectiveUserId) && activeTab === "accounts",
+        retry: 1,
+    });
+    const connections = accountsQuery.data ?? accountsSnapshot?.data ?? {};
+
+    const connectorsSnapshot = useMemo(() => readBackpackConnectorsCache(effectiveUserId), [effectiveUserId]);
+    const connectorsQuery = useQuery<BackpackConnectorRow[], Error>({
+        queryKey: backpackConnectorsQueryKey(effectiveUserId),
+        queryFn: ({ signal }) => fetchBackpackConnectorRows(effectiveUserId, { signal }),
+        initialData: connectorsSnapshot?.data,
+        initialDataUpdatedAt: connectorsSnapshot?.updatedAt,
+        staleTime: BACKPACK_STALE_TIME,
+        gcTime: BACKPACK_GC_TIME,
+        enabled: handleOpen && Boolean(effectiveUserId) && activeTab === "connectors",
+        retry: 1,
+    });
+    const connectorRows = connectorsQuery.data ?? connectorsSnapshot?.data ?? [];
+
+    const channelsSnapshot = useMemo(
+        () => readBackpackChannelsCache(effectiveUserId, effectiveAgentWallet),
+        [effectiveAgentWallet, effectiveUserId],
+    );
+    const channelsQuery = useQuery<BackpackChannelStatusMap, Error>({
+        queryKey: backpackChannelsQueryKey(effectiveUserId, effectiveAgentWallet || ""),
+        queryFn: ({ signal }) => fetchAllChannelStatuses(effectiveUserId, effectiveAgentWallet!, { signal }),
+        initialData: channelsSnapshot?.data,
+        initialDataUpdatedAt: channelsSnapshot?.updatedAt,
+        staleTime: BACKPACK_STALE_TIME,
+        gcTime: BACKPACK_GC_TIME,
+        enabled: handleOpen && Boolean(effectiveUserId) && Boolean(effectiveAgentWallet) && activeTab === "channels",
+        retry: 1,
+    });
+    const channelStatuses = channelsQuery.data ?? channelsSnapshot?.data ?? {};
+
+    const cachedPermissionsList = useMemo(
+        () => getCachedPermissions(effectiveAgentWallet, effectiveUserId),
+        [effectiveAgentWallet, effectiveUserId],
+    );
+    const hasPermissionsAuth = Boolean(keyToken || sessionActive || hasSessionAuth(effectiveUserId));
+    const permissionsQuery = useQuery<BackpackCloudPermission[], Error>({
+        queryKey: backpackPermissionsQueryKey(effectiveUserId, effectiveAgentWallet || ""),
+        queryFn: () => fetchCloudPermissions(effectiveUserId, effectiveAgentWallet!),
+        initialData: cachedPermissionsList.length > 0 ? cachedPermissionsList : undefined,
+        initialDataUpdatedAt: cachedPermissionsList.length > 0 ? Date.now() - BACKPACK_STALE_TIME : 0,
+        staleTime: BACKPACK_STALE_TIME,
+        gcTime: BACKPACK_GC_TIME,
+        enabled: handleOpen && Boolean(effectiveUserId) && Boolean(effectiveAgentWallet) && activeTab === "permissions" && hasPermissionsAuth,
+        retry: 1,
+    });
+    const permissions = useMemo<Record<string, boolean>>(() => {
+        const granted = new Set(permissionsQuery.data ?? cachedPermissionsList);
+        return Object.fromEntries(
+            PERMISSION_TYPES.map((perm) => [perm.type, granted.has(perm.type as BackpackCloudPermission)]),
+        );
+    }, [cachedPermissionsList, permissionsQuery.data]);
+
+    // ==========================================================================
+    // Local 0 ms Search Filtering over Snapshot
+    // ==========================================================================
+
+    const trimmedAccountSearch = deferredAccountSearch.trim().toLowerCase();
+    const filteredAccountMatches = useMemo(() => {
+        if (!trimmedAccountSearch) return [];
+        return allConnectableToolkits.filter((tk) => (
+            tk.name.toLowerCase().includes(trimmedAccountSearch)
+            || tk.slug.toLowerCase().includes(trimmedAccountSearch)
+            || (tk.description || "").toLowerCase().includes(trimmedAccountSearch)
+            || (tk.categories || []).some((cat) => cat.toLowerCase().includes(trimmedAccountSearch))
+        )).slice(0, 60);
+    }, [allConnectableToolkits, trimmedAccountSearch]);
+
+    const filteredSearchResults = useMemo(
+        () => filteredAccountMatches.filter((tk) => !FEATURED_SLUGS.has(tk.slug)),
+        [filteredAccountMatches],
+    );
+
+    const trimmedConnectorSearch = deferredConnectorSearch.trim().toLowerCase();
+    const filteredGatedCatalog = useMemo(() => {
+        const rowSlugs = new Set(connectorRows.map((row) => row.slug));
+        const base = gatedCatalog.filter((entry) => !rowSlugs.has(entry.slug));
+        if (!trimmedConnectorSearch) return base;
+        return base.filter((entry) => (
+            entry.name.toLowerCase().includes(trimmedConnectorSearch)
+            || entry.slug.toLowerCase().includes(trimmedConnectorSearch)
+            || (entry.description || "").toLowerCase().includes(trimmedConnectorSearch)
+        ));
+    }, [connectorRows, gatedCatalog, trimmedConnectorSearch]);
+
+    useEffect(() => {
+        setAccountsWindow(INITIAL_CATALOG_WINDOW);
+    }, [trimmedAccountSearch]);
+
+    useEffect(() => {
+        setConnectorsWindow(INITIAL_CATALOG_WINDOW);
+    }, [trimmedConnectorSearch]);
+
+    // ==========================================================================
+    // Cleanup Helpers
+    // ==========================================================================
 
     const clearStatusPolling = useCallback(() => {
         if (statusPollIntervalRef.current) {
@@ -455,42 +582,12 @@ export function BackpackDialog({
     }, []);
 
     const cleanupAsyncWork = useCallback(() => {
-        if (searchDebounceRef.current) {
-            clearTimeout(searchDebounceRef.current);
-            searchDebounceRef.current = null;
-        }
-        if (searchAbortRef.current) {
-            searchAbortRef.current.abort();
-            searchAbortRef.current = null;
-        }
-        if (connectionsAbortRef.current) {
-            connectionsAbortRef.current.abort();
-            connectionsAbortRef.current = null;
-        }
-        if (connectorSearchDebounceRef.current) {
-            clearTimeout(connectorSearchDebounceRef.current);
-            connectorSearchDebounceRef.current = null;
-        }
-        if (connectorSearchAbortRef.current) {
-            connectorSearchAbortRef.current.abort();
-            connectorSearchAbortRef.current = null;
-        }
         clearStatusPolling();
-        if (whatsappWsRef.current) {
-            whatsappWsRef.current.close();
-            whatsappWsRef.current = null;
-        }
         cleanupChannels();
     }, [clearStatusPolling, cleanupChannels]);
 
     const resetTransientState = useCallback(() => {
         setLoadingAccount(null);
-        setWhatsappScreen(null);
-        setWhatsappQr(null);
-        setWhatsappQrLoading(false);
-        setWhatsappPairingCode(null);
-        setWhatsappPhoneInput("");
-        setSearching(false);
         setWhatsappChannelState(null);
         setBusyChannel(null);
         setConnectPanel(null);
@@ -498,8 +595,7 @@ export function BackpackDialog({
         setConnectSubmitting(false);
         setConnectError(null);
         setConnectorSearchQuery("");
-        setConnectorSearchResults([]);
-        setSearchingConnectors(false);
+        setSearchQuery("");
     }, []);
 
     const handleDialogOpenChange = useCallback((nextOpen: boolean) => {
@@ -510,186 +606,54 @@ export function BackpackDialog({
         handleOpenChange(nextOpen);
     }, [cleanupAsyncWork, handleOpenChange, resetTransientState]);
 
-    // Effective userAddress — fallback to anonymous session id
-    const effectiveUserId = userAddress || sessionStorage.getItem("composio_anon_id") || (() => {
-        const id = `anon_${crypto.randomUUID()}`;
-        sessionStorage.setItem("composio_anon_id", id);
-        return id;
-    })();
-
-    // ==========================================================================
-    // Fetch Connection Status from Backend
-    // ==========================================================================
-
-    const fetchConnections = useCallback(async () => {
-        if (connectionsAbortRef.current) {
-            connectionsAbortRef.current.abort();
-        }
-
-        const controller = new AbortController();
-        connectionsAbortRef.current = controller;
-
-        try {
-            if (!agentWallet) {
-                setConnections({});
-                return;
-            }
-            setRefreshing(true);
-            const data = await sdk.accounts.list({ userAddress: effectiveUserId, agentWallet }, { signal: controller.signal });
-            const connMap: Record<string, ConnectionStatus> = {};
-
-            // Map Composio connections to our featured providers
-            if (data.connections) {
-                for (const conn of data.connections) {
-                    connMap[conn.slug] = conn;
-                }
-            }
-
-            setConnections(connMap);
-        } catch (err) {
-            if (controller.signal.aborted) {
-                return;
-            }
-            console.warn("[Backpack] Could not fetch connections:", err);
-        } finally {
-            if (connectionsAbortRef.current === controller) {
-                connectionsAbortRef.current = null;
-                setRefreshing(false);
-            }
-        }
-    }, [agentWallet, effectiveUserId]);
-
-    // ==========================================================================
-    // Credential-Gated Connectors (user-scoped backpack)
-    // ==========================================================================
-
-    const fetchConnectors = useCallback(async () => {
-        if (!agentWallet) {
-            setConnectorRows([]);
-            return;
-        }
-        setLoadingConnectors(true);
-        try {
-            const status = await sdk.gated.status({ userAddress: effectiveUserId, agentWallet });
-            setConnectorRows(status.connectors || []);
-        } catch (err) {
-            console.warn("[Backpack] Could not fetch connectors:", err);
-        } finally {
-            setLoadingConnectors(false);
-        }
-    }, [agentWallet, effectiveUserId]);
-
-    const fetchGatedCatalog = useCallback(async () => {
-        try {
-            const response = await fetch(`${CONNECTORS_URL}/mcps?status=credential_gated&limit=100`, {
-                headers: { Accept: "application/json" },
-                signal: AbortSignal.timeout(8000),
-            });
-            if (!response.ok) return;
-            const data = await response.json() as {
-                servers?: Array<{ slug?: string; name?: string; description?: string }>;
-            };
-            setGatedCatalog((data.servers || [])
-                .filter((server): server is { slug: string; name?: string; description?: string } => typeof server.slug === "string" && server.slug.length > 0)
-                .map((server) => ({
-                    slug: server.slug,
-                    name: server.name || server.slug,
-                    ...(server.description ? { description: server.description } : {}),
-                })));
-        } catch (err) {
-            console.warn("[Backpack] Could not fetch gated catalog:", err);
-        }
-    }, []);
-
-    const searchConnectors = useCallback(async (query: string) => {
-        if (!query.trim()) {
-            if (connectorSearchAbortRef.current) {
-                connectorSearchAbortRef.current.abort();
-                connectorSearchAbortRef.current = null;
-            }
-            setConnectorSearchResults([]);
-            return;
-        }
-
-        if (connectorSearchAbortRef.current) {
-            connectorSearchAbortRef.current.abort();
-        }
-
-        const controller = new AbortController();
-        connectorSearchAbortRef.current = controller;
-
-        setSearchingConnectors(true);
-        try {
-            const response = await fetch(
-                `${CONNECTORS_URL}/mcps/search?q=${encodeURIComponent(query)}&limit=30`,
-                { headers: { Accept: "application/json" }, signal: controller.signal },
-            );
-            if (!response.ok) {
-                setConnectorSearchResults([]);
-                return;
-            }
-            const data = await response.json() as {
-                servers?: Array<{ slug?: string; name?: string; description?: string; status?: string }>;
-            };
-            setConnectorSearchResults((data.servers || [])
-                .filter((server): server is { slug: string; name?: string; description?: string } =>
-                    typeof server.slug === "string" && server.slug.length > 0 && server.status === "credential_gated")
-                .map((server) => ({
-                    slug: server.slug,
-                    name: server.name || server.slug,
-                    ...(server.description ? { description: server.description } : {}),
-                })));
-        } catch (err) {
-            if (controller.signal.aborted) {
-                return;
-            }
-            console.warn("[Backpack] Connector search error:", err);
-        } finally {
-            if (connectorSearchAbortRef.current === controller) {
-                connectorSearchAbortRef.current = null;
-                setSearchingConnectors(false);
-            }
-        }
-    }, []);
-
-    // Debounced connector search
     useEffect(() => {
-        if (connectorSearchDebounceRef.current) {
-            clearTimeout(connectorSearchDebounceRef.current);
+        if (!handleOpen || activeTab !== "channels") {
+            cleanupChannels();
         }
-        if (!connectorSearchQuery.trim()) {
-            if (connectorSearchAbortRef.current) {
-                connectorSearchAbortRef.current.abort();
-                connectorSearchAbortRef.current = null;
-            }
-            setConnectorSearchResults([]);
-            setSearchingConnectors(false);
-            return;
+    }, [activeTab, cleanupChannels, handleOpen]);
+
+    useEffect(() => () => cleanupAsyncWork(), [cleanupAsyncWork]);
+
+    // ==========================================================================
+    // Refresh & Mutation Handlers (Write-Through Cache)
+    // ==========================================================================
+
+    const refreshAccounts = useCallback(async () => {
+        if (!effectiveUserId) return;
+        setManualRefreshingAccounts(true);
+        try {
+            const fresh = await fetchBackpackAccountsMap(effectiveUserId, { refresh: true });
+            queryClient.setQueryData(backpackAccountsQueryKey(effectiveUserId), fresh);
+        } catch (err) {
+            console.warn("[Backpack] Could not refresh connections:", err);
+        } finally {
+            setManualRefreshingAccounts(false);
         }
-        connectorSearchDebounceRef.current = setTimeout(() => {
-            searchConnectors(connectorSearchQuery);
-        }, 300);
-        return () => {
-            if (connectorSearchDebounceRef.current) clearTimeout(connectorSearchDebounceRef.current);
-        };
-    }, [connectorSearchQuery, searchConnectors]);
+    }, [effectiveUserId, queryClient]);
+
+    const refreshConnectors = useCallback(async () => {
+        if (!effectiveUserId) return;
+        setManualRefreshingConnectors(true);
+        try {
+            const fresh = await fetchBackpackConnectorRows(effectiveUserId, { refresh: true });
+            queryClient.setQueryData(backpackConnectorsQueryKey(effectiveUserId), fresh);
+        } catch (err) {
+            console.warn("[Backpack] Could not refresh connectors:", err);
+        } finally {
+            setManualRefreshingConnectors(false);
+        }
+    }, [effectiveUserId, queryClient]);
+
+    const refreshChannels = useCallback(async () => {
+        if (!effectiveAgentWallet || !effectiveUserId) return;
+        await channelsQuery.refetch();
+    }, [channelsQuery, effectiveAgentWallet, effectiveUserId]);
 
     const openConnectPanel = useCallback(async (slug: string, name?: string) => {
         setConnectorBusy(slug);
         setConnectError(null);
         try {
-            const response = await fetch(`${CONNECTORS_URL}/mcps/${encodeURIComponent(slug)}`, {
-                headers: { Accept: "application/json" },
-                signal: AbortSignal.timeout(8000),
-            });
-            if (!response.ok) {
-                throw new Error(`Connector catalog entry unavailable (${response.status}).`);
-            }
-            const card = await response.json() as {
-                slug?: string;
-                name?: string;
-                credentials?: Array<{ varName?: string; description?: string; obtainUrl?: string }>;
-            };
+            const card = await sdk.connectors.mcps.get(slug, { timeoutMs: 8000 });
             const credentials = (card.credentials || [])
                 .filter((entry): entry is { varName: string; description?: string; obtainUrl?: string } =>
                     typeof entry?.varName === "string" && entry.varName.trim().length > 0)
@@ -708,31 +672,35 @@ export function BackpackDialog({
     }, []);
 
     const submitConnectorConnect = useCallback(async () => {
-        if (!connectPanel || !agentWallet) return;
+        if (!connectPanel) return;
         setConnectSubmitting(true);
         setConnectError(null);
         try {
+            if (!effectiveUserId) {
+                throw new Error("Connect your wallet first to store connector credentials.");
+            }
             const vars: Record<string, string> = {};
             for (const credential of connectPanel.credentials) {
                 const value = (connectVars[credential.varName] || "").trim();
-                if (!value) {
-                    throw new Error(`${credential.varName} is required.`);
-                }
+                if (!value) throw new Error(`${credential.varName} is required.`);
                 vars[credential.varName] = value;
             }
-            await sdk.gated.connect({
+            await sdk.connectors.gated.connect({
                 userAddress: effectiveUserId,
                 slug: connectPanel.slug,
                 vars,
-                agentWallet,
             });
+            await sdk.connectors.gated.grant({
+                userAddress: effectiveUserId,
+                slug: connectPanel.slug,
+            }).catch(() => undefined);
             toast({
                 title: "Connector connected",
-                description: `${connectPanel.name} credentials stored and ${agentLabel} granted.`,
+                description: `${connectPanel.name} credentials stored and granted for your agents.`,
             });
             setConnectPanel(null);
             setConnectVars({});
-            void fetchConnectors();
+            await refreshConnectors();
         } catch (err) {
             const message = err instanceof Error ? err.message : "Could not connect connector.";
             setConnectError(message);
@@ -740,14 +708,53 @@ export function BackpackDialog({
         } finally {
             setConnectSubmitting(false);
         }
-    }, [agentLabel, agentWallet, connectPanel, connectVars, effectiveUserId, fetchConnectors, toast]);
+    }, [connectPanel, connectVars, effectiveUserId, refreshConnectors, toast]);
 
-    const disconnectConnector = useCallback(async (row: ConnectorRow) => {
+    const toggleConnectorGrant = useCallback(async (row: BackpackConnectorRow, nextAllowed: boolean) => {
         setConnectorBusy(row.slug);
         try {
-            await sdk.gated.disconnect({ userAddress: effectiveUserId, slug: row.slug });
+            if (nextAllowed) {
+                await sdk.connectors.gated.grant({ userAddress: effectiveUserId, slug: row.slug });
+            } else {
+                await sdk.connectors.gated.revoke({ userAddress: effectiveUserId, slug: row.slug });
+            }
+            const key = backpackConnectorsQueryKey(effectiveUserId);
+            queryClient.setQueryData<BackpackConnectorRow[]>(key, (prev) => {
+                const updated = (prev ?? connectorRows).map((item) => (
+                    item.slug === row.slug ? { ...item, allowed: nextAllowed } : item
+                ));
+                writeBackpackConnectorsCache(effectiveUserId, updated);
+                return updated;
+            });
+            toast({
+                title: nextAllowed ? "Connector granted" : "Connector revoked",
+                description: nextAllowed
+                    ? `${row.name} is now enabled for your agents.`
+                    : `${row.name} access paused for your agents.`,
+            });
+        } catch (err) {
+            toast({
+                title: "Update failed",
+                description: err instanceof Error ? err.message : "Could not update connector allowance.",
+                variant: "destructive",
+            });
+        } finally {
+            setConnectorBusy(null);
+        }
+    }, [connectorRows, effectiveUserId, queryClient, toast]);
+
+    const disconnectConnector = useCallback(async (row: BackpackConnectorRow) => {
+        setConnectorBusy(row.slug);
+        try {
+            await sdk.connectors.gated.disconnect({ userAddress: effectiveUserId, slug: row.slug });
+            const key = backpackConnectorsQueryKey(effectiveUserId);
+            queryClient.setQueryData<BackpackConnectorRow[]>(key, (prev) => {
+                const updated = (prev ?? connectorRows).filter((item) => item.slug !== row.slug);
+                writeBackpackConnectorsCache(effectiveUserId, updated);
+                return updated;
+            });
             toast({ title: "Connector disconnected", description: `${row.name} credentials removed.` });
-            void fetchConnectors();
+            await refreshConnectors();
         } catch (err) {
             toast({
                 title: "Disconnect failed",
@@ -757,45 +764,39 @@ export function BackpackDialog({
         } finally {
             setConnectorBusy(null);
         }
-    }, [effectiveUserId, fetchConnectors, toast]);
-
-    const refreshChannels = useCallback(async (signal?: AbortSignal) => {
-        if (!agentWallet) return;
-        setLoadingChannels(true);
-        try {
-            const entries = await Promise.all(CHANNELS_LIST.map(async (channel) => [
-                channel,
-                await sdk.channels.status(channel, { userAddress: effectiveUserId, agentWallet }, { signal }),
-            ] as const));
-            if (signal?.aborted) return;
-            setChannelStatuses(Object.fromEntries(entries) as StatusMap);
-        } catch (err) {
-            if (signal?.aborted) return;
-            console.warn("[Backpack] Could not refresh channels:", err);
-        } finally {
-            if (!signal?.aborted) setLoadingChannels(false);
-        }
-    }, [agentWallet, effectiveUserId]);
+    }, [effectiveUserId, refreshConnectors, toast]);
 
     const pollChannel = useCallback((channel: ChannelName) => {
-        if (!agentWallet) return;
-        const wallet = agentWallet;
+        if (!effectiveAgentWallet || !effectiveUserId) return;
+        const wallet = effectiveAgentWallet;
         if (channelsPollRef.current) clearInterval(channelsPollRef.current);
         if (channelsAbortRef.current) channelsAbortRef.current.abort();
 
         const controller = new AbortController();
         channelsAbortRef.current = controller;
         let attempts = 0;
+        const key = backpackChannelsQueryKey(effectiveUserId, wallet);
         const tick = async () => {
             attempts += 1;
             try {
-                const status = await sdk.channels.status(channel, { userAddress: effectiveUserId, agentWallet: wallet }, { signal: controller.signal });
+                const status = await sdk.channels.status(
+                    channel,
+                    { userAddress: effectiveUserId, agentWallet: wallet },
+                    { signal: controller.signal },
+                );
                 if (controller.signal.aborted) return;
-                setChannelStatuses((current) => ({ ...current, [channel]: status }));
+                queryClient.setQueryData<BackpackChannelStatusMap>(key, (prev) => {
+                    const next = { ...(prev ?? {}), [channel]: status };
+                    writeBackpackChannelsCache(effectiveUserId, wallet, next);
+                    return next;
+                });
                 if (status.connected || attempts >= 40) {
                     if (channelsPollRef.current) clearInterval(channelsPollRef.current);
                     channelsPollRef.current = null;
                     setBusyChannel(null);
+                    if (status.connected) {
+                        void queryClient.invalidateQueries({ queryKey: ["notifications"] });
+                    }
                 }
             } catch (error) {
                 if (!controller.signal.aborted) {
@@ -805,10 +806,10 @@ export function BackpackDialog({
         };
         void tick();
         channelsPollRef.current = setInterval(() => void tick(), 3000);
-    }, [agentWallet, effectiveUserId]);
+    }, [effectiveAgentWallet, effectiveUserId, queryClient]);
 
     const openAction = useCallback((link: ChannelLinkResponse) => {
-        const url = actionUrl(link);
+        const url = safeHref(actionUrl(link));
         if (!url) return;
         window.open(url, "_blank", "noopener,noreferrer");
     }, []);
@@ -820,9 +821,7 @@ export function BackpackDialog({
             pollChannel("whatsapp");
             return;
         }
-        if (channelsWsRef.current) {
-            channelsWsRef.current.close();
-        }
+        if (channelsWsRef.current) channelsWsRef.current.close();
         setWhatsappChannelState({ socket, loading: true, phone: "" });
         const ws = new WebSocket(socket);
         channelsWsRef.current = ws;
@@ -842,6 +841,7 @@ export function BackpackDialog({
                     setWhatsappChannelState(null);
                     setBusyChannel(null);
                     void refreshChannels();
+                    void queryClient.invalidateQueries({ queryKey: ["notifications"] });
                     toast({ title: "WhatsApp connected", description: "Channel route is ready." });
                 }
                 if (message.type === "error") {
@@ -864,19 +864,19 @@ export function BackpackDialog({
             channelsWsRef.current = null;
         };
         pollChannel("whatsapp");
-    }, [openAction, pollChannel, refreshChannels, toast]);
+    }, [openAction, pollChannel, queryClient, refreshChannels, toast]);
 
     const connectChannel = useCallback(async (
         channel: ChannelName,
         mode?: "user" | "guild",
-        privacy?: "public" | "private"
+        privacy?: "public" | "private",
     ) => {
-        if (!agentWallet) return;
+        if (!effectiveAgentWallet) return;
         setBusyChannel(channel);
         try {
             const link = await sdk.channels.link(channel, {
                 userAddress: effectiveUserId,
-                agentWallet,
+                agentWallet: effectiveAgentWallet,
                 agentName: agentLabel,
                 ...(mode ? { mode } : {}),
                 ...(privacy ? { privacy } : {}),
@@ -896,44 +896,22 @@ export function BackpackDialog({
                 variant: "destructive",
             });
         }
-    }, [agentLabel, agentWallet, effectiveUserId, openAction, pollChannel, startWhatsAppChannel, toast]);
-
-    const disconnectChannel = useCallback(async (route: ChannelRoute) => {
-        if (!agentWallet) return;
-        setDisconnectingChannel(route.id);
-        try {
-            await sdk.channels.disconnect(route.channel, {
-                userAddress: effectiveUserId,
-                agentWallet,
-                accountId: route.accountId,
-                threadId: route.threadId,
-            });
-            await refreshChannels();
-            toast({ title: "Channel disconnected", description: `${CHANNEL_META[route.channel].label} route removed.` });
-        } catch (error) {
-            toast({
-                title: "Disconnect failed",
-                description: error instanceof Error ? error.message : "Unable to disconnect channel.",
-                variant: "destructive",
-            });
-        } finally {
-            setDisconnectingChannel(null);
-        }
-    }, [agentWallet, effectiveUserId, refreshChannels, toast]);
+    }, [agentLabel, effectiveAgentWallet, effectiveUserId, openAction, pollChannel, startWhatsAppChannel, toast]);
 
     const disconnectAllRoutes = useCallback(async (channel: ChannelName, routes: ChannelRoute[]) => {
-        if (!agentWallet) return;
+        if (!effectiveAgentWallet) return;
         setBusyChannel(channel);
         try {
-            await Promise.all(routes.map(route =>
+            await Promise.all(routes.map((route) =>
                 sdk.channels.disconnect(channel, {
                     userAddress: effectiveUserId,
-                    agentWallet,
+                    agentWallet: effectiveAgentWallet,
                     accountId: route.accountId,
                     threadId: route.threadId,
-                })
+                }),
             ));
             await refreshChannels();
+            void queryClient.invalidateQueries({ queryKey: ["notifications"] });
             toast({ title: `${CHANNEL_META[channel].label} disconnected`, description: "All routes removed." });
         } catch (error) {
             toast({
@@ -944,7 +922,7 @@ export function BackpackDialog({
         } finally {
             setBusyChannel(null);
         }
-    }, [agentWallet, effectiveUserId, refreshChannels, toast]);
+    }, [effectiveAgentWallet, effectiveUserId, queryClient, refreshChannels, toast]);
 
     const pairWhatsAppChannel = useCallback(() => {
         const phone = whatsappChannelState?.phone.replace(/[^0-9]/gu, "") || "";
@@ -953,132 +931,19 @@ export function BackpackDialog({
         setWhatsappChannelState((current) => current ? { ...current, loading: true, pairing: undefined } : current);
     }, [whatsappChannelState]);
 
-    const fetchPermissions = useCallback(async () => {
-        try {
-            if (!agentWallet) return;
-            const granted = await fetchBackpackPermissions(effectiveUserId, agentWallet);
-            const grantedSet = new Set(granted);
-            setPermissions(() => Object.fromEntries(
-                PERMISSION_TYPES.map((permission) => [permission.type, grantedSet.has(permission.type as BackpackCloudPermission)]),
-            ));
-        } catch (err) {
-            console.warn("[Backpack] Could not fetch permissions:", err);
-        }
-    }, [agentWallet, effectiveUserId]);
-
-    useEffect(() => {
-        if (handleOpen && activeTab === "permissions") {
-            void fetchPermissions();
-        }
-    }, [activeTab, fetchPermissions, handleOpen]);
-
-    // Fetch channel statuses when channels tab is opened
-    useEffect(() => {
-        if (handleOpen && activeTab === "channels") {
-            void refreshChannels();
-        } else {
-            cleanupChannels();
-        }
-    }, [handleOpen, activeTab, refreshChannels, cleanupChannels]);
-
-    // Fetch connections when the accounts tab is opened
-    useEffect(() => {
-        if (handleOpen && activeTab === "accounts") {
-            fetchConnections();
-        }
-    }, [handleOpen, activeTab, fetchConnections]);
-
-    // Fetch gated connectors when the connectors tab is opened
-    useEffect(() => {
-        if (handleOpen && activeTab === "connectors") {
-            void fetchConnectors();
-            void fetchGatedCatalog();
-        }
-    }, [handleOpen, activeTab, fetchConnectors, fetchGatedCatalog]);
-
-    // ==========================================================================
-    // Toolkit Search
-    // ==========================================================================
-
-    const searchToolkits = useCallback(async (query: string) => {
-        if (!query.trim()) {
-            if (searchAbortRef.current) {
-                searchAbortRef.current.abort();
-                searchAbortRef.current = null;
-            }
-            setSearchResults([]);
-            return;
-        }
-
-        if (searchAbortRef.current) {
-            searchAbortRef.current.abort();
-        }
-
-        const controller = new AbortController();
-        searchAbortRef.current = controller;
-
-        setSearching(true);
-        try {
-            const data = await sdk.accounts.toolkits.list({ search: query, limit: 15 }, { signal: controller.signal });
-            setSearchResults(data.toolkits || []);
-        } catch (err) {
-            if (controller.signal.aborted) {
-                return;
-            }
-            console.warn("[Backpack] Search error:", err);
-        } finally {
-            if (searchAbortRef.current === controller) {
-                searchAbortRef.current = null;
-                setSearching(false);
-            }
-        }
-    }, []);
-
-    // Debounced search
-    useEffect(() => {
-        if (searchDebounceRef.current) {
-            clearTimeout(searchDebounceRef.current);
-        }
-        if (!searchQuery.trim()) {
-            if (searchAbortRef.current) {
-                searchAbortRef.current.abort();
-                searchAbortRef.current = null;
-            }
-            setSearchResults([]);
-            setSearching(false);
-            return;
-        }
-        searchDebounceRef.current = setTimeout(() => {
-            searchToolkits(searchQuery);
-        }, 300);
-        return () => {
-            if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
-        };
-    }, [searchQuery, searchToolkits]);
-
     const startStatusPolling = useCallback((poll: (signal: AbortSignal) => Promise<boolean>) => {
         clearStatusPolling();
-
         const controller = new AbortController();
         statusPollAbortRef.current = controller;
 
         let attempts = 0;
         const runPoll = async () => {
-            if (controller.signal.aborted || statusPollBusyRef.current) {
-                return;
-            }
-
+            if (controller.signal.aborted || statusPollBusyRef.current) return;
             statusPollBusyRef.current = true;
             attempts += 1;
             try {
                 const isComplete = await poll(controller.signal);
-                if (isComplete) {
-                    clearStatusPolling();
-                    setLoadingAccount(null);
-                    return;
-                }
-
-                if (attempts >= 40) {
+                if (isComplete || attempts >= 40) {
                     clearStatusPolling();
                     setLoadingAccount(null);
                 }
@@ -1096,13 +961,13 @@ export function BackpackDialog({
         }, 3000);
     }, [clearStatusPolling]);
 
-    // Convert a search result to a ProviderDisplay for the connect flow
     const toolkitToProvider = useCallback((tk: ToolkitResult): ProviderDisplay => ({
         slug: tk.slug,
         name: tk.name,
-        logo: tk.logo,
+        logo: tk.logo || `https://logos.composio.dev/api/${tk.slug}`,
         color: "#6366f1",
-        description: tk.description?.substring(0, 60) || tk.categories.join(", ") || "Connect account",
+        description: tk.description?.substring(0, 60) || tk.categories?.join(", ") || "Connect account",
+        badge: tk.authMode === "oauth" ? "OAuth" : tk.authMode === "api_key" ? "API Key" : undefined,
     }), []);
 
     // ==========================================================================
@@ -1111,74 +976,80 @@ export function BackpackDialog({
 
     const requestPermission = useCallback(async (type: string) => {
         setLoadingPermission(type);
-
         try {
-            if (!agentWallet) {
-                throw new Error("Open an agent page to manage per-agent browser permissions.");
+            if (!effectiveAgentWallet) {
+                throw new Error("Select an agent first to manage per-agent browser permissions.");
             }
             let granted = false;
-
             switch (type) {
                 case "filesystem":
                     if ("showDirectoryPicker" in window) {
-                        await (window as any).showDirectoryPicker();
+                        await (window as unknown as { showDirectoryPicker: () => Promise<unknown> }).showDirectoryPicker();
                         granted = true;
                     } else {
                         throw new Error("File System Access API not supported");
                     }
                     break;
-
-                case "camera":
-                    await navigator.mediaDevices.getUserMedia({ video: true });
+                case "camera": {
+                    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                    for (const track of stream.getTracks()) track.stop();
                     granted = true;
                     break;
-
-                case "microphone":
-                    await navigator.mediaDevices.getUserMedia({ audio: true });
+                }
+                case "microphone": {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    for (const track of stream.getTracks()) track.stop();
                     granted = true;
                     break;
-
+                }
                 case "geolocation":
                     await new Promise<void>((resolve, reject) => {
                         navigator.geolocation.getCurrentPosition(() => resolve(), reject);
                     });
                     granted = true;
                     break;
-
                 case "clipboard":
                     await navigator.clipboard.readText();
                     granted = true;
                     break;
-
-                case "notifications":
+                case "notifications": {
                     const result = await Notification.requestPermission();
                     granted = result === "granted";
                     break;
+                }
             }
 
             if (granted) {
-                await grantBackpackPermission(effectiveUserId, agentWallet, type as BackpackCloudPermission);
-                setPermissions(prev => ({ ...prev, [type]: true }));
+                await grantBackpackPermission(effectiveUserId, effectiveAgentWallet, type as BackpackCloudPermission);
+                const key = backpackPermissionsQueryKey(effectiveUserId, effectiveAgentWallet);
+                queryClient.setQueryData<BackpackCloudPermission[]>(key, (prev) => {
+                    const next = new Set(prev ?? cachedPermissionsList);
+                    next.add(type as BackpackCloudPermission);
+                    return [...next];
+                });
                 toast({ title: "Permission Granted", description: `${type} access enabled.` });
             }
         } catch (err) {
             toast({
                 title: "Permission Denied",
-                description: `Could not get ${type} access.`,
-                variant: "destructive"
+                description: err instanceof Error ? err.message : `Could not get ${type} access.`,
+                variant: "destructive",
             });
         } finally {
             setLoadingPermission(null);
         }
-    }, [agentWallet, effectiveUserId, toast]);
+    }, [cachedPermissionsList, effectiveAgentWallet, effectiveUserId, queryClient, toast]);
 
     const revokePermission = useCallback(async (type: string) => {
         try {
-            if (!agentWallet) {
-                throw new Error("Open an agent page to manage per-agent browser permissions.");
+            if (!effectiveAgentWallet) {
+                throw new Error("Select an agent first to manage per-agent browser permissions.");
             }
-            await revokeBackpackCloudPermission(effectiveUserId, agentWallet, type as BackpackCloudPermission);
-            setPermissions(prev => ({ ...prev, [type]: false }));
+            await revokeBackpackCloudPermission(effectiveUserId, effectiveAgentWallet, type as BackpackCloudPermission);
+            const key = backpackPermissionsQueryKey(effectiveUserId, effectiveAgentWallet);
+            queryClient.setQueryData<BackpackCloudPermission[]>(key, (prev) =>
+                (prev ?? cachedPermissionsList).filter((item) => item !== type),
+            );
             toast({ title: "Permission Revoked", description: `${type} access disabled.` });
         } catch (err) {
             toast({
@@ -1187,7 +1058,7 @@ export function BackpackDialog({
                 variant: "destructive",
             });
         }
-    }, [agentWallet, effectiveUserId, toast]);
+    }, [cachedPermissionsList, effectiveAgentWallet, effectiveUserId, queryClient, toast]);
 
     // ==========================================================================
     // OAuth Handlers — Composio Credential Broker
@@ -1198,314 +1069,134 @@ export function BackpackDialog({
         clearStatusPolling();
 
         try {
-            if (!agentWallet) {
-                throw new Error("Open an agent page to connect accounts for that agent.");
+            if (!effectiveUserId) {
+                throw new Error("Connect your wallet first to link accounts.");
             }
-            const data = await sdk.accounts.connect({
+            const data = await sdk.connectors.accounts.connect({
                 userAddress: effectiveUserId,
-                agentWallet,
                 toolkit: provider.slug,
             });
-            const redirectUrl = data.redirectUrl;
+            const redirectUrl = safeHref(data.redirectUrl);
+            if (!redirectUrl) throw new Error("No valid redirect URL returned from server");
 
-            if (!redirectUrl) {
-                throw new Error("No redirect URL returned from server");
-            }
-
-            // Step 2: Open Composio's hosted auth page in a popup
             window.open(
                 redirectUrl,
                 `Connect ${provider.name}`,
-                "width=600,height=700,scrollbars=yes"
+                "noopener,noreferrer,width=600,height=700,scrollbars=yes",
             );
 
-            // Step 3: Poll the BACKEND for connection status instead of
-            // checking popup.closed (which triggers COOP errors on cross-origin popups)
             toast({
                 title: "Authentication Started",
-                description: `Complete authentication in the popup, then click Refresh.`,
+                description: "Complete authentication in the popup, then click Refresh.",
             });
 
             startStatusPolling(async (signal) => {
-                const statusData = await sdk.accounts.status({
+                const statusData = await sdk.connectors.accounts.status({
                     userAddress: effectiveUserId,
-                    agentWallet,
                     toolkit: provider.slug,
                     connectedAccountId: data.connectedAccountId,
                 }, { signal });
-                if (!statusData.connected) {
-                    return false;
-                }
+                if (!statusData.connected) return false;
 
-                setConnections(prev => ({
-                    ...prev,
-                    [provider.slug]: {
-                        slug: provider.slug,
-                        name: provider.name,
-                        connected: true,
-                        accountId: statusData.accountId,
-                        connectedAccountId: statusData.connectedAccountId,
-                    },
-                }));
+                const key = backpackAccountsQueryKey(effectiveUserId);
+                queryClient.setQueryData<Record<string, BackpackConnectionInfo>>(key, (prev) => {
+                    const next: Record<string, BackpackConnectionInfo> = {
+                        ...(prev ?? {}),
+                        [provider.slug]: {
+                            slug: provider.slug,
+                            name: provider.name,
+                            connected: true,
+                            granted: true,
+                            accountId: statusData.accountId,
+                            connectedAccountId: statusData.connectedAccountId,
+                        },
+                    };
+                    writeBackpackAccountsCache(effectiveUserId, next);
+                    return next;
+                });
                 toast({
                     title: "Connected!",
-                    description: `${provider.name} account connected successfully.`,
+                    description: `${provider.name} account connected and granted for your agents.`,
                 });
                 return true;
             });
-
         } catch (err) {
             console.error("[Backpack] Connection error:", err);
             toast({
                 title: "Connection Failed",
                 description: err instanceof Error ? err.message : "Could not connect account.",
-                variant: "destructive"
+                variant: "destructive",
             });
             setLoadingAccount(null);
         }
-    }, [agentWallet, clearStatusPolling, effectiveUserId, startStatusPolling, toast]);
+    }, [clearStatusPolling, effectiveUserId, queryClient, startStatusPolling, toast]);
 
-    // ==========================================================================
-    // Channel-Based Connection (Telegram)
-    // ==========================================================================
-
-    const connectTelegram = useCallback(async () => {
-        setLoadingAccount("telegram");
-        clearStatusPolling();
-
+    const toggleAccountGrant = useCallback(async (provider: ProviderDisplay, nextGranted: boolean) => {
+        setLoadingAccount(provider.slug);
         try {
-            if (!agentWallet) {
-                throw new Error("Open an agent page to bind Telegram for that agent.");
+            if (nextGranted) {
+                await sdk.connectors.accounts.grant({ userAddress: effectiveUserId, toolkit: provider.slug });
+            } else {
+                await sdk.connectors.accounts.revoke({ userAddress: effectiveUserId, toolkit: provider.slug });
             }
-            const link = await sdk.channels.link("telegram", { userAddress: effectiveUserId, agentWallet });
-            const deepLinkUrl = link.action?.url || link.url;
-            if (!deepLinkUrl) {
-                throw new Error("No Telegram link returned from server.");
-            }
-
-            // Open Telegram deep link
-            window.open(deepLinkUrl, "_blank");
-
-            toast({
-                title: "Open Telegram",
-                description: 'Tap "Start" in Telegram to connect your account.',
-            });
-
-            startStatusPolling(async (signal) => {
-                const statusData = await sdk.channels.status("telegram", { userAddress: effectiveUserId, agentWallet }, { signal });
-                if (!statusData.connected) {
-                    return false;
-                }
-
-                setConnections(prev => ({
-                    ...prev,
-                    telegram: {
-                        slug: "telegram",
-                        name: "Telegram",
-                        connected: true,
+            const key = backpackAccountsQueryKey(effectiveUserId);
+            queryClient.setQueryData<Record<string, BackpackConnectionInfo>>(key, (prev) => {
+                const base = prev ?? connections;
+                const next: Record<string, BackpackConnectionInfo> = {
+                    ...base,
+                    [provider.slug]: {
+                        ...(base[provider.slug] || { slug: provider.slug, name: provider.name, connected: true }),
+                        granted: nextGranted,
                     },
-                }));
-                toast({
-                    title: "Connected!",
-                    description: "Telegram bot connected successfully.",
-                });
-                return true;
+                };
+                writeBackpackAccountsCache(effectiveUserId, next);
+                return next;
+            });
+            toast({
+                title: nextGranted ? "Account granted" : "Account paused",
+                description: nextGranted
+                    ? `${provider.name} is enabled for your agents.`
+                    : `${provider.name} access paused for your agents.`,
             });
         } catch (err) {
-            console.error("[Backpack] Telegram connection error:", err);
             toast({
-                title: "Connection Failed",
-                description: err instanceof Error ? err.message : "Could not connect Telegram.",
+                title: "Update failed",
+                description: err instanceof Error ? err.message : "Could not update account allowance.",
                 variant: "destructive",
             });
+        } finally {
             setLoadingAccount(null);
         }
-    }, [agentWallet, clearStatusPolling, effectiveUserId, startStatusPolling, toast]);
-
-    // ==========================================================================
-    // Channel-Based Connection (WhatsApp via Baileys WebSocket)
-    // ==========================================================================
-
-    const connectWhatsApp = useCallback(async () => {
-        clearStatusPolling();
-
-        // Close any existing WS connection
-        if (whatsappWsRef.current) {
-            whatsappWsRef.current.close();
-            whatsappWsRef.current = null;
-        }
-
-        setWhatsappScreen("qr");
-        setWhatsappQr(null);
-        setWhatsappQrLoading(true);
-        setLoadingAccount("whatsapp");
-
-        let wsUrl: string | undefined;
-        try {
-            if (!agentWallet) {
-                throw new Error("Open an agent page to bind WhatsApp for that agent.");
-            }
-            const link = await sdk.channels.link("whatsapp", { userAddress: effectiveUserId, agentWallet });
-            wsUrl = link.action?.socket;
-            if (!wsUrl) {
-                throw new Error("No WhatsApp pairing socket returned from server.");
-            }
-        } catch (error) {
-            toast({
-                title: "Connection Failed",
-                description: error instanceof Error ? error.message : "Could not connect WhatsApp.",
-                variant: "destructive",
-            });
-            setWhatsappScreen(null);
-            setWhatsappQrLoading(false);
-            setLoadingAccount(null);
-            return;
-        }
-        console.log(`[Backpack] Connecting WhatsApp WebSocket: ${wsUrl}`);
-
-        const ws = new WebSocket(wsUrl);
-        whatsappWsRef.current = ws;
-
-        ws.onmessage = (event) => {
-            try {
-                const msg = JSON.parse(event.data);
-                console.log(`[Backpack] WhatsApp WS message:`, msg.type);
-
-                switch (msg.type) {
-                    case "qr":
-                        setWhatsappQr(msg.qr);
-                        setWhatsappQrLoading(false);
-                        break;
-
-                    case "connected":
-                        setWhatsappScreen(null);
-                        setWhatsappQr(null);
-                        setConnections(prev => ({
-                            ...prev,
-                            whatsapp: {
-                                slug: "whatsapp",
-                                name: "WhatsApp",
-                                connected: true,
-                            },
-                        }));
-                        toast({
-                            title: "Connected!",
-                            description: `WhatsApp linked successfully${msg.phoneNumber ? ` (${msg.phoneNumber})` : ""}.`,
-                        });
-                        setLoadingAccount(null);
-                        break;
-
-                    case "already_connected":
-                        setWhatsappScreen(null);
-                        setConnections(prev => ({
-                            ...prev,
-                            whatsapp: {
-                                slug: "whatsapp",
-                                name: "WhatsApp",
-                                connected: true,
-                            },
-                        }));
-                        toast({
-                            title: "Already Connected",
-                            description: "WhatsApp is already linked.",
-                        });
-                        setLoadingAccount(null);
-                        break;
-
-                    case "error":
-                        console.error(`[Backpack] WhatsApp error:`, msg.message);
-                        toast({
-                            title: "Connection Failed",
-                            description: msg.message || "Could not connect WhatsApp.",
-                            variant: "destructive",
-                        });
-                        setWhatsappScreen(null);
-                        setWhatsappQrLoading(false);
-                        setLoadingAccount(null);
-                        break;
-
-                    case "disconnected":
-                        setWhatsappScreen(null);
-                        setWhatsappQr(null);
-                        setLoadingAccount(null);
-                        break;
-
-                    case "reconnecting":
-                        setWhatsappQrLoading(true);
-                        setWhatsappQr(null);
-                        break;
-
-                    case "pairing_code_pending":
-                        setWhatsappPairingCode(null);
-                        setWhatsappQr(null);
-                        setWhatsappQrLoading(true);
-                        break;
-
-                    case "pairing_code":
-                        setWhatsappPairingCode(msg.code);
-                        setWhatsappQrLoading(false);
-                        break;
-                }
-            } catch {
-                // Ignore malformed messages
-            }
-        };
-
-        ws.onerror = () => {
-            console.error("[Backpack] WhatsApp WebSocket error");
-            toast({
-                title: "Connection Error",
-                description: "Could not reach WhatsApp service. Try again.",
-                variant: "destructive",
-            });
-            setWhatsappScreen(null);
-            setWhatsappQrLoading(false);
-            setLoadingAccount(null);
-        };
-
-        ws.onclose = () => {
-            console.log("[Backpack] WhatsApp WebSocket closed");
-            whatsappWsRef.current = null;
-        };
-    }, [agentWallet, clearStatusPolling, effectiveUserId, toast]);
-
-    const cancelWhatsApp = useCallback(() => {
-        if (whatsappWsRef.current) {
-            whatsappWsRef.current.close();
-            whatsappWsRef.current = null;
-        }
-        setWhatsappScreen(null);
-        setWhatsappQr(null);
-        setWhatsappQrLoading(false);
-        setWhatsappPairingCode(null);
-        setWhatsappPhoneInput("");
-        setLoadingAccount(null);
-    }, []);
+    }, [connections, effectiveUserId, queryClient, toast]);
 
     const disconnectAccount = useCallback(async (provider: ProviderDisplay) => {
         setLoadingAccount(provider.slug);
-
         try {
-            if (!agentWallet) {
-                throw new Error("Open an agent page to disconnect accounts for that agent.");
-            }
             const connection = connections[provider.slug];
             const connectedAccountId = connection?.connectedAccountId || connection?.accountId;
-            if (!connectedAccountId) {
-                throw new Error("Connected account id is missing.");
-            }
-            await sdk.accounts.disconnect({
+            if (!connectedAccountId) throw new Error("Connected account id is missing.");
+
+            await sdk.connectors.accounts.disconnect({
                 userAddress: effectiveUserId,
-                agentWallet,
                 toolkit: provider.slug,
                 connectedAccountId,
             });
 
-            // Update local state
-            setConnections(prev => ({
-                ...prev,
-                [provider.slug]: { ...prev[provider.slug], connected: false, accountId: undefined },
-            }));
+            const key = backpackAccountsQueryKey(effectiveUserId);
+            queryClient.setQueryData<Record<string, BackpackConnectionInfo>>(key, (prev) => {
+                const base = prev ?? connections;
+                const next: Record<string, BackpackConnectionInfo> = {
+                    ...base,
+                    [provider.slug]: {
+                        ...base[provider.slug],
+                        connected: false,
+                        granted: false,
+                        accountId: undefined,
+                    },
+                };
+                writeBackpackAccountsCache(effectiveUserId, next);
+                return next;
+            });
 
             toast({
                 title: "Disconnected",
@@ -1516,49 +1207,87 @@ export function BackpackDialog({
             toast({
                 title: "Disconnect Failed",
                 description: err instanceof Error ? err.message : "Could not disconnect account.",
-                variant: "destructive"
+                variant: "destructive",
             });
         } finally {
             setLoadingAccount(null);
         }
-    }, [agentWallet, connections, effectiveUserId, toast]);
-
-    useEffect(() => {
-        return () => {
-            cleanupAsyncWork();
-        };
-    }, [cleanupAsyncWork]);
+    }, [connections, effectiveUserId, queryClient, toast]);
 
     // ==========================================================================
-    // Filtered search results (exclude featured providers from search)
+    // Progressive Scroll Expanders
     // ==========================================================================
 
-    const featuredSlugs = useMemo(() => new Set(FEATURED_PROVIDERS.map(p => p.slug)), []);
-    const filteredSearchResults = useMemo(
-        () => searchResults.filter(tk => !featuredSlugs.has(tk.slug)),
-        [searchResults, featuredSlugs]
-    );
+    const handleAccountsScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+        const el = event.currentTarget;
+        if (accountsWindow >= browseableCatalogToolkits.length) return;
+        if (el.scrollHeight - el.scrollTop - el.clientHeight < 420) {
+            setAccountsWindow((prev) => Math.min(browseableCatalogToolkits.length, prev + CATALOG_WINDOW_STEP));
+        }
+    }, [accountsWindow, browseableCatalogToolkits.length]);
+
+    const handleConnectorsScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+        const el = event.currentTarget;
+        if (connectorsWindow >= filteredGatedCatalog.length) return;
+        if (el.scrollHeight - el.scrollTop - el.clientHeight < 420) {
+            setConnectorsWindow((prev) => Math.min(filteredGatedCatalog.length, prev + CATALOG_WINDOW_STEP));
+        }
+    }, [connectorsWindow, filteredGatedCatalog.length]);
 
     // ==========================================================================
     // Render
     // ==========================================================================
 
     const grantedPermissionsCount = Object.values(permissions).filter(Boolean).length;
-    const connectedChannelsCount = Object.values(channelStatuses).filter(status => (status?.routes || []).length > 0).length;
-    const connectedAccountsCount = Object.values(connections).filter(c => c.connected).length;
-    const connectedConnectorsCount = connectorRows.filter(c => c.connected).length;
+    const connectedChannelsCount = Object.values(channelStatuses).filter((status) => (status?.routes || []).length > 0).length;
+    const connectedAccountsCount = Object.values(connections).filter((c) => c.connected).length;
+    const connectedConnectorsCount = connectorRows.filter((c) => c.connected).length;
 
-    // Provider card renderer — shared between featured and search results
+    const refreshingAccounts = manualRefreshingAccounts || accountsQuery.isFetching;
+    const loadingConnectors = manualRefreshingConnectors || connectorsQuery.isFetching;
+    const loadingChannels = channelsQuery.isFetching;
+
+    const renderAgentScopeBar = (scopeLabel: string) => {
+        if (agentWallet) {
+            return (
+                <div className="flex items-center justify-between gap-2 rounded-md border border-primary/15 bg-background/50 px-3 py-2 mb-3 text-xs text-muted-foreground flex-shrink-0">
+                    <span>{scopeLabel}</span>
+                    <span className="font-mono text-foreground truncate max-w-56">{agentLabel}</span>
+                </div>
+            );
+        }
+        return (
+            <div className="flex items-center justify-between gap-2 rounded-md border border-primary/15 bg-background/50 px-3 py-2 mb-3 flex-shrink-0">
+                <span className="text-xs text-muted-foreground">{scopeLabel}</span>
+                {manowarAgents.length > 0 ? (
+                    <Select value={effectiveAgentWallet || ""} onValueChange={setSelectedAgentWallet}>
+                        <SelectTrigger className="h-7 text-xs w-48 bg-background/70">
+                            <SelectValue placeholder="Select agent" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {manowarAgents.map((item) => (
+                                <SelectItem key={item.walletAddress} value={item.walletAddress}>
+                                    {item.name || short(item.walletAddress)}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                ) : (
+                    <span className="text-xs font-mono text-muted-foreground">No agents available</span>
+                )}
+            </div>
+        );
+    };
+
     const renderProviderCard = (provider: ProviderDisplay) => {
         const connection = connections[provider.slug];
         const isConnected = connection?.connected ?? false;
+        const isGranted = connection?.granted ?? isConnected;
         const isLoading = loadingAccount === provider.slug;
-        const isDisabled = provider.connectionType === "disabled";
-        const isChannel = provider.connectionType === "channel";
 
         return (
             <Fragment key={provider.slug}>
-                <div className={`cm-setting-row ${isDisabled ? "opacity-60" : ""}`}>
+                <div className="cm-setting-row snap-start">
                     <div
                         className="cm-setting-row__icon overflow-hidden"
                         style={{ backgroundColor: `${provider.color}15` }}
@@ -1566,9 +1295,11 @@ export function BackpackDialog({
                         <img
                             src={provider.logo}
                             alt={provider.name}
+                            loading="lazy"
+                            decoding="async"
                             className="w-6 h-6 object-contain"
                             onError={(e) => {
-                                (e.target as HTMLImageElement).style.display = 'none';
+                                (e.target as HTMLImageElement).style.display = "none";
                             }}
                         />
                     </div>
@@ -1576,7 +1307,7 @@ export function BackpackDialog({
                         <div className="cm-setting-row__label truncate flex items-center gap-1.5">
                             {provider.name}
                             {provider.badge && (
-                                <Badge variant="outline" className="text-[10px] px-1 py-0 border-primary/20 text-muted-foreground font-normal">
+                                <Badge variant="outline" className="text-xs px-1 py-0 border-primary/20 text-muted-foreground font-normal">
                                     {provider.badge}
                                 </Badge>
                             )}
@@ -1587,7 +1318,7 @@ export function BackpackDialog({
                         <div className="cm-setting-row__description truncate hidden sm:block">
                             {isConnected ? (
                                 <span className="flex items-center gap-1 text-green-400">
-                                    <Check className="w-3 h-3" /> Connected
+                                    <Check className="w-3 h-3" /> {isGranted ? "Connected · Granted to agents" : "Connected · Paused"}
                                 </span>
                             ) : (
                                 provider.description
@@ -1595,60 +1326,43 @@ export function BackpackDialog({
                         </div>
                     </div>
 
-                    <div className="cm-setting-row__control">
-                        {isDisabled ? (
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                disabled
-                                className="shrink-0 h-8 w-8 sm:w-auto p-0 sm:px-2.5 flex items-center justify-center"
-                            >
-                                <MessageCircle className="w-4 h-4" />
-                                <span className="hidden sm:inline ml-1 text-xs">Soon</span>
-                            </Button>
-                        ) : (
-                            <Button
-                                variant={isConnected ? "destructive" : "outline"}
-                                size="sm"
+                    <div className="cm-setting-row__control flex items-center gap-2">
+                        {isConnected && (
+                            <Switch
+                                checked={isGranted}
                                 disabled={isLoading}
-                                className="shrink-0 h-8 w-8 sm:w-auto p-0 sm:px-2.5 flex items-center justify-center"
-                                onClick={() => {
-                                    if (isConnected) {
-                                        disconnectAccount(provider);
-                                    } else if (isChannel && provider.slug === "telegram") {
-                                        connectTelegram();
-                                    } else if (isChannel && provider.slug === "whatsapp") {
-                                        connectWhatsApp();
-                                    } else {
-                                        connectAccount(provider);
-                                    }
-                                }}
-                            >
-                                {isLoading ? (
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                ) : isConnected ? (
-                                    <>
-                                        <Unplug className="w-4 h-4" />
-                                        <span className="hidden sm:inline ml-1 text-xs">Disconnect</span>
-                                    </>
-                                ) : isChannel && provider.slug === "whatsapp" ? (
-                                    <>
-                                        <QrCode className="w-4 h-4" />
-                                        <span className="hidden sm:inline ml-1 text-xs">Scan QR</span>
-                                    </>
-                                ) : isChannel ? (
-                                    <>
-                                        <Send className="w-4 h-4" />
-                                        <span className="hidden sm:inline ml-1 text-xs">Link Bot</span>
-                                    </>
-                                ) : (
-                                    <>
-                                        <ExternalLink className="w-4 h-4" />
-                                        <span className="hidden sm:inline ml-1 text-xs">Connect</span>
-                                    </>
-                                )}
-                            </Button>
+                                onCheckedChange={(checked) => void toggleAccountGrant(provider, checked)}
+                                aria-label={`Allow agents to use ${provider.name}`}
+                            />
                         )}
+                        <Button
+                            variant={isConnected ? "destructive" : "outline"}
+                            size="sm"
+                            disabled={isLoading}
+                            aria-label={isConnected ? `Disconnect ${provider.name}` : `Connect ${provider.name}`}
+                            className="shrink-0 h-8 w-8 sm:w-auto p-0 sm:px-2.5 flex items-center justify-center"
+                            onClick={() => {
+                                if (isConnected) {
+                                    void disconnectAccount(provider);
+                                } else {
+                                    void connectAccount(provider);
+                                }
+                            }}
+                        >
+                            {isLoading ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : isConnected ? (
+                                <>
+                                    <Unplug className="w-4 h-4" />
+                                    <span className="hidden sm:inline ml-1 text-xs">Disconnect</span>
+                                </>
+                            ) : (
+                                <>
+                                    <ExternalLink className="w-4 h-4" />
+                                    <span className="hidden sm:inline ml-1 text-xs">Connect</span>
+                                </>
+                            )}
+                        </Button>
                     </div>
                 </div>
             </Fragment>
@@ -1666,7 +1380,7 @@ export function BackpackDialog({
                 </DialogTrigger>
             )}
 
-            <DialogContent className="sm:max-w-lg max-h-[85dvh] flex flex-col overflow-hidden">
+            <DialogContent className="cm-dialog-panel sm:max-w-lg max-h-[85dvh] flex flex-col overflow-hidden">
                 <DialogHeader className="flex-shrink-0">
                     <DialogTitle className="flex items-center gap-2">
                         <Backpack className="w-5 h-5 text-fuchsia-400" />
@@ -1677,417 +1391,461 @@ export function BackpackDialog({
                     </DialogDescription>
                 </DialogHeader>
 
-                {/* ========== WhatsApp Dedicated Connection Screen ========== */}
-                {whatsappScreen ? (
-                    <div className="flex-1 flex flex-col gap-4 py-2 min-h-0 overflow-y-auto">
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            className="self-start gap-1.5 text-muted-foreground hover:text-foreground -ml-2"
-                            onClick={cancelWhatsApp}
-                        >
-                            <ArrowLeft className="w-4 h-4" />
-                            Back
-                        </Button>
+                <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                    <TabsList className="grid w-full grid-cols-4 flex-shrink-0">
+                        <TabsTrigger value="permissions" className="gap-1 px-1.5 text-xs min-w-0">
+                            <Shield className="w-3.5 h-3.5 shrink-0 hidden sm:inline" />
+                            <span className="truncate">Access</span>
+                            {grantedPermissionsCount > 0 && (
+                                <Badge variant="secondary" className="text-[10px] leading-none px-1 py-0.5 shrink-0">
+                                    {grantedPermissionsCount}
+                                </Badge>
+                            )}
+                        </TabsTrigger>
+                        <TabsTrigger value="channels" className="gap-1 px-1.5 text-xs min-w-0">
+                            <RadioTower className="w-3.5 h-3.5 shrink-0 hidden sm:inline" />
+                            <span className="truncate">Channels</span>
+                            {connectedChannelsCount > 0 && (
+                                <Badge variant="secondary" className="text-[10px] leading-none px-1 py-0.5 shrink-0">
+                                    {connectedChannelsCount}
+                                </Badge>
+                            )}
+                        </TabsTrigger>
+                        <TabsTrigger value="accounts" className="gap-1 px-1.5 text-xs min-w-0">
+                            <Link2 className="w-3.5 h-3.5 shrink-0 hidden sm:inline" />
+                            <span className="truncate">Accounts</span>
+                            {connectedAccountsCount > 0 && (
+                                <Badge variant="secondary" className="text-[10px] leading-none px-1 py-0.5 shrink-0">
+                                    {connectedAccountsCount}
+                                </Badge>
+                            )}
+                        </TabsTrigger>
+                        <TabsTrigger value="connectors" className="gap-1 px-1.5 text-xs min-w-0">
+                            <KeyRound className="w-3.5 h-3.5 shrink-0 hidden sm:inline" />
+                            <span className="truncate">Connectors</span>
+                            {connectedConnectorsCount > 0 && (
+                                <Badge variant="secondary" className="text-[10px] leading-none px-1 py-0.5 shrink-0">
+                                    {connectedConnectorsCount}
+                                </Badge>
+                            )}
+                        </TabsTrigger>
+                    </TabsList>
 
-                        <div className="flex items-center gap-3 mb-2">
-                            <div
-                                className="w-12 h-12 rounded-xl flex items-center justify-center"
-                                style={{ backgroundColor: "#25D36615" }}
-                            >
-                                <img
-                                    src="https://logos.composio.dev/api/whatsapp"
-                                    alt="WhatsApp"
-                                    className="w-7 h-7 object-contain"
+                    {/* Permissions Tab */}
+                    <TabsContent value="permissions" className="mt-4 space-y-3 flex-1 overflow-y-auto overscroll-contain pr-1">
+                        {renderAgentScopeBar("Per-agent browser permissions")}
+                        {PERMISSION_TYPES.map((perm) => (
+                            <div key={perm.type} className="cm-setting-row snap-start">
+                                <div className="cm-setting-row__icon">
+                                    {perm.icon}
+                                </div>
+                                <div className="cm-setting-row__copy">
+                                    <div className="cm-setting-row__label">{perm.label}</div>
+                                    <div className="cm-setting-row__description hidden sm:block">{perm.description}</div>
+                                </div>
+
+                                <div className="cm-setting-row__control">
+                                    {loadingPermission === perm.type ? (
+                                        <Loader2 className="w-4 h-4 animate-spin text-fuchsia-400" />
+                                    ) : (
+                                        <Switch
+                                            checked={permissions[perm.type]}
+                                            disabled={!effectiveAgentWallet}
+                                            onCheckedChange={(checked) => {
+                                                if (checked) {
+                                                    void requestPermission(perm.type);
+                                                } else {
+                                                    void revokePermission(perm.type);
+                                                }
+                                            }}
+                                        />
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                    </TabsContent>
+
+                    {/* Channels Tab */}
+                    <TabsContent value="channels" className="mt-4 flex flex-col flex-1 min-h-0 overflow-hidden">
+                        {renderAgentScopeBar("Per-agent messaging channels")}
+                        {loadingChannels && Object.keys(channelStatuses).length === 0 ? (
+                            <div className="flex items-center justify-center py-8 text-muted-foreground text-sm flex-1">
+                                <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                                Loading channels...
+                            </div>
+                        ) : (
+                            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1 space-y-3">
+                                {CHANNELS_LIST.map((channel) => {
+                                    const info = CHANNEL_META[channel];
+                                    const linked = channelStatuses[channel]?.routes || [];
+                                    const connecting = busyChannel === channel;
+                                    const isConnected = linked.length > 0;
+
+                                    return (
+                                        <div key={channel} className="space-y-2.5 snap-start">
+                                            <div className="cm-setting-row">
+                                                <div
+                                                    className="cm-setting-row__icon overflow-hidden flex items-center justify-center"
+                                                    style={{ backgroundColor: `${info.color}15` }}
+                                                >
+                                                    <img
+                                                        src={info.logo}
+                                                        alt={info.label}
+                                                        loading="lazy"
+                                                        decoding="async"
+                                                        className="w-6 h-6 object-contain"
+                                                        onError={(e) => {
+                                                            (e.target as HTMLImageElement).style.display = "none";
+                                                        }}
+                                                    />
+                                                </div>
+                                                <div className="cm-setting-row__copy">
+                                                    <div className="cm-setting-row__label flex items-center gap-1.5">
+                                                        {info.label}
+                                                        {isConnected && (
+                                                            <Badge variant="secondary" className="text-xs px-1.5 py-0 border-primary/20 text-muted-foreground font-normal">
+                                                                {linked.length} {linked.length === 1 ? "route" : "routes"}
+                                                            </Badge>
+                                                        )}
+                                                    </div>
+                                                    <div className="cm-setting-row__description hidden sm:block">
+                                                        {isConnected ? (
+                                                            <span className="flex items-center gap-1 text-green-400">
+                                                                <Check className="w-3 h-3" /> {routeLabel(linked[0])} {linked.length > 1 ? `(+${linked.length - 1} more)` : ""}
+                                                            </span>
+                                                        ) : (
+                                                            info.description
+                                                        )}
+                                                    </div>
+                                                </div>
+
+                                                <div className="cm-setting-row__control">
+                                                    {connecting ? (
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            disabled
+                                                            className="shrink-0 h-8 w-8 sm:w-auto p-0 sm:px-2.5 flex items-center justify-center"
+                                                        >
+                                                            <Loader2 className="w-4 h-4 animate-spin text-fuchsia-400" />
+                                                        </Button>
+                                                    ) : isConnected ? (
+                                                        <Button
+                                                            variant="destructive"
+                                                            size="sm"
+                                                            className="shrink-0 h-8 w-8 sm:w-auto p-0 sm:px-2.5 flex items-center justify-center"
+                                                            onClick={() => void disconnectAllRoutes(channel, linked)}
+                                                        >
+                                                            <Unplug className="w-4 h-4" />
+                                                            <span className="hidden sm:inline ml-1 text-xs">Disconnect</span>
+                                                        </Button>
+                                                    ) : channel === "telegram" ? (
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            className="shrink-0 h-8 w-8 sm:w-auto p-0 sm:px-2.5 flex items-center justify-center"
+                                                            onClick={() => void connectChannel("telegram")}
+                                                        >
+                                                            <Send className="w-4 h-4" />
+                                                            <span className="hidden sm:inline ml-1 text-xs">Connect</span>
+                                                        </Button>
+                                                    ) : channel === "whatsapp" ? (
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            className="shrink-0 h-8 w-8 sm:w-auto p-0 sm:px-2.5 flex items-center justify-center"
+                                                            onClick={() => void connectChannel("whatsapp")}
+                                                        >
+                                                            <QrCode className="w-4 h-4" />
+                                                            <span className="hidden sm:inline ml-1 text-xs">Connect</span>
+                                                        </Button>
+                                                    ) : (
+                                                        <Select value="" onValueChange={(val) => {
+                                                            const [mode, privacy] = val.split(":");
+                                                            void connectChannel(
+                                                                channel,
+                                                                mode as "user" | "guild" | undefined,
+                                                                privacy as "public" | "private" | undefined,
+                                                            );
+                                                        }}>
+                                                            <SelectTrigger className="h-8 text-xs shrink-0 w-8 sm:w-24 p-0 sm:px-2.5">
+                                                                <SelectValue placeholder="Connect" />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                <SelectItem value="user">DM</SelectItem>
+                                                                <SelectItem value="guild:public">Public {channel === "discord" ? "Server" : "Workspace"}</SelectItem>
+                                                                <SelectItem value="guild:private">Private {channel === "discord" ? "Server" : "Workspace"}</SelectItem>
+                                                            </SelectContent>
+                                                        </Select>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+
+                                {/* WhatsApp Pairing Screen */}
+                                {whatsappChannelState && (
+                                    <div className="p-3 bg-muted/40 rounded-lg border border-primary/10 space-y-3">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-2 font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
+                                                <QrCode className="w-4 h-4 text-green-400" />
+                                                WhatsApp Pairing
+                                            </div>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => {
+                                                    if (channelsWsRef.current) channelsWsRef.current.close();
+                                                    setWhatsappChannelState(null);
+                                                }}
+                                                className="h-6 w-6 p-0 hover:bg-muted"
+                                            >
+                                                <X className="w-3.5 h-3.5 text-muted-foreground" />
+                                            </Button>
+                                        </div>
+
+                                        {whatsappChannelState.loading && (
+                                            <div className="flex items-center gap-2 text-xs text-muted-foreground py-2 justify-center">
+                                                <Loader2 className="w-4 h-4 animate-spin text-green-400" />
+                                                Waiting for WhatsApp...
+                                            </div>
+                                        )}
+
+                                        {whatsappChannelState.qr && (
+                                            <div className="mx-auto w-full max-w-48 rounded-lg bg-white p-2.5 border border-primary/15">
+                                                <img
+                                                    alt="Scan with WhatsApp"
+                                                    className="aspect-square w-full object-contain"
+                                                    src={whatsappChannelState.qr.startsWith("data:") ? whatsappChannelState.qr : `data:image/png;base64,${whatsappChannelState.qr}`}
+                                                />
+                                                <p className="text-xs text-muted-foreground text-center mt-1">Scan with WhatsApp link device</p>
+                                            </div>
+                                        )}
+
+                                        {whatsappChannelState.pairing && (
+                                            <div className="rounded-lg border border-green-500/20 bg-green-500/5 px-3 py-3 text-center">
+                                                <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Pairing Code</div>
+                                                <div className="font-mono text-2xl font-bold tracking-[0.28em] text-green-400">
+                                                    {whatsappChannelState.pairing}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        <div className="flex flex-col gap-1.5">
+                                            <span className="text-xs font-mono text-muted-foreground">Or Pair with Phone Number</span>
+                                            <div className="flex gap-2">
+                                                <Input
+                                                    type="tel"
+                                                    value={whatsappChannelState.phone}
+                                                    placeholder="14155551234"
+                                                    onChange={(e) => setWhatsappChannelState((current) => current ? { ...current, phone: e.target.value } : current)}
+                                                    className="h-8 text-xs bg-background/50"
+                                                />
+                                                <Button
+                                                    size="sm"
+                                                    onClick={pairWhatsAppChannel}
+                                                    disabled={whatsappChannelState.phone.replace(/[^0-9]/gu, "").length < 10}
+                                                    className="h-8 text-xs bg-green-600 hover:bg-green-700 text-white"
+                                                >
+                                                    Pair
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </TabsContent>
+
+                    {/* Connected Accounts Tab */}
+                    <TabsContent value="accounts" className="mt-4 flex flex-col flex-1 min-h-0 overflow-hidden">
+                        <div className="flex items-center gap-2 mb-2 flex-shrink-0">
+                            <div className="relative flex-1">
+                                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                                <input
+                                    type="text"
+                                    placeholder={`Search ${accountsTotal > 0 ? accountsTotal.toLocaleString() : "1,500+"} integrations...`}
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    className="w-full h-8 pl-8 pr-8 text-sm bg-background/70 border border-primary/20 rounded-md text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-fuchsia-500/50 focus:ring-1 focus:ring-fuchsia-500/20 transition-colors"
                                 />
+                                {searchQuery && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setSearchQuery("")}
+                                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                    >
+                                        <X className="w-3.5 h-3.5" />
+                                    </button>
+                                )}
                             </div>
-                            <div>
-                                <h3 className="text-base font-semibold text-foreground">Connect WhatsApp</h3>
-                                <p className="text-xs text-muted-foreground">
-                                    {isMobile
-                                        ? "Link your WhatsApp account"
-                                        : "Scan with your phone to link"}
-                                </p>
-                            </div>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground shrink-0"
+                                onClick={() => void refreshAccounts()}
+                                disabled={refreshingAccounts}
+                            >
+                                <RefreshCw className={`w-3 h-3 mr-1 ${refreshingAccounts ? "animate-spin" : ""}`} />
+                                Refresh
+                            </Button>
                         </div>
 
-                        <div className="flex flex-col items-center gap-4 py-2">
-                            {isMobile ? (
-                                /* ===== Mobile: Phone pairing code ===== */
-                                whatsappPairingCode ? (
-                                    <div className="flex flex-col items-center gap-4 py-4">
-                                        <div className="text-sm text-foreground text-center">
-                                            Enter this code in WhatsApp to link:
+                        <div
+                            onScroll={handleAccountsScroll}
+                            className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1 space-y-3"
+                        >
+                            {trimmedAccountSearch && (
+                                <div className="space-y-2">
+                                    {filteredSearchResults.length === 0 && filteredAccountMatches.length === 0 && !catalogSnap.isLoading && (
+                                        <div className="text-center py-4 text-muted-foreground text-sm">
+                                            No integrations found for "{searchQuery}"
                                         </div>
-                                        <div className="font-mono text-3xl font-bold tracking-[0.3em] text-green-400 bg-background/80 px-6 py-4 rounded-xl border border-green-500/30">
-                                            {whatsappPairingCode}
-                                        </div>
-                                        <p className="text-xs text-muted-foreground text-center">
-                                            WhatsApp → Linked Devices → Link a Device
-                                        </p>
-                                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                            <Loader2 className="w-3 h-3 animate-spin" />
-                                            Waiting for pairing...
-                                        </div>
-                                    </div>
-                                ) : whatsappQrLoading ? (
-                                    <div className="flex flex-col items-center gap-3 py-8">
-                                        <Loader2 className="w-10 h-10 animate-spin text-green-500" />
-                                        <span className="text-sm text-muted-foreground">Generating pairing code...</span>
-                                    </div>
-                                ) : (
-                                    <form
-                                        className="flex flex-col items-center gap-4 py-2 w-full max-w-xs"
-                                        onSubmit={(e) => {
-                                            e.preventDefault();
-                                            const phone = whatsappPhoneInput.replace(/[^0-9]/g, "");
-                                            if (phone.length < 10) return;
-                                            if (whatsappWsRef.current?.readyState === WebSocket.OPEN) {
-                                                whatsappWsRef.current.send(JSON.stringify({ type: "pair_phone", phone }));
-                                            }
-                                        }}
-                                    >
-                                        <p className="text-xs text-muted-foreground text-center leading-relaxed">
-                                            Enter your full number with country code (no + or spaces).
-                                            It's only used to generate a one-time linking code.
-                                            Compose never stores or shares your data.
-                                        </p>
-                                        <input
-                                            type="tel"
-                                            placeholder="e.g. 14155551234"
-                                            value={whatsappPhoneInput}
-                                            onChange={(e) => setWhatsappPhoneInput(e.target.value)}
-                                            className="w-full px-4 py-2.5 rounded-lg bg-background/70 border border-primary/20 text-foreground text-center font-mono text-lg placeholder:text-muted-foreground/60 focus:outline-none focus:border-green-500 transition-colors"
-                                            autoFocus
-                                        />
-                                        <Button
-                                            type="submit"
-                                            disabled={whatsappPhoneInput.replace(/[^0-9]/g, "").length < 10}
-                                            className="w-full bg-green-600 hover:bg-green-700 text-white"
-                                        >
-                                            Get Linking Code
-                                        </Button>
-                                    </form>
-                                )
-                            ) : (
-                                /* ===== Desktop: QR code scanning ===== */
+                                    )}
+                                    {filteredSearchResults.map((tk) => renderProviderCard(toolkitToProvider(tk)))}
+                                    {filteredSearchResults.length > 0 && (
+                                        <div className="border-t border-primary/15 my-3" />
+                                    )}
+                                </div>
+                            )}
+
+                            {(!trimmedAccountSearch || filteredSearchResults.length > 0 || filteredAccountMatches.some((sr) => FEATURED_SLUGS.has(sr.slug))) && (
                                 <>
-                                    {whatsappQrLoading ? (
-                                        <div className="flex flex-col items-center gap-3 py-8">
-                                            <Loader2 className="w-10 h-10 animate-spin text-green-500" />
-                                            <span className="text-sm text-muted-foreground">Generating QR code...</span>
+                                    {trimmedAccountSearch && (
+                                        <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+                                            Popular
                                         </div>
-                                    ) : whatsappQr ? (
-                                        <>
-                                            <div className="p-4 rounded-xl bg-white">
-                                                <img
-                                                    src={whatsappQr.startsWith("data:") ? whatsappQr : `data:image/png;base64,${whatsappQr}`}
-                                                    alt="Scan with WhatsApp"
-                                                    className="w-52 h-52 object-contain"
-                                                />
-                                            </div>
-                                            <div className="flex flex-col items-center gap-1.5">
-                                                <div className="flex items-center gap-2 text-sm text-foreground">
-                                                    <Smartphone className="w-4 h-4 text-green-400" />
-                                                    Scan with WhatsApp
-                                                </div>
-                                                <p className="text-xs text-muted-foreground text-center">
-                                                    Open WhatsApp → Settings → Linked Devices → Link a Device
-                                                </p>
-                                            </div>
-                                            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-2">
-                                                <Loader2 className="w-3 h-3 animate-spin" />
-                                                Waiting for scan...
-                                            </div>
-                                        </>
-                                    ) : (
-                                        <div className="text-sm text-muted-foreground py-4">
-                                            QR code not available. Please try again.
-                                        </div>
+                                    )}
+                                    {FEATURED_PROVIDERS.filter((provider) => (
+                                        !trimmedAccountSearch
+                                        || provider.name.toLowerCase().includes(trimmedAccountSearch)
+                                        || provider.slug.toLowerCase().includes(trimmedAccountSearch)
+                                        || provider.description.toLowerCase().includes(trimmedAccountSearch)
+                                    )).map((provider) => renderProviderCard(provider))}
+                                </>
+                            )}
+
+                            {!trimmedAccountSearch && browseableCatalogToolkits.length > 0 && (
+                                <>
+                                    <div className="border-t border-primary/15 pt-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                                        All Integrations ({accountsTotal > 0 ? accountsTotal.toLocaleString() : browseableCatalogToolkits.length})
+                                    </div>
+                                    {browseableCatalogToolkits.slice(0, accountsWindow).map((tk) =>
+                                        renderProviderCard(toolkitToProvider(tk)),
                                     )}
                                 </>
                             )}
                         </div>
-                    </div>
-                ) : (
-                    <>
 
-                        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 min-h-0 overflow-hidden">
-                            <TabsList className="grid w-full grid-cols-4 flex-shrink-0">
-                                <TabsTrigger value="permissions" className="gap-2">
-                                    <Shield className="w-4 h-4" />
-                                    Permissions
-                                    {grantedPermissionsCount > 0 && (
-                                        <Badge variant="secondary" className="ml-1 text-xs px-1.5">
-                                            {grantedPermissionsCount}
-                                        </Badge>
-                                    )}
-                                </TabsTrigger>
-                                <TabsTrigger value="channels" className="gap-2">
-                                    <RadioTower className="w-4 h-4" />
-                                    Channels
-                                    {connectedChannelsCount > 0 && (
-                                        <Badge variant="secondary" className="ml-1 text-xs px-1.5">
-                                            {connectedChannelsCount}
-                                        </Badge>
-                                    )}
-                                </TabsTrigger>
-                                <TabsTrigger value="accounts" className="gap-2">
-                                    <Link2 className="w-4 h-4" />
-                                    Accounts
-                                    {connectedAccountsCount > 0 && (
-                                        <Badge variant="secondary" className="ml-1 text-xs px-1.5">
-                                            {connectedAccountsCount}
-                                        </Badge>
-                                    )}
-                                </TabsTrigger>
-                                <TabsTrigger value="connectors" className="gap-2">
-                                    <KeyRound className="w-4 h-4" />
-                                    Connectors
-                                    {connectedConnectorsCount > 0 && (
-                                        <Badge variant="secondary" className="ml-1 text-xs px-1.5">
-                                            {connectedConnectorsCount}
-                                        </Badge>
-                                    )}
-                                </TabsTrigger>
-                            </TabsList>
+                        <p className="text-xs text-muted-foreground text-center pt-4 flex-shrink-0">
+                            Compose Market never sees or stores your tokens.
+                        </p>
+                    </TabsContent>
 
-                            {/* Permissions Tab */}
-                            <TabsContent value="permissions" className="mt-4 space-y-3 flex-1 overflow-y-auto pr-1">
-                                {PERMISSION_TYPES.map(perm => (
-                                    <div key={perm.type} className="cm-setting-row">
-                                        <div className="cm-setting-row__icon">
-                                            {perm.icon}
-                                        </div>
-                                        <div className="cm-setting-row__copy">
-                                            <div className="cm-setting-row__label">{perm.label}</div>
-                                            <div className="cm-setting-row__description hidden sm:block">{perm.description}</div>
-                                        </div>
+                    {/* Credential-Gated Connectors Tab */}
+                    <TabsContent value="connectors" className="mt-4 flex flex-col flex-1 min-h-0 overflow-hidden">
+                        {connectPanel ? (
+                            <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-3">
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="self-start gap-1.5 text-muted-foreground hover:text-foreground -ml-2"
+                                    onClick={() => {
+                                        setConnectPanel(null);
+                                        setConnectVars({});
+                                        setConnectError(null);
+                                    }}
+                                >
+                                    <ArrowLeft className="w-4 h-4" />
+                                    Back
+                                </Button>
 
-                                        <div className="cm-setting-row__control">
-                                            {loadingPermission === perm.type ? (
-                                                <Loader2 className="w-4 h-4 animate-spin text-fuchsia-400" />
-                                            ) : (
-                                                <Switch
-                                                    checked={permissions[perm.type]}
-                                                    onCheckedChange={(checked) => {
-                                                        if (checked) {
-                                                            requestPermission(perm.type);
-                                                        } else {
-                                                            revokePermission(perm.type);
-                                                        }
-                                                    }}
-                                                />
-                                            )}
-                                        </div>
+                                <div className="flex items-center gap-3">
+                                    <div className="cm-setting-row__icon">
+                                        <KeyRound className="w-5 h-5 text-fuchsia-400" />
                                     </div>
-                                ))}
-                            </TabsContent>
-
-                            {/* Channels Tab */}
-                            <TabsContent value="channels" className="mt-4 flex flex-col flex-1 min-h-0 overflow-hidden">
-                                {loadingChannels && Object.keys(channelStatuses).length === 0 ? (
-                                    <div className="flex items-center justify-center py-8 text-muted-foreground text-sm flex-1">
-                                        <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                                        Loading channels...
+                                    <div>
+                                        <h3 className="text-base font-semibold text-foreground">Connect {connectPanel.name}</h3>
+                                        <p className="text-xs text-muted-foreground">
+                                            Credentials are encrypted at rest and only ever injected into the connector at execution time.
+                                        </p>
                                     </div>
+                                </div>
+
+                                {connectPanel.credentials.length === 0 ? (
+                                    <p className="text-sm text-muted-foreground py-4">
+                                        This connector declares no credential variables.
+                                    </p>
                                 ) : (
-                                    <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-3">
-                                        {CHANNELS_LIST.map((channel) => {
-                                            const info = CHANNEL_META[channel];
-                                            const linked = channelStatuses[channel]?.routes || [];
-                                            const connecting = busyChannel === channel;
-                                            const isConnected = linked.length > 0;
-
-                                            return (
-                                                <div key={channel} className="space-y-2.5">
-                                                    <div className="cm-setting-row">
-                                                        <div
-                                                            className="cm-setting-row__icon overflow-hidden flex items-center justify-center"
-                                                            style={{ backgroundColor: `${info.color}15` }}
-                                                        >
-                                                            <img
-                                                                src={info.logo}
-                                                                alt={info.label}
-                                                                className="w-6 h-6 object-contain"
-                                                                onError={(e) => {
-                                                                    (e.target as HTMLImageElement).style.display = 'none';
-                                                                }}
-                                                            />
-                                                        </div>
-                                                        <div className="cm-setting-row__copy">
-                                                            <div className="cm-setting-row__label flex items-center gap-1.5">
-                                                                {info.label}
-                                                                {isConnected && (
-                                                                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0 border-primary/20 text-muted-foreground font-normal">
-                                                                        {linked.length} {linked.length === 1 ? "route" : "routes"}
-                                                                    </Badge>
-                                                                )}
-                                                            </div>
-                                                            <div className="cm-setting-row__description hidden sm:block">
-                                                                {isConnected ? (
-                                                                    <span className="flex items-center gap-1 text-green-400">
-                                                                        <Check className="w-3 h-3" /> {routeLabel(linked[0])} {linked.length > 1 ? `(+${linked.length - 1} more)` : ""}
-                                                                    </span>
-                                                                ) : (
-                                                                    info.description
-                                                                )}
-                                                            </div>
-                                                        </div>
-
-                                                        <div className="cm-setting-row__control">
-                                                            {connecting ? (
-                                                                <Button
-                                                                    variant="outline"
-                                                                    size="sm"
-                                                                    disabled
-                                                                    className="shrink-0 h-8 w-8 sm:w-auto p-0 sm:px-2.5 flex items-center justify-center"
-                                                                >
-                                                                    <Loader2 className="w-4 h-4 animate-spin text-fuchsia-400" />
-                                                                </Button>
-                                                            ) : isConnected ? (
-                                                                <Button
-                                                                    variant="destructive"
-                                                                    size="sm"
-                                                                    className="shrink-0 h-8 w-8 sm:w-auto p-0 sm:px-2.5 flex items-center justify-center"
-                                                                    onClick={() => disconnectAllRoutes(channel, linked)}
-                                                                >
-                                                                    <Unplug className="w-4 h-4" />
-                                                                    <span className="hidden sm:inline ml-1 text-xs">Disconnect</span>
-                                                                </Button>
-                                                            ) : channel === "telegram" ? (
-                                                                <Button
-                                                                    variant="outline"
-                                                                    size="sm"
-                                                                    className="shrink-0 h-8 w-8 sm:w-auto p-0 sm:px-2.5 flex items-center justify-center"
-                                                                    onClick={() => connectChannel("telegram")}
-                                                                >
-                                                                    <Send className="w-4 h-4" />
-                                                                    <span className="hidden sm:inline ml-1 text-xs">Connect</span>
-                                                                </Button>
-                                                            ) : channel === "whatsapp" ? (
-                                                                <Button
-                                                                    variant="outline"
-                                                                    size="sm"
-                                                                    className="shrink-0 h-8 w-8 sm:w-auto p-0 sm:px-2.5 flex items-center justify-center"
-                                                                    onClick={() => connectChannel("whatsapp")}
-                                                                >
-                                                                    <QrCode className="w-4 h-4" />
-                                                                    <span className="hidden sm:inline ml-1 text-xs">Connect</span>
-                                                                </Button>
-                                                            ) : (
-                                                                <Select value="" onValueChange={(val) => {
-                                                                    const [mode, privacy] = val.split(":");
-                                                                    void connectChannel(channel, mode as any, privacy as any);
-                                                                }}>
-                                                                    <SelectTrigger className="h-8 text-xs shrink-0 w-8 sm:w-24 p-0 sm:px-2.5">
-                                                                        <SelectValue placeholder="Connect" />
-                                                                    </SelectTrigger>
-                                                                    <SelectContent>
-                                                                        <SelectItem value="user">DM</SelectItem>
-                                                                        <SelectItem value="guild:public">Public {channel === "discord" ? "Server" : "Workspace"}</SelectItem>
-                                                                        <SelectItem value="guild:private">Private {channel === "discord" ? "Server" : "Workspace"}</SelectItem>
-                                                                    </SelectContent>
-                                                                </Select>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-
-                                        {/* WhatsApp Pairing Screen inline/nested at the bottom if active */}
-                                        {whatsappChannelState && (
-                                            <div className="p-3 bg-muted/40 rounded-lg border border-primary/10 space-y-3">
+                                    <div className="space-y-3">
+                                        {connectPanel.credentials.map((credential) => (
+                                            <div key={credential.varName} className="space-y-1">
                                                 <div className="flex items-center justify-between">
-                                                    <div className="flex items-center gap-2 font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
-                                                        <QrCode className="w-4 h-4 text-green-400" />
-                                                        WhatsApp Pairing
-                                                    </div>
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        onClick={() => {
-                                                            if (channelsWsRef.current) {
-                                                                channelsWsRef.current.close();
-                                                            }
-                                                            setWhatsappChannelState(null);
-                                                        }}
-                                                        className="h-6 w-6 p-0 hover:bg-muted"
-                                                    >
-                                                        <X className="w-3.5 h-3.5 text-muted-foreground" />
-                                                    </Button>
+                                                    <label className="text-xs font-mono text-foreground">{credential.varName}</label>
+                                                    {(() => {
+                                                        const obtainHref = safeHref(credential.obtainUrl);
+                                                        return obtainHref ? (
+                                                            <a
+                                                                href={obtainHref}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="text-xs text-fuchsia-400 hover:underline inline-flex items-center gap-1"
+                                                            >
+                                                                Get key <ExternalLink className="w-3 h-3" />
+                                                            </a>
+                                                        ) : null;
+                                                    })()}
                                                 </div>
-
-                                                {whatsappChannelState.loading && (
-                                                    <div className="flex items-center gap-2 text-xs text-muted-foreground py-2 justify-center">
-                                                        <Loader2 className="w-4 h-4 animate-spin text-green-400" />
-                                                        Waiting for WhatsApp...
-                                                    </div>
+                                                {credential.description && (
+                                                    <p className="text-xs text-muted-foreground">{credential.description}</p>
                                                 )}
-
-                                                {whatsappChannelState.qr && (
-                                                    <div className="mx-auto w-full max-w-[200px] rounded-lg bg-white p-2.5 border border-primary/15">
-                                                        <img
-                                                            alt="Scan with WhatsApp"
-                                                            className="aspect-square w-full object-contain"
-                                                            src={whatsappChannelState.qr.startsWith("data:") ? whatsappChannelState.qr : `data:image/png;base64,${whatsappChannelState.qr}`}
-                                                        />
-                                                        <p className="text-[10px] text-muted-foreground text-center mt-1">Scan with WhatsApp link device</p>
-                                                    </div>
-                                                )}
-
-                                                {whatsappChannelState.pairing && (
-                                                    <div className="rounded-lg border border-green-500/20 bg-green-500/5 px-3 py-3 text-center">
-                                                        <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Pairing Code</div>
-                                                        <div className="font-mono text-2xl font-bold tracking-[0.28em] text-green-400">
-                                                            {whatsappChannelState.pairing}
-                                                        </div>
-                                                    </div>
-                                                )}
-
-                                                <div className="flex flex-col gap-1.5">
-                                                    <span className="text-[10px] font-mono text-muted-foreground">Or Pair with Phone Number</span>
-                                                    <div className="flex gap-2">
-                                                        <Input
-                                                            type="tel"
-                                                            value={whatsappChannelState.phone}
-                                                            placeholder="14155551234"
-                                                            onChange={(e) => setWhatsappChannelState((current) => current ? { ...current, phone: e.target.value } : current)}
-                                                            className="h-8 text-xs bg-background/50"
-                                                        />
-                                                        <Button
-                                                            size="sm"
-                                                            onClick={pairWhatsAppChannel}
-                                                            disabled={whatsappChannelState.phone.replace(/[^0-9]/gu, "").length < 10}
-                                                            className="h-8 text-xs bg-green-600 hover:bg-green-700 text-white"
-                                                        >
-                                                            Pair
-                                                        </Button>
-                                                    </div>
-                                                </div>
+                                                <Input
+                                                    type="password"
+                                                    autoComplete="off"
+                                                    value={connectVars[credential.varName] || ""}
+                                                    onChange={(e) => setConnectVars((current) => ({ ...current, [credential.varName]: e.target.value }))}
+                                                    placeholder={credential.varName}
+                                                    className="h-9 text-sm bg-background/70 font-mono"
+                                                />
                                             </div>
-                                        )}
+                                        ))}
                                     </div>
                                 )}
-                            </TabsContent>
 
-                            {/* Connected Accounts Tab */}
-                            <TabsContent value="accounts" className="mt-4 flex flex-col flex-1 min-h-0 overflow-hidden">
-                                {/* Search + Refresh row */}
+                                {connectError && (
+                                    <p className="text-xs text-destructive">{connectError}</p>
+                                )}
+
+                                <Button
+                                    onClick={() => void submitConnectorConnect()}
+                                    disabled={connectSubmitting || connectPanel.credentials.some((credential) => !(connectVars[credential.varName] || "").trim())}
+                                    className="w-full"
+                                >
+                                    {connectSubmitting ? (
+                                        <Loader2 className="w-4 h-4 animate-spin mr-1.5" />
+                                    ) : (
+                                        <KeyRound className="w-4 h-4 mr-1.5" />
+                                    )}
+                                    Connect
+                                </Button>
+                            </div>
+                        ) : (
+                            <>
                                 <div className="flex items-center gap-2 mb-2 flex-shrink-0">
                                     <div className="relative flex-1">
                                         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
                                         <input
                                             type="text"
-                                            placeholder="Search 870+ integrations..."
-                                            value={searchQuery}
-                                            onChange={(e) => setSearchQuery(e.target.value)}
+                                            placeholder="Search API-key connectors..."
+                                            value={connectorSearchQuery}
+                                            onChange={(e) => setConnectorSearchQuery(e.target.value)}
                                             className="w-full h-8 pl-8 pr-8 text-sm bg-background/70 border border-primary/20 rounded-md text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-fuchsia-500/50 focus:ring-1 focus:ring-fuchsia-500/20 transition-colors"
                                         />
-                                        {searchQuery && (
+                                        {connectorSearchQuery && (
                                             <button
-                                                onClick={() => setSearchQuery("")}
+                                                type="button"
+                                                onClick={() => setConnectorSearchQuery("")}
                                                 className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                                             >
                                                 <X className="w-3.5 h-3.5" />
@@ -2098,314 +1856,153 @@ export function BackpackDialog({
                                         variant="ghost"
                                         size="sm"
                                         className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground shrink-0"
-                                        onClick={fetchConnections}
-                                        disabled={refreshing}
+                                        onClick={() => void refreshConnectors()}
+                                        disabled={loadingConnectors}
                                     >
-                                        <RefreshCw className={`w-3 h-3 mr-1 ${refreshing ? "animate-spin" : ""}`} />
+                                        <RefreshCw className={`w-3 h-3 mr-1 ${loadingConnectors ? "animate-spin" : ""}`} />
                                         Refresh
                                     </Button>
                                 </div>
 
-                                {/* Scrollable search and popular integrations area */}
-                                <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-3">
-                                    {/* Search results */}
-                                    {searchQuery.trim() && (
-                                        <div className="space-y-2">
-                                            {searching && (
-                                                <div className="flex items-center justify-center py-4 text-muted-foreground text-sm">
-                                                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                                                    Searching...
-                                                </div>
-                                            )}
-                                            {!searching && filteredSearchResults.length === 0 && searchResults.length === 0 && (
-                                                <div className="text-center py-4 text-muted-foreground text-sm">
-                                                    No integrations found for "{searchQuery}"
-                                                </div>
-                                            )}
-                                            {filteredSearchResults.map(tk =>
-                                                renderProviderCard(toolkitToProvider(tk))
-                                            )}
-                                            {filteredSearchResults.length > 0 && (
-                                                <div className="border-t border-primary/15 my-3" />
-                                            )}
+                                <div
+                                    onScroll={handleConnectorsScroll}
+                                    className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1 space-y-3"
+                                >
+                                    {loadingConnectors && connectorRows.length === 0 && gatedCatalog.length === 0 && !trimmedConnectorSearch ? (
+                                        <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
+                                            <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                                            Loading connectors...
                                         </div>
-                                    )}
-
-                                    {/* Featured Providers */}
-                                    {(!searchQuery.trim() || filteredSearchResults.length > 0 || searchResults.some(sr => featuredSlugs.has(sr.slug))) && (
+                                    ) : (
                                         <>
-                                            {searchQuery.trim() && (
-                                                <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
-                                                    Popular
-                                                </div>
-                                            )}
-                                            {FEATURED_PROVIDERS.map(provider =>
-                                                renderProviderCard(provider)
-                                            )}
-                                        </>
-                                    )}
-                                </div>
-
-                                <p className="text-xs text-muted-foreground text-center pt-4 flex-shrink-0">
-                                    Compose Market never sees or stores your tokens.
-                                </p>
-                            </TabsContent>
-
-                            {/* Credential-Gated Connectors Tab */}
-                            <TabsContent value="connectors" className="mt-4 flex flex-col flex-1 min-h-0 overflow-hidden">
-                                {connectPanel ? (
-                                    <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-3">
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            className="self-start gap-1.5 text-muted-foreground hover:text-foreground -ml-2"
-                                            onClick={() => {
-                                                setConnectPanel(null);
-                                                setConnectVars({});
-                                                setConnectError(null);
-                                            }}
-                                        >
-                                            <ArrowLeft className="w-4 h-4" />
-                                            Back
-                                        </Button>
-
-                                        <div className="flex items-center gap-3">
-                                            <div className="cm-setting-row__icon">
-                                                <KeyRound className="w-5 h-5 text-fuchsia-400" />
-                                            </div>
-                                            <div>
-                                                <h3 className="text-base font-semibold text-foreground">Connect {connectPanel.name}</h3>
-                                                <p className="text-xs text-muted-foreground">
-                                                    Credentials are encrypted at rest and only ever injected into the connector at execution time.
-                                                </p>
-                                            </div>
-                                        </div>
-
-                                        {connectPanel.credentials.length === 0 ? (
-                                            <p className="text-sm text-muted-foreground py-4">
-                                                This connector declares no credential variables.
-                                            </p>
-                                        ) : (
-                                            <div className="space-y-3">
-                                                {connectPanel.credentials.map((credential) => (
-                                                    <div key={credential.varName} className="space-y-1">
-                                                        <div className="flex items-center justify-between">
-                                                            <label className="text-xs font-mono text-foreground">{credential.varName}</label>
-                                                            {credential.obtainUrl && (
-                                                                <a
-                                                                    href={credential.obtainUrl}
-                                                                    target="_blank"
-                                                                    rel="noopener noreferrer"
-                                                                    className="text-xs text-fuchsia-400 hover:underline inline-flex items-center gap-1"
-                                                                >
-                                                                    Get key <ExternalLink className="w-3 h-3" />
-                                                                </a>
-                                                            )}
+                                            {connectorRows
+                                                .filter((row) => !trimmedConnectorSearch
+                                                    || row.name.toLowerCase().includes(trimmedConnectorSearch)
+                                                    || row.slug.toLowerCase().includes(trimmedConnectorSearch))
+                                                .map((row) => (
+                                                    <div key={row.slug} className="cm-setting-row snap-start">
+                                                        <div className="cm-setting-row__icon">
+                                                            <KeyRound className="w-4 h-4 text-fuchsia-400" />
                                                         </div>
-                                                        {credential.description && (
-                                                            <p className="text-xs text-muted-foreground">{credential.description}</p>
-                                                        )}
-                                                        <Input
-                                                            type="password"
-                                                            autoComplete="off"
-                                                            value={connectVars[credential.varName] || ""}
-                                                            onChange={(e) => setConnectVars((current) => ({ ...current, [credential.varName]: e.target.value }))}
-                                                            placeholder={credential.varName}
-                                                            className="h-9 text-sm bg-background/70 font-mono"
-                                                        />
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
-
-                                        {connectError && (
-                                            <p className="text-xs text-destructive">{connectError}</p>
-                                        )}
-
-                                        <Button
-                                            onClick={() => void submitConnectorConnect()}
-                                            disabled={connectSubmitting || connectPanel.credentials.some((credential) => !(connectVars[credential.varName] || "").trim())}
-                                            className="w-full"
-                                        >
-                                            {connectSubmitting ? (
-                                                <Loader2 className="w-4 h-4 animate-spin mr-1.5" />
-                                            ) : (
-                                                <KeyRound className="w-4 h-4 mr-1.5" />
-                                            )}
-                                            Connect
-                                        </Button>
-                                    </div>
-                                ) : (
-                                    <>
-                                        {/* Search + Refresh row */}
-                                        <div className="flex items-center gap-2 mb-2 flex-shrink-0">
-                                            <div className="relative flex-1">
-                                                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-                                                <input
-                                                    type="text"
-                                                    placeholder="Search API-key connectors..."
-                                                    value={connectorSearchQuery}
-                                                    onChange={(e) => setConnectorSearchQuery(e.target.value)}
-                                                    className="w-full h-8 pl-8 pr-8 text-sm bg-background/70 border border-primary/20 rounded-md text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-fuchsia-500/50 focus:ring-1 focus:ring-fuchsia-500/20 transition-colors"
-                                                />
-                                                {connectorSearchQuery && (
-                                                    <button
-                                                        onClick={() => setConnectorSearchQuery("")}
-                                                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                                                    >
-                                                        <X className="w-3.5 h-3.5" />
-                                                    </button>
-                                                )}
-                                            </div>
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground shrink-0"
-                                                onClick={() => void fetchConnectors()}
-                                                disabled={loadingConnectors}
-                                            >
-                                                <RefreshCw className={`w-3 h-3 mr-1 ${loadingConnectors ? "animate-spin" : ""}`} />
-                                                Refresh
-                                            </Button>
-                                        </div>
-
-                                        <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-3">
-                                            {connectorSearchQuery.trim() && (
-                                                <div className="space-y-2">
-                                                    {searchingConnectors && (
-                                                        <div className="flex items-center justify-center py-4 text-muted-foreground text-sm">
-                                                            <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                                                            Searching...
-                                                        </div>
-                                                    )}
-                                                    {!searchingConnectors && connectorSearchResults.length === 0 && !connectorRows.some((row) =>
-                                                        row.name.toLowerCase().includes(connectorSearchQuery.trim().toLowerCase())
-                                                        || row.slug.toLowerCase().includes(connectorSearchQuery.trim().toLowerCase())) && (
-                                                        <div className="text-center py-4 text-muted-foreground text-sm">
-                                                            No API-key connectors found for "{connectorSearchQuery}"
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            )}
-                                            {loadingConnectors && connectorRows.length === 0 && !connectorSearchQuery.trim() ? (
-                                                <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
-                                                    <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                                                    Loading connectors...
-                                                </div>
-                                            ) : (
-                                                <>
-                                                    {connectorRows
-                                                        .filter((row) => !connectorSearchQuery.trim()
-                                                            || row.name.toLowerCase().includes(connectorSearchQuery.trim().toLowerCase())
-                                                            || row.slug.toLowerCase().includes(connectorSearchQuery.trim().toLowerCase()))
-                                                        .map((row) => (
-                                                        <div key={row.slug} className="cm-setting-row">
-                                                            <div className="cm-setting-row__icon">
-                                                                <KeyRound className="w-4 h-4 text-fuchsia-400" />
+                                                        <div className="cm-setting-row__copy min-w-0">
+                                                            <div className="cm-setting-row__label flex items-center gap-1.5 min-w-0">
+                                                                <span className="truncate">{row.name}</span>
+                                                                {row.connected && (
+                                                                    <Check className="w-3.5 h-3.5 text-green-400 sm:hidden shrink-0" />
+                                                                )}
                                                             </div>
-                                                            <div className="cm-setting-row__copy">
-                                                                <div className="cm-setting-row__label flex items-center gap-1.5">
-                                                                    {row.name}
-                                                                    {row.connected && (
-                                                                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0 border-primary/20 text-green-400 font-normal">
-                                                                            connected
-                                                                        </Badge>
-                                                                    )}
-                                                                    {row.allowed && (
-                                                                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0 border-primary/20 text-muted-foreground font-normal">
-                                                                            granted
-                                                                        </Badge>
-                                                                    )}
-                                                                </div>
-                                                                <div className="cm-setting-row__description truncate hidden sm:block">
-                                                                    {row.connected
-                                                                        ? `${row.actions?.length ? `${row.actions.length} actions` : "ready"}`
-                                                                        : row.missingVars.length > 0
-                                                                            ? `Missing: ${row.missingVars.map((v) => v.varName).join(", ")}`
-                                                                            : "Not connected"}
-                                                                </div>
+                                                            <div className="cm-setting-row__description truncate hidden sm:block">
+                                                                {row.connected ? (
+                                                                    <span className="inline-flex items-center gap-1 text-green-400">
+                                                                        <Check className="w-3 h-3 shrink-0" />
+                                                                        {row.allowed ? "Connected · Granted to agents" : "Connected · Paused"}
+                                                                        {row.actions?.length ? ` · ${row.actions.length} actions` : ""}
+                                                                    </span>
+                                                                ) : row.missingVars.length > 0 ? (
+                                                                    `Missing: ${row.missingVars.map((v) => v.varName).join(", ")}`
+                                                                ) : (
+                                                                    "Not connected"
+                                                                )}
                                                             </div>
+                                                        </div>
 
-                                                            <div className="cm-setting-row__control">
-                                                                {connectorBusy === row.slug ? (
-                                                                    <Loader2 className="w-4 h-4 animate-spin text-fuchsia-400" />
-                                                                ) : row.connected ? (
+                                                        <div className="cm-setting-row__control flex items-center gap-2 shrink-0">
+                                                            {connectorBusy === row.slug ? (
+                                                                <Loader2 className="w-4 h-4 animate-spin text-fuchsia-400" />
+                                                            ) : row.connected ? (
+                                                                <>
+                                                                    <Switch
+                                                                        checked={row.allowed}
+                                                                        disabled={connectorBusy === row.slug}
+                                                                        onCheckedChange={(checked) => void toggleConnectorGrant(row, checked)}
+                                                                        aria-label={`Allow agents to use ${row.name}`}
+                                                                    />
                                                                     <Button
                                                                         variant="destructive"
                                                                         size="sm"
+                                                                        aria-label={`Disconnect ${row.name}`}
                                                                         className="shrink-0 h-8 w-8 sm:w-auto p-0 sm:px-2.5 flex items-center justify-center"
                                                                         onClick={() => void disconnectConnector(row)}
                                                                     >
                                                                         <Unplug className="w-4 h-4" />
                                                                         <span className="hidden sm:inline ml-1 text-xs">Disconnect</span>
                                                                     </Button>
-                                                                ) : (
-                                                                    <Button
-                                                                        variant="outline"
-                                                                        size="sm"
-                                                                        className="shrink-0 h-8 w-8 sm:w-auto p-0 sm:px-2.5 flex items-center justify-center"
-                                                                        onClick={() => void openConnectPanel(row.slug, row.name)}
-                                                                    >
-                                                                        <KeyRound className="w-4 h-4" />
-                                                                        <span className="hidden sm:inline ml-1 text-xs">Connect</span>
-                                                                    </Button>
-                                                                )}
-                                                            </div>
+                                                                </>
+                                                            ) : (
+                                                                <Button
+                                                                    variant="outline"
+                                                                    size="sm"
+                                                                    aria-label={`Connect ${row.name}`}
+                                                                    className="shrink-0 h-8 w-8 sm:w-auto p-0 sm:px-2.5 flex items-center justify-center"
+                                                                    onClick={() => void openConnectPanel(row.slug, row.name)}
+                                                                >
+                                                                    <KeyRound className="w-4 h-4" />
+                                                                    <span className="hidden sm:inline ml-1 text-xs">Connect</span>
+                                                                </Button>
+                                                            )}
                                                         </div>
-                                                    ))}
+                                                    </div>
+                                                ))}
 
-                                                    {(connectorSearchQuery.trim() ? connectorSearchResults : gatedCatalog)
-                                                        .filter((entry) => !connectorRows.some((row) => row.slug === entry.slug))
-                                                        .map((entry) => (
-                                                            <div key={entry.slug} className="cm-setting-row">
-                                                                <div className="cm-setting-row__icon">
-                                                                    <KeyRound className="w-4 h-4 text-muted-foreground" />
-                                                                </div>
-                                                                <div className="cm-setting-row__copy">
-                                                                    <div className="cm-setting-row__label">{entry.name}</div>
-                                                                    <div className="cm-setting-row__description truncate hidden sm:block">
-                                                                        {entry.description || entry.slug}
-                                                                    </div>
-                                                                </div>
-                                                                <div className="cm-setting-row__control">
-                                                                    {connectorBusy === entry.slug ? (
-                                                                        <Loader2 className="w-4 h-4 animate-spin text-fuchsia-400" />
-                                                                    ) : (
-                                                                        <Button
-                                                                            variant="outline"
-                                                                            size="sm"
-                                                                            className="shrink-0 h-8 w-8 sm:w-auto p-0 sm:px-2.5 flex items-center justify-center"
-                                                                            onClick={() => void openConnectPanel(entry.slug, entry.name)}
-                                                                        >
-                                                                            <KeyRound className="w-4 h-4" />
-                                                                            <span className="hidden sm:inline ml-1 text-xs">Connect</span>
-                                                                        </Button>
-                                                                    )}
-                                                                </div>
-                                                            </div>
-                                                        ))}
-
-                                                    {connectorRows.length === 0 && gatedCatalog.length === 0 && !loadingConnectors && !connectorSearchQuery.trim() && (
-                                                        <div className="text-center py-8 text-muted-foreground text-sm">
-                                                            No credential-gated connectors available.
+                                            {filteredGatedCatalog.slice(0, connectorsWindow).map((entry) => (
+                                                <div key={entry.slug} className="cm-setting-row snap-start">
+                                                    <div className="cm-setting-row__icon">
+                                                        <KeyRound className="w-4 h-4 text-muted-foreground" />
+                                                    </div>
+                                                    <div className="cm-setting-row__copy min-w-0">
+                                                        <div className="cm-setting-row__label truncate">{entry.name}</div>
+                                                        <div className="cm-setting-row__description truncate hidden sm:block">
+                                                            {entry.description || entry.slug}
                                                         </div>
-                                                    )}
-                                                </>
+                                                    </div>
+                                                    <div className="cm-setting-row__control shrink-0">
+                                                        {connectorBusy === entry.slug ? (
+                                                            <Loader2 className="w-4 h-4 animate-spin text-fuchsia-400" />
+                                                        ) : (
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                aria-label={`Connect ${entry.name}`}
+                                                                className="shrink-0 h-8 w-8 sm:w-auto p-0 sm:px-2.5 flex items-center justify-center"
+                                                                onClick={() => void openConnectPanel(entry.slug, entry.name)}
+                                                            >
+                                                                <KeyRound className="w-4 h-4" />
+                                                                <span className="hidden sm:inline ml-1 text-xs">Connect</span>
+                                                            </Button>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            ))}
+
+                                            {trimmedConnectorSearch && filteredGatedCatalog.length === 0 && !connectorRows.some((row) => (
+                                                row.name.toLowerCase().includes(trimmedConnectorSearch)
+                                                || row.slug.toLowerCase().includes(trimmedConnectorSearch)
+                                            )) && (
+                                                <div className="text-center py-4 text-muted-foreground text-sm">
+                                                    No API-key connectors found for "{connectorSearchQuery}"
+                                                </div>
                                             )}
-                                        </div>
 
-                                        {connectError && (
-                                            <p className="text-xs text-destructive pt-2 flex-shrink-0">{connectError}</p>
-                                        )}
+                                            {connectorRows.length === 0 && gatedCatalog.length === 0 && !loadingConnectors && !trimmedConnectorSearch && (
+                                                <div className="text-center py-8 text-muted-foreground text-sm">
+                                                    No credential-gated connectors available.
+                                                </div>
+                                            )}
+                                        </>
+                                    )}
+                                </div>
 
-                                        <p className="text-xs text-muted-foreground text-center pt-4 flex-shrink-0">
-                                            Keys are encrypted and injected blind at execution time — never shown again.
-                                        </p>
-                                    </>
+                                {connectError && (
+                                    <p className="text-xs text-destructive pt-2 flex-shrink-0">{connectError}</p>
                                 )}
-                            </TabsContent>
-                        </Tabs>
-                    </>)}
+
+                                <p className="text-xs text-muted-foreground text-center pt-4 flex-shrink-0">
+                                    Keys are encrypted and injected blind at execution time — never shown again.
+                                </p>
+                            </>
+                        )}
+                    </TabsContent>
+                </Tabs>
             </DialogContent>
         </Dialog>
     );
