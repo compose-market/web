@@ -94,3 +94,9 @@ function phaseText(
   if (activityState?.phase === "error") return "Error";
   return "Done";
 }
+
+function formatDuration(startedAt: number, endedAt?: number): string {
+  const ms = Math.max(0, (endedAt ?? Date.now()) - startedAt);
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
