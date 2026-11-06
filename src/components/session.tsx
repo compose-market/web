@@ -499,30 +499,23 @@ function SessionManageDialog({ open, onOpenChange }: SessionManageDialogProps) {
 
 function KeyDialog({ open, onOpenChange }: KeyDialogProps) {
   const { session, ensureKeyToken } = useSession();
-  const { account } = useWalletAccount();
+  const { userAddress } = useSelectedUserAddress();
+  const { selectedChain } = useChain();
+  const assetSymbol = selectedChain?.asset ?? "USDC";
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [keyName, setKeyName] = useState("Cursor");
 
   const handleGenerate = async () => {
-    if (!account?.address || !session.isActive) {
-      return;
-    }
+    if (!userAddress || !session.isActive) return;
 
     setIsGenerating(true);
     try {
       const keyToken = await ensureKeyToken();
-      if (!keyToken) {
-        throw new Error("Compose Key token unavailable");
-      }
+      if (!keyToken) throw new Error("Compose Key token unavailable");
 
-      // Preserve the caller's session token: sdk.keys.create stores the newly
-      // minted API-key token as the SDK's "current" token, which would
-      // silently swap the active session for an API key. Re-assert the
-      // session token after creation so downstream calls keep using it.
       const previousToken = sdk.keys.currentToken();
-
       const created = await sdk.keys.create({
         purpose: "api",
         budgetWei: toBudgetWeiString(session.budgetRemaining),
@@ -536,24 +529,21 @@ function KeyDialog({ open, onOpenChange }: KeyDialogProps) {
       }
 
       setGeneratedKey(created.token);
-      toast.success("API Key generated!");
+      toast({ title: "API Key generated" });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to generate API key";
       console.error(error);
-      toast.error(message);
+      toast({ title: "Key generation failed", description: message, variant: "destructive" });
     } finally {
       setIsGenerating(false);
     }
   };
 
   const handleCopy = async () => {
-    if (!generatedKey) {
-      return;
-    }
-
+    if (!generatedKey) return;
     await navigator.clipboard.writeText(generatedKey);
     setCopied(true);
-    toast.success("Copied to clipboard!");
+    toast({ title: "Copied to clipboard" });
     window.setTimeout(() => setCopied(false), 2000);
   };
 
@@ -565,41 +555,80 @@ function KeyDialog({ open, onOpenChange }: KeyDialogProps) {
     onOpenChange(nextOpen);
   };
 
+  const summaryRows: SessionSummaryRow[] = [
+    { label: "Budget", value: `$${(session.budgetRemaining / 1_000_000).toFixed(2)} ${assetSymbol}` },
+    { label: "Expires", value: session.expiresAt ? new Date(session.expiresAt).toLocaleString() : "Never" },
+  ];
+
   return (
-    <KeyDialogShell
+    <ShellModal
       open={open}
-      title="Generate API Key"
+      title={(
+        <span className="cm-session-modal__title-wrap">
+          <Key className="cm-session-icon cm-session-icon--lg" />
+          Generate API Key
+        </span>
+      )}
       subtitle="Create a key for external tools like Cursor or OpenClaw. Uses your current session budget."
-      titleIcon={<Key size={18} />}
-      keyName={keyName}
-      keyNameLabel="Key Name"
-      keyNamePlaceholder="e.g., Cursor, OpenCode"
-      onKeyNameChange={setKeyName}
-      summaryRows={[
-        {
-          label: "Budget",
-          value: `$${(session.budgetRemaining / 1_000_000).toFixed(2)} USDC`,
-        },
-        {
-          label: "Expires",
-          value: session.expiresAt ? new Date(session.expiresAt).toLocaleString() : "Never",
-        },
-      ]}
-      generatedKey={generatedKey}
-      warning="Save this key now. You won't be able to see it again."
-      usageLabel="Usage"
-      usageValue={generatedKey ? `Authorization: Bearer ${generatedKey.slice(0, 20)}...` : undefined}
       onClose={() => handleClose(false)}
-      onGenerate={() => void handleGenerate()}
-      generating={isGenerating}
-      generateLabel="Generate Key"
-      generatingLabel="Generating..."
-      onCopy={() => void handleCopy()}
-      copied={copied}
-      copyLabel="Copy to Clipboard"
-      copiedLabel="Copied!"
-      copyIcon={<Copy size={14} />}
-      copiedIcon={<Check size={14} />}
-    />
+      className="cm-session-modal"
+      contentClassName="cm-session-modal__body"
+    >
+      {!generatedKey ? (
+        <>
+          <div className="cm-session-section">
+            <div className="cm-session-section__label">Key Name</div>
+            <ShellInput
+              value={keyName}
+              onChange={(event) => setKeyName(event.currentTarget.value)}
+              placeholder="e.g., Cursor, OpenCode"
+            />
+          </div>
+
+          <SessionSummary rows={summaryRows} />
+
+          <div className="cm-session-modal__footer">
+            <ShellButton tone="ghost" onClick={() => handleClose(false)} disabled={isGenerating}>
+              Close
+            </ShellButton>
+            <ShellButton tone="primary" onClick={() => void handleGenerate()} disabled={isGenerating}>
+              {isGenerating ? "Generating..." : "Generate Key"}
+            </ShellButton>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="cm-session-section">
+            <div className="cm-session-section__label">Your API Key</div>
+            <div className="cm-session-generated">
+              <ShellInput readOnly value={generatedKey} />
+              <ShellButton tone="secondary" size="sm" onClick={() => void handleCopy()}>
+                {copied ? <Check className="cm-session-icon" /> : <Copy className="cm-session-icon" />}
+              </ShellButton>
+            </div>
+          </div>
+
+          <ShellNotice tone="warning">
+            Save this key now. You won't be able to see it again.
+          </ShellNotice>
+          <SessionSummary rows={summaryRows} />
+
+          <ShellPanel className="cm-session-usage">
+            <div className="cm-session-summary__row">
+              <span>Usage</span>
+              <strong>{`Authorization: Bearer ${generatedKey.slice(0, 20)}...`}</strong>
+            </div>
+          </ShellPanel>
+
+          <div className="cm-session-modal__footer">
+            <ShellButton tone="ghost" onClick={() => handleClose(false)}>Close</ShellButton>
+            <ShellButton tone="primary" onClick={() => void handleCopy()}>
+              {copied ? <Check className="cm-session-icon" /> : <Copy className="cm-session-icon" />}
+              {copied ? "Copied!" : "Copy to Clipboard"}
+            </ShellButton>
+          </div>
+        </>
+      )}
+    </ShellModal>
   );
 }
