@@ -1,17 +1,13 @@
 /**
  * Backpack Component
- * 
- * User's personal permission and account management popup.
- * Two tabs:
- * - Permissions: Toggle browser permissions (filesystem, camera, mic, etc.)
- * - Connected Accounts: Connect/disconnect external accounts via Composio
- * 
- * OAuth is handled entirely by Composio as a credential broker —
- * the app never sees or stores user credentials. Composio manages
- * the full OAuth handshake, token storage, and refresh lifecycle.
+ *
+ * User's personal permission, channel, account, and gated-connector manager.
+ * All 4 tabs hydrate synchronously from owner-scoped snapshots + TanStack Query
+ * and reuse the cached `useConnectorCatalogSnapshot` (0 ms open & reload paint).
  */
 
-import { useState, useCallback, useEffect, useRef, useMemo, Fragment } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo, useDeferredValue, Fragment } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
     Dialog,
     DialogContent,
@@ -25,15 +21,35 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { useIsMobile } from "@/hooks/use-mobile";
+import { useSession } from "@/hooks/use-session";
 import {
     BACKPACK_CLOUD_PERMISSION_TYPES,
-    fetchBackpackPermissions,
-    getCachedBackpackPermissions,
+    BACKPACK_GC_TIME,
+    BACKPACK_STALE_TIME,
+    backpackAccountsQueryKey,
+    backpackChannelsQueryKey,
+    backpackConnectorsQueryKey,
+    backpackPermissionsQueryKey,
+    fetchAllChannelStatuses,
+    fetchBackpackAccountsMap,
+    fetchBackpackConnectorRows,
+    fetchPermissions as fetchCloudPermissions,
+    getCachedPermissions,
     grantBackpackPermission,
+    readBackpackAccountsCache,
+    readBackpackChannelsCache,
+    readBackpackConnectorsCache,
     revokeBackpackPermission as revokeBackpackCloudPermission,
+    writeBackpackAccountsCache,
+    writeBackpackChannelsCache,
+    writeBackpackConnectorsCache,
+    type BackpackChannelStatusMap,
     type BackpackCloudPermission,
+    type BackpackConnectionInfo,
+    type BackpackConnectorRow,
+    type BackpackConnectorVarSpec,
 } from "@/lib/backpack";
+import { useConnectorCatalogSnapshot } from "@/hooks/use-registry";
 import {
     Backpack,
     FolderOpen,
@@ -51,25 +67,37 @@ import {
     Unplug,
     Search,
     X,
-    MessageCircle,
     Send,
     QrCode,
-    Smartphone,
     ArrowLeft,
     RadioTower,
-    Gamepad2,
-    Hash,
     KeyRound,
 } from "lucide-react";
 import { sdk } from "@/lib/sdk";
+import { useSelectedUserAddress } from "@/hooks/use-address";
+import { useAgentCatalog } from "@/hooks/use-agents";
+import { hasSessionAuth } from "@/lib/sdk";
+import { safeHref } from "@/lib/performance/markdown";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import type {
     ChannelLinkResponse,
     ChannelName,
     ChannelRoute,
-    ChannelStatusResponse,
+    DirectoryAgent,
 } from "@compose-market/sdk";
+
+import {
+    OPEN_BACKPACK_EVENT,
+    type BackpackTab,
+    type OpenBackpackDetail,
+} from "@/components/layout/Layout";
+
+export function openGlobalBackpack(detail: OpenBackpackDetail = {}): void {
+    if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent<OpenBackpackDetail>(OPEN_BACKPACK_EVENT, { detail }));
+    }
+}
 
 // =============================================================================
 // Types
