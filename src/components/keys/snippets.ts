@@ -21,19 +21,19 @@ export const ENV_EXPORT = `export COMPOSE_MARKET_API_KEY="compose-..."`;
 export const CURL_RESPONSES = `curl https://api.compose.market/v1/responses \\
   -H "Authorization: Bearer $COMPOSE_MARKET_API_KEY" \\
   -H "Content-Type: application/json" \\
-  -H "x-network-id: eip155:* | solana:*" \ \\
+  -H "x-network-id: eip155:* | solana:*" \\
   -d '{
-    "model": "gemini-3.7-flash",
+    "model": "gemini-2.5-flash",
     "input": "Write a terse deployment checklist."
   }'`;
 
 /** OpenAI-compatible external surface — drop-in for existing SDKs. */
-export const CURL_EXTERNAL = `curl https://api.compose.market/external/v1/ \\
+export const CURL_EXTERNAL = `curl https://api.compose.market/external/v1/chat/completions \\
   -H "Authorization: Bearer $COMPOSE_MARKET_API_KEY" \\
   -H "Content-Type: application/json" \\
   -H "x-network-id: eip155:* | solana:*" \\
   -d '{
-    "model": "gemini-3.7-flash",
+    "model": "gemini-2.5-flash",
     "messages": [
       { "role": "user", "content": "Hello from an OpenAI-compatible client." }
     ]
@@ -48,7 +48,7 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="gemini-3.7-flash",
+    model="gemini-2.5-flash",
     messages=[{"role": "user", "content": "Hello from Compose."}],
 )
 
@@ -62,7 +62,7 @@ const client = new OpenAI({
 });
 
 const response = await client.chat.completions.create({
-  model: "gemini-3.7-flash",
+  model: "gemini-2.5-flash",
   messages: [{ role: "user", content: "Hello from Compose." }],
 });
 
