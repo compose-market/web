@@ -366,7 +366,7 @@ export function QuickstartPanel({
           data-active={segment === "integrate"}
           onClick={() => onSegmentChange("integrate")}
         >
-          Integrate in your app
+          In Your App
         </button>
         <button
           type="button"
@@ -376,7 +376,7 @@ export function QuickstartPanel({
           data-active={segment === "ide"}
           onClick={() => onSegmentChange("ide")}
         >
-          External (IDE / Agent)
+          IDE / Agent
         </button>
       </div>
 
