@@ -670,3 +670,166 @@ function discoveryMetrics(agent: DiscoveryAgent): Metric[] {
     },
   ];
 }
+
+function useExternalWarpStatus(registry: string | null, address: string | null) {
+  return useQuery({
+    queryKey: ["is-external-warped", registry, address],
+    queryFn: async () => {
+      if (!registry || !address) {
+        return { isWarped: false, warpedAgentId: 0 };
+      }
+      const { fetchExternalWarpStatus } = await import("@/hooks/use-warp");
+      return fetchExternalWarpStatus(registry, address);
+    },
+    enabled: Boolean(registry && address),
+    staleTime: 60 * 1000,
+  });
+}
+
+export const DiscoveryAgentCard = React.memo(function DiscoveryAgentCard({ agent, onSelect, className }: DiscoveryAgentCardProps) {
+  const navigate = useViewNavigate();
+  const tiltRef = useTilt<HTMLDivElement>({ maxDeg: 2.5, enabled: true });
+  const [brokenAvatarUrl, setBrokenAvatarUrl] = React.useState<string | null>(null);
+  const isManowar = agent.registry === "manowar";
+  const registryInfo = AGENT_REGISTRIES[agent.registry];
+  const externalRegistry = !isManowar ? agent.registry : null;
+  const externalAddress = !isManowar ? agent.address : null;
+  const { data: externalWarpData } = useExternalWarpStatus(externalRegistry, externalAddress);
+  const warped = isManowar ? agent.isWarped : externalWarpData?.isWarped;
+  const excerpt = agent.description || (agent.readme ? getReadmeExcerpt(agent.readme, 100) : "Ready for chat and tasks.");
+  const registry = registryInfo?.name || agent.registry;
+  const statusLabel = warped ? "Warped" : isManowar ? "On-chain" : agent.type === "hosted" ? "Hosted" : "Active";
+  const tone = monogramTone(agent.address || agent.name);
+  const avatarUrl = sizedAvatarUrl(agent.avatarUrl ?? null, "thumb");
+  const showAvatar = Boolean(avatarUrl) && brokenAvatarUrl !== avatarUrl;
+
+  const handleWarp = (event: MouseEvent) => {
+    event.stopPropagation();
+    sessionStorage.setItem("warpAgent", JSON.stringify(agent));
+    navigate("/create?warp=true");
+  };
+
+  const handleViewEndpoint = (event: MouseEvent) => {
+    event.stopPropagation();
+    if (agent.walletAddress) {
+      navigate(`/agent/${agent.walletAddress}`);
+    }
+  };
+
+  return (
+    <div ref={tiltRef} className="cm-agent-card-host cm-tilt-surface">
+      <Card
+        interactive
+        variant="market"
+        className={cn("cm-agent-card", className)}
+        onClick={() => onSelect(agent)}
+        media={showAvatar && avatarUrl ? (
+          <img
+            src={avatarUrl}
+            alt={agent.name}
+            width={60}
+            height={60}
+            loading="lazy"
+            decoding="async"
+            onError={() => setBrokenAvatarUrl(avatarUrl)}
+          />
+        ) : (
+          <span className="cm-agent-tile__monogram" data-tone={tone} aria-hidden="true">
+            {initials(agent.name)}
+          </span>
+        )}
+        mediaFallback={initials(agent.name)}
+        title={(
+          <span className="cm-agent-card__identity">
+            <span className="cm-agent-card__identity-head">
+              <span className="cm-agent-card__identity-name">{agent.name}</span>
+              {agent.verified ? (
+                <Hint label="Verified">
+                  <span className="cm-agent-card__verified" aria-label="Verified">
+                    <Shield />
+                  </span>
+                </Hint>
+              ) : null}
+            </span>
+            <span className="cm-agent-card__identity-meta">
+              <span className="cm-agent-card__model">
+                <Globe />
+                <span className="cm-agent-card__model-name">{registry}</span>
+              </span>
+              <span className="cm-agent-card__model" data-tone={warped ? "warning" : undefined}>
+                <Zap />
+                <span className="cm-agent-card__model-name">{statusLabel}</span>
+              </span>
+            </span>
+          </span>
+        )}
+        description={(
+          <Excerpt title={agent.name} text={excerpt} lines={2}>
+            {excerpt}
+          </Excerpt>
+        )}
+        metrics={discoveryMetrics(agent)}
+        tagsTitle={(
+          <Hint label="Capabilities">
+            <span className="cm-agent-card__tools-icon" aria-label="Capabilities">
+              <Wrench />
+            </span>
+          </Hint>
+        )}
+        tags={buildDiscoveryTags(agent, 2)}
+        headerAction={agent.externalUrl ? (
+          <ShellButton
+            tone="ghost"
+            size="sm"
+            iconOnly
+            onClick={(event) => {
+              event.stopPropagation();
+              window.open(agent.externalUrl, "_blank", "noopener,noreferrer");
+            }}
+            aria-label="Open external profile"
+            title="Open external profile"
+          >
+            <ExternalLink className="cm-agent-card__inline-svg" />
+          </ShellButton>
+        ) : undefined}
+        footer={(
+          <div className="cm-agent-card__action-stack">
+            <ShellButton
+              tone={isManowar ? "secondary" : "primary"}
+              size="sm"
+              onClick={(event) => {
+                event.stopPropagation();
+                onSelect(agent);
+              }}
+            >
+              <Check className="cm-agent-card__inline-svg" />
+              Select
+            </ShellButton>
+            {!isManowar && !externalWarpData?.isWarped ? (
+              <ShellButton tone="secondary" size="sm" onClick={handleWarp}>
+                <ArrowRightLeft className="cm-agent-card__inline-svg" />
+                Warp
+              </ShellButton>
+            ) : null}
+            {!isManowar && externalWarpData?.isWarped ? (
+              <ShellButton tone="secondary" size="sm" disabled>
+                <CheckCircle2 className="cm-agent-card__inline-svg" />
+                Warped
+              </ShellButton>
+            ) : null}
+            {isManowar ? (
+              <ShellButton tone="secondary" size="sm" onClick={handleViewEndpoint}>
+                <Eye className="cm-agent-card__inline-svg" />
+                View
+              </ShellButton>
+            ) : null}
+          </div>
+        )}
+      />
+    </div>
+  );
+});
+
+export function AgentCardSkeleton() {
+  return <Skeleton className="cm-agent-card cm-agent-card--market" />;
+}
