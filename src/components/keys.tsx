@@ -362,7 +362,8 @@ function KeysHeader({
   canRefresh,
   onCreate,
   canCreate,
-  onOpenGuide,
+  pocket,
+  onPocketChange,
   activeCount,
 }: {
   onRefresh: () => void;
@@ -370,12 +371,13 @@ function KeysHeader({
   canRefresh: boolean;
   onCreate: () => void;
   canCreate: boolean;
-  onOpenGuide: () => void;
+  pocket: "main" | "side";
+  onPocketChange: (pocket: "main" | "side") => void;
   activeCount?: number;
 }) {
   return (
-    <div className="cm-keys-header">
-      <div className="cm-keys-header__brand">
+    <div className="cm-control-rail cm-dashboard-control-rail">
+      <div className="cm-dashboard-control-rail__brand">
         <h1 className="cm-page-header__title cm-keys-header__title">
           <span className="text-fuchsia-500 mr-2">//</span>
           API KEYS
@@ -386,31 +388,37 @@ function KeysHeader({
           </span>
         )}
       </div>
-      <div className="cm-keys-header__actions">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onOpenGuide}
-          className="cm-shell-button cm-shell-button--ghost cm-shell-button--icon cm-keys-quickstart-trigger"
-          title="Connect your tools"
-          aria-label="Open the setup guide"
-        >
-          <Terminal className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
+      <div className="cm-dashboard-control-rail__actions">
+        <Pockets
+          value={pocket}
+          label="Keys workspace view"
+          className="cm-pocket-bar--split"
+          onChange={onPocketChange}
+          options={[
+            { value: "main", label: "Keys" },
+            { value: "side", label: "Setup" },
+          ]}
+        />
+        <button
+          type="button"
           onClick={onRefresh}
           disabled={!canRefresh || isRefetching}
-          className="cm-shell-button cm-shell-button--ghost cm-shell-button--icon"
+          className="cm-control-icon-button"
           title="Refresh"
+          aria-label="Refresh keys"
         >
           <RefreshCw className={`h-4 w-4 ${isRefetching ? "animate-spin" : ""}`} />
-        </Button>
-        <Button onClick={onCreate} disabled={!canCreate} className="cm-shell-button cm-shell-button--primary" size="sm">
-          <Plus className="w-4 h-4" />
-          New Key
-        </Button>
+        </button>
+        <button
+          type="button"
+          onClick={onCreate}
+          disabled={!canCreate}
+          className="cm-shell-tab"
+          data-state="active"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          <span>New<span className="hidden sm:inline"> Key</span></span>
+        </button>
       </div>
     </div>
   );
