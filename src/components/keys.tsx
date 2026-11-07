@@ -469,8 +469,10 @@ function CreateKeyDialog({
   const effectiveBudget = customBudget.trim() !== "" ? customBudget.trim() : budget;
   const budgetValid = isValidBudget(effectiveBudget);
 
+  const assetSymbol = currentChain?.asset ?? "USDC";
+
   const handleCreate = useCallback(async () => {
-    if (!name.trim() || !budgetValid) return;
+    if (!name.trim() || !budgetValid || !paymentNetwork) return;
     await createKey({
       name: name.trim(),
       budgetUsd: effectiveBudget,
@@ -483,7 +485,7 @@ function CreateKeyDialog({
     if (!createdToken) return;
     await navigator.clipboard.writeText(createdToken);
     setCopied(true);
-    toast.success("API key copied to clipboard!");
+    toast({ title: "API key copied to clipboard" });
     setTimeout(() => setCopied(false), 2000);
   }, [createdToken]);
 
@@ -497,86 +499,106 @@ function CreateKeyDialog({
     }
   }, [onOpenChange, clearCreatedToken]);
 
-  const budgetSummary = budgetValid ? `$${Number(effectiveBudget).toFixed(2)} USDC` : "—";
+  const budgetSummary = budgetValid ? `$${Number(effectiveBudget).toFixed(2)} ${assetSymbol}` : "—";
 
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="cm-dialog-panel max-w-md border-violet-500/30 bg-background/95 p-6">
-        <DialogHeader>
-          <DialogTitle className="font-display text-violet-300 flex items-center gap-2 text-base">
-            <Key className="h-5 w-5" />
-            {createdToken ? "Key Created" : "Create API Key"}
-          </DialogTitle>
-        </DialogHeader>
-
-        {createdToken ? (
+    <ShellModal
+      open={open}
+      title={(
+        <span className="cm-session-modal__title-wrap">
+          <Key className="cm-session-icon cm-session-icon--lg" />
+          {createdToken ? "Key Created" : "Create API Key"}
+        </span>
+      )}
+      subtitle={
+        createdToken
+          ? "Save this secret token now — it is displayed only once."
+          : `Create a scoped API key with a fixed ${assetSymbol} spending cap and expiration.`
+      }
+      onClose={() => handleClose(false)}
+      className="cm-session-modal"
+      contentClassName="cm-session-modal__body"
+    >
+      {createdToken ? (
+        <>
+          <ShellNotice tone="warning">
+            Save this key now. You won&apos;t be able to see it again.
+          </ShellNotice>
           <div className="cm-created-token">
-            <span className="cm-created-token__warning">
-              Save this key now. You won't be able to see it again.
-            </span>
             <code className="cm-created-token__value">{createdToken}</code>
             <div className="cm-created-token__usage">
               Usage: <code>Authorization: Bearer {createdToken.slice(0, 20)}...</code>
             </div>
-            <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.3rem" }}>
-              <Button onClick={() => void handleCopyToken()} className="cm-shell-button cm-shell-button--primary" size="sm" style={{ flex: 1 }}>
-                {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                {copied ? "Copied!" : "Copy Key"}
-              </Button>
-            </div>
-            <div className="cm-created-token__next">
-              <span className="cm-created-token__next-label">Next — configure your client</span>
-              <span className="cm-created-token__next-copy">
-                Base URL, model catalog, and per-client recipes (OpenCode, OpenClaw, Hermes) are one click away.
-              </span>
-              <Button
+          </div>
+          <div className="cm-created-token__next">
+            <span className="cm-created-token__next-label">Next — configure your client</span>
+            <span className="cm-created-token__next-copy">
+              Base URL, model catalog, and per-client recipes (OpenCode, OpenClaw, Hermes) are one click away.
+            </span>
+            <div>
+              <ShellButton
+                tone="secondary"
+                size="sm"
                 onClick={() => {
                   handleClose(false);
                   onOpenQuickstart();
                 }}
-                className="cm-shell-button cm-shell-button--secondary"
-                size="sm"
               >
                 Open quickstart
-              </Button>
+              </ShellButton>
             </div>
-            <Button onClick={() => handleClose(false)} className="cm-shell-button cm-shell-button--ghost" size="sm">
-              Done
-            </Button>
           </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.85rem" }}>
-            <div className="cm-create-key__field">
-              <label className="cm-create-key__label">Key Name</label>
-              <Input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g., Cursor, OpenCode, Production"
-                className="cm-shell-input"
-              />
-              <div className="cm-create-key__choices">
-                {NAME_SUGGESTIONS.map((suggestion) => (
-                  <button
-                    key={suggestion}
-                    type="button"
-                    className="cm-create-key__choice"
-                    data-active={name === suggestion}
-                    onClick={() => setName(suggestion)}
-                  >
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
+          <div className="cm-session-modal__footer">
+            <ShellButton tone="ghost" onClick={() => handleClose(false)}>
+              Done
+            </ShellButton>
+            <ShellButton tone="primary" onClick={() => void handleCopyToken()}>
+              {copied ? <Check className="cm-session-icon" /> : <Copy className="cm-session-icon" />}
+              {copied ? "Copied!" : "Copy Key"}
+            </ShellButton>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="cm-session-section">
+            <label className="cm-session-section__label" htmlFor="cm-key-name-input">
+              <Key className="cm-session-icon" />
+              Key Name
+            </label>
+            <ShellInput
+              id="cm-key-name-input"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g., Cursor, OpenCode, Production"
+            />
+            <div className="cm-session-choice-grid cm-session-choice-grid--tags">
+              {NAME_SUGGESTIONS.map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  className={`cm-session-choice${name === suggestion ? " active" : ""}`}
+                  data-active={name === suggestion}
+                  onClick={() => setName(suggestion)}
+                >
+                  {suggestion}
+                </button>
+              ))}
             </div>
+          </div>
 
-            <div className="cm-create-key__field">
-              <label className="cm-create-key__label">Budget (USDC)</label>
-              <div className="cm-create-key__choices">
-                {BUDGET_PRESETS.map((preset) => (
+          <div className="cm-session-section">
+            <div className="cm-session-section__label">
+              <Wallet className="cm-session-icon" />
+              Budget (USDC)
+            </div>
+            <div className="cm-session-choice-grid">
+              {BUDGET_PRESETS.map((preset) => {
+                const isActive = customBudget === "" && budget === preset.value;
+                return (
                   <button
                     key={preset.value}
-                    className="cm-create-key__choice"
-                    data-active={customBudget === "" && budget === preset.value}
+                    className={`cm-session-choice${isActive ? " active" : ""}`}
+                    data-active={isActive}
                     onClick={() => {
                       setBudget(preset.value);
                       setCustomBudget("");
@@ -585,68 +607,74 @@ function CreateKeyDialog({
                   >
                     {preset.label}
                   </button>
-                ))}
-                <Input
-                  value={customBudget}
-                  onChange={(e) => setCustomBudget(e.target.value)}
-                  placeholder="Custom"
-                  inputMode="decimal"
-                  className="cm-shell-input cm-create-key__custom"
-                  data-invalid={customBudget.trim() !== "" && !budgetValid ? "true" : undefined}
-                  aria-label="Custom budget in USDC"
-                />
-              </div>
+                );
+              })}
+              <ShellInput
+                value={customBudget}
+                onChange={(e) => setCustomBudget(e.target.value)}
+                placeholder="Custom"
+                inputMode="decimal"
+                className="cm-session-choice-input"
+                data-invalid={customBudget.trim() !== "" && !budgetValid ? "true" : undefined}
+                aria-label="Custom budget in USDC"
+              />
             </div>
+          </div>
 
-            <div className="cm-create-key__field">
-              <label className="cm-create-key__label">Duration</label>
-              <div className="cm-create-key__choices">
-                {DURATION_PRESETS.map((preset) => (
+          <div className="cm-session-section">
+            <div className="cm-session-section__label">
+              <Clock className="cm-session-icon" />
+              Duration
+            </div>
+            <div className="cm-session-choice-grid">
+              {DURATION_PRESETS.map((preset) => {
+                const isActive = duration === preset.hours;
+                return (
                   <button
                     key={preset.hours}
-                    className="cm-create-key__choice"
-                    data-active={duration === preset.hours}
+                    className={`cm-session-choice${isActive ? " active" : ""}`}
+                    data-active={isActive}
                     onClick={() => setDuration(preset.hours)}
                     type="button"
                   >
                     {preset.label}
                   </button>
-                ))}
-              </div>
+                );
+              })}
             </div>
+          </div>
 
-            <div className="cm-create-key__summary">
-              <div className="cm-create-key__summary-row">
-                <span>Max Spend</span>
-                <strong>{budgetSummary}</strong>
-              </div>
-              <div className="cm-create-key__summary-row">
-                <span>Expires After</span>
-                <strong>{duration >= 24 ? `${Math.floor(duration / 24)}d` : `${duration}h`}</strong>
-              </div>
-              <div className="cm-create-key__summary-row">
-                <span>Chain</span>
-                <strong>{currentChain?.name || paymentNetwork}</strong>
-              </div>
+          <div className="cm-session-summary">
+            <div className="cm-session-summary__row">
+              <span>Max Spend</span>
+              <strong>{budgetSummary}</strong>
             </div>
+            <div className="cm-session-summary__row">
+              <span>Expires After</span>
+              <strong>{duration >= 24 ? `${Math.floor(duration / 24)}d` : `${duration}h`}</strong>
+            </div>
+            <div className="cm-session-summary__row">
+              <span>Chain</span>
+              <strong>{currentChain?.name || paymentNetwork}</strong>
+            </div>
+          </div>
 
-            {createError && (
-              <div className="cm-create-key__summary" style={{ borderColor: "hsl(0 72% 51% / 0.3)", background: "hsl(0 72% 51% / 0.05)" }}>
-                <span style={{ color: "hsl(0 72% 55%)", fontSize: "0.66rem" }}>{createError}</span>
-              </div>
-            )}
+          {createError ? <ShellNotice tone="error">{createError}</ShellNotice> : null}
 
-            <Button
+          <div className="cm-session-modal__footer">
+            <ShellButton tone="ghost" onClick={() => handleClose(false)} disabled={isCreating}>
+              Cancel
+            </ShellButton>
+            <ShellButton
+              tone="primary"
               onClick={() => void handleCreate()}
               disabled={isCreating || !name.trim() || !budgetValid}
-              className="cm-shell-button cm-shell-button--primary"
-              style={{ width: "100%" }}
             >
               {isCreating ? "Creating..." : "Create Key"}
-            </Button>
+            </ShellButton>
           </div>
-        )}
-      </DialogContent>
-    </Dialog>
+        </>
+      )}
+    </ShellModal>
   );
 }
