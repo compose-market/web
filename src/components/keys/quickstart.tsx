@@ -11,7 +11,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Check, Copy, ExternalLink, Terminal } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/hooks/use-toast";
 
 import {
   BEARER_FORMAT,
@@ -101,7 +101,7 @@ function SnippetBlock({ code, language, label }: { code: string; language: strin
   const handleCopy = () => {
     void navigator.clipboard.writeText(code).then(() => {
       setCopied(true);
-      toast.success("Copied to clipboard");
+      toast({ title: "Copied to clipboard" });
       if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
       timeoutRef.current = window.setTimeout(() => setCopied(false), 2000);
     });
@@ -123,14 +123,22 @@ function SnippetBlock({ code, language, label }: { code: string; language: strin
           PreTag="div"
           customStyle={{
             margin: 0,
-            padding: "0.8rem",
-            fontSize: "0.68rem",
-            lineHeight: 1.55,
+            padding: "0.75rem",
+            fontSize: "var(--font-xs)",
+            lineHeight: 1.52,
             background: "hsl(240 10% 4% / 0.55)",
             borderRadius: 0,
-            overflowX: "auto",
+            overflowX: "hidden",
+            whiteSpace: "pre-wrap",
+            overflowWrap: "anywhere",
           }}
-          codeTagProps={{ style: { fontFamily: "var(--font-mono), monospace" } }}
+          codeTagProps={{
+            style: {
+              fontFamily: "var(--font-mono), monospace",
+              whiteSpace: "pre-wrap",
+              overflowWrap: "anywhere",
+            },
+          }}
         >
           {code}
         </runtime.SyntaxHighlighter>
@@ -187,7 +195,7 @@ function IntegratePane({
         <span className="cm-quickstart__hero-copy">
           No need for <code>/chat/completions</code>, <code>/[images|video]/generations</code>,{" "}
           <code>/audio/speech</code>, <code>/embeddings</code> and the like. Compose&apos;s native{" "}
-          <code>POST /v1/responses</code> gives you access to <b>text, image, audio, video, embeddings</b> etc from a single endpoints.
+          <code>POST /v1/responses</code> gives you access to <b>text, image, audio, video, embeddings</b> etc from a single endpoint.
         </span>
       </div>
 
