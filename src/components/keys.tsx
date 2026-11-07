@@ -8,24 +8,13 @@
  */
 
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
-import { Check, Copy, Key, Plus, RefreshCw, Terminal, Trash2, Zap, Clock } from "lucide-react";
+import { Check, Copy, Key, Plus, RefreshCw, Terminal, Trash2, Zap, Clock, Wallet } from "lucide-react";
+import { ShellButton, ShellInput, ShellModal, ShellNotice } from "@compose-market/theme/shell";
 import { useKeys, type KeyRecord, type UseKeysReturn } from "@/hooks/use-keys";
 import { useWalletAccount } from "@/hooks/use-wallet";
 import { NetworkBadge } from "@/components/network-selector";
 import { useChain } from "@/contexts/Network";
-import { toast } from "sonner";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+import { toast } from "@/hooks/use-toast";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -35,13 +24,13 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Input } from "@/components/ui/input";
+} from "@/components/ui/alerts";
 import { Button } from "@/components/ui/button";
 import { formatWeiUsd, timeAgo } from "@/lib/receipts";
 import { QuickstartPanel, type QuickstartSegment } from "@/components/keys/quickstart";
 import { SessionBudgetDialog } from "@/components/session";
 import { useSession } from "@/hooks/use-session";
+import { Pockets } from "@/components/control";
 
 function formatTimeRemaining(expiresAt: number): string {
   const remaining = expiresAt - Date.now();
@@ -93,7 +82,7 @@ export function ApiKeysPanel() {
   const [revokeTarget, setRevokeTarget] = useState<KeyRecord | null>(null);
   const [segment, setSegment] = useState<QuickstartSegment>("integrate");
   const [highlight, setHighlight] = useState(false);
-  const [guideOpen, setGuideOpen] = useState(false);
+  const [pocket, setPocket] = useState<"main" | "side">("main");
   const highlightTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => () => {
@@ -114,7 +103,7 @@ export function ApiKeysPanel() {
   const handleCopy = useCallback(async (keyId: string) => {
     await navigator.clipboard.writeText(keyId);
     setCopiedKeyId(keyId);
-    toast.success("Key ID copied");
+    toast({ title: "Key ID copied" });
     setTimeout(() => setCopiedKeyId(null), 2000);
   }, []);
 
@@ -122,9 +111,9 @@ export function ApiKeysPanel() {
     if (!revokeTarget || !isConnected) return;
     try {
       await revokeKey(revokeTarget.keyId);
-      toast.success("Key revoked");
+      toast({ title: "Key revoked" });
     } catch {
-      toast.error("Failed to revoke key");
+      toast({ title: "Failed to revoke key", variant: "destructive" });
     } finally {
       setRevokeTarget(null);
     }
@@ -133,12 +122,9 @@ export function ApiKeysPanel() {
   const openQuickstart = useCallback(() => {
     setSegment("ide");
     setHighlight(true);
+    setPocket("side");
     if (highlightTimeoutRef.current !== null) window.clearTimeout(highlightTimeoutRef.current);
     highlightTimeoutRef.current = window.setTimeout(() => setHighlight(false), 1800);
-    // Below the cm-split breakpoint the side panel is hidden — open the sheet.
-    if (typeof window !== "undefined" && window.matchMedia("(max-width: 58rem)").matches) {
-      setGuideOpen(true);
-    }
   }, []);
 
   const openCreate = useCallback(() => {
@@ -147,7 +133,6 @@ export function ApiKeysPanel() {
 
   const openSession = useCallback(() => {
     if (!isConnected) return;
-    setGuideOpen(false);
     setSessionOpen(true);
   }, [isConnected]);
 
@@ -183,11 +168,12 @@ export function ApiKeysPanel() {
         canRefresh={Boolean(owner)}
         onCreate={openCreate}
         canCreate={isConnected}
-        onOpenGuide={() => setGuideOpen(true)}
+        pocket={pocket}
+        onPocketChange={setPocket}
         activeCount={activeKeys.length}
       />
 
-      <div className="cm-split">
+      <div className="cm-split" data-pocket={pocket}>
         <div className="cm-split__main">
           <div className="cm-keys-main">
             {mainContent ?? (
@@ -205,13 +191,13 @@ export function ApiKeysPanel() {
                       Two steps to any client: create a Compose Key, paste it into your tool.
                       The guide on the right has the exact config for your setup.
                     </span>
-                    <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem", flexWrap: "wrap", justifyContent: "center" }}>
+                    <div className="mt-2 flex flex-wrap justify-center gap-2">
                       <Button onClick={openCreate} disabled={!isConnected} className="cm-shell-button cm-shell-button--primary">
                         <Plus className="w-4 h-4" />
                         Create Key
                       </Button>
                       <Button
-                        onClick={() => setGuideOpen(true)}
+                        onClick={() => setPocket("side")}
                         className="cm-shell-button cm-shell-button--secondary cm-keys-quickstart-trigger"
                       >
                         <Terminal className="w-4 h-4" />
@@ -259,7 +245,7 @@ export function ApiKeysPanel() {
                                     {key.purpose}
                                   </span>
                                   <NetworkBadge network={key.network} />
-                                  <span className="cm-key-card__id">inference-{key.keyId.slice(0, 8)}***</span>
+                                  <span className="cm-key-card__id">compose-{key.keyId.slice(0, 8)}…</span>
                                 </div>
                                 <div className="cm-key-card__meta">
                                   <span className="cm-key-card__budget">
@@ -331,30 +317,6 @@ export function ApiKeysPanel() {
           />
         </div>
       </div>
-
-      <Sheet open={guideOpen} onOpenChange={setGuideOpen}>
-        <SheetContent side="right" className="cm-shell-panel cm-sheet-panel cm-sheet-panel--inspect p-0">
-          <SheetHeader className="border-b border-primary/15 p-4">
-            <SheetTitle className="font-display text-cyan-300 flex items-center gap-2 text-base">
-              <Terminal className="h-5 w-5" />
-              Connect your tools
-            </SheetTitle>
-          </SheetHeader>
-          <div className="cm-sheet-body cm-sheet-body--inspect">
-            <QuickstartPanel
-              segment={segment}
-              onSegmentChange={setSegment}
-              highlight={false}
-              sessionActive={sessionActive}
-              onCreateSession={openSession}
-              onCreateKey={() => {
-                setGuideOpen(false);
-                openCreate();
-              }}
-            />
-          </div>
-        </SheetContent>
-      </Sheet>
 
       <CreateKeyDialog
         open={createOpen}
