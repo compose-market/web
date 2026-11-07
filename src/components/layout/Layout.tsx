@@ -135,6 +135,112 @@ export function Layout({
   );
 }
 
+function NavNetworkPlaceholder({ onActivateWallet }: { onActivateWallet?: () => void }) {
+  const { selectedNetwork, getChainByNetworkId } = useChain();
+  const currentChain = getChainByNetworkId(selectedNetwork);
+  const colorClass = currentChain?.isTestnet
+    ? "border-amber-500/40 text-amber-300"
+    : "border-primary/35 text-foreground";
+
+  return (
+    <button
+      type="button"
+      onClick={onActivateWallet}
+      aria-label="Network"
+      className={cn(
+        "flex h-9 w-full items-center justify-between whitespace-nowrap rounded-md border bg-transparent px-3 py-2 text-sm shadow-sm cm-hud-button font-mono text-xs",
+        colorClass,
+        "cm-app-chrome__navselect",
+      )}
+    >
+      <div className="flex min-w-0 items-center gap-2 truncate">
+        <NetworkGlyph network={selectedNetwork} name={currentChain?.name} />
+        <span className="cm-hud-value">{currentChain?.name || "Select"}</span>
+      </div>
+      <ChevronDown className="h-4 w-4 opacity-50" />
+    </button>
+  );
+}
+
+function HudPlaceholder({
+  bellOpen,
+  onOpenBell,
+  overflowOpen,
+  onToggleOverflow,
+  onActivateWallet,
+}: {
+  bellOpen: boolean;
+  onOpenBell: () => void;
+  overflowOpen: boolean;
+  onToggleOverflow: () => void;
+  onActivateWallet?: () => void;
+}) {
+  const { paymentNetwork } = useChain();
+  const [cachedAccount] = useState(() => readCachedAccount());
+  const isEvm = isEvmNetwork(paymentNetwork);
+  const displayAddress = cachedAccount
+    ? (isEvm ? cachedAccount.address : cachedAccount.solanaAddress ?? cachedAccount.address)
+    : null;
+  const shortAddress = displayAddress
+    ? `${displayAddress.slice(0, 6)}...${displayAddress.slice(-4)}`
+    : null;
+
+  return (
+    <>
+      <div className="cm-app-chrome__hud-item" data-priority="medium">
+        <button
+          type="button"
+          className="cm-hud-button cm-hud-button--icon"
+          aria-label="Notifications"
+          aria-expanded={bellOpen}
+          onClick={onOpenBell}
+        >
+          <Bell className="cm-hud-icon" />
+        </button>
+      </div>
+
+      <div className="cm-app-chrome__hud-item" data-priority="low" />
+
+      <div className="cm-app-chrome__hud-item" data-priority="medium">
+        {shortAddress ? (
+          <button
+            type="button"
+            onClick={onActivateWallet}
+            aria-label={`Wallet ${shortAddress}`}
+            data-reconnecting="true"
+            className="cm-hud-button cm-hud-wallet opacity-80"
+          >
+            <Wallet className="cm-hud-icon cm-hud-wallet__icon" size={18} aria-hidden="true" />
+            <span className="cm-hud-value">...</span>
+            <span className="cm-hud-address">{shortAddress}</span>
+            <ChevronDown className="cm-hud-icon" size={13} />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onActivateWallet}
+            className="cm-hud-button cm-hud-connect"
+          >
+            LOGIN
+          </button>
+        )}
+      </div>
+
+      <div className="cm-app-chrome__hud-fold">
+        <button
+          type="button"
+          className="cm-hud-button cm-hud-button--icon cm-hud-overflow"
+          aria-label="More controls"
+          aria-expanded={overflowOpen}
+          onClick={onToggleOverflow}
+        >
+          <MoreHorizontal className="cm-hud-icon" />
+        </button>
+      </div>
+    </>
+  );
+}
+
 function Nav({ location }: { location: string }) {
   return (
     <nav className="cm-app-chrome__navdock" aria-label="Primary navigation">
