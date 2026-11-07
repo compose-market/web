@@ -1,59 +1,78 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Link, useLocation } from "wouter";
-import {
-  Activity,
-  BarChart3,
-  Bell,
-  Box,
-  Key,
-  Layers,
-  MoreHorizontal,
-  PlusCircle,
-  Scale,
-  Search,
-  Sparkles,
-} from "lucide-react";
+import { useLocation } from "wouter";
+import Activity from "lucide-react/icons/activity";
+import Backpack from "lucide-react/icons/backpack";
+import BarChart3 from "lucide-react/icons/bar-chart-3";
+import Bell from "lucide-react/icons/bell";
+import Box from "lucide-react/icons/box";
+import ChevronDown from "lucide-react/icons/chevron-down";
+import Key from "lucide-react/icons/key";
+import MoreHorizontal from "lucide-react/icons/more-horizontal";
+import PlusCircle from "lucide-react/icons/plus-circle";
+import Scale from "lucide-react/icons/scale";
+import Sparkles from "lucide-react/icons/sparkles";
+import Wallet from "lucide-react/icons/wallet";
 import { AppShell } from "@compose-market/theme/app";
-import { WalletConnector } from "@/components/connector";
-import { useWalletAccount } from "@/hooks/use-wallet";
-import { SessionIndicator } from "@/components/session";
-import { useSession } from "@/hooks/use-session";
-import { DispenserButton } from "@/components/dispenser";
-import { NetworkSelector } from "@/components/network-selector";
-import { CostReceiptIndicator } from "@/components/receipt-indicator";
-import { NotificationsDialog } from "@/components/notifications";
+import { useViewNavigate } from "@/motion/snap";
+import { refreshAgentCatalog } from "@/hooks/use-agents";
+import { NetworkGlyph, useChain } from "@/contexts/Network";
+import { readCachedAccount } from "@/lib/cache";
+import { isEvmNetwork } from "@/lib/performance/networks";
+import { cn } from "@/lib/utils";
 
-interface LayoutProps {
+export type BackpackTab = "accounts" | "connectors" | "permissions" | "channels";
+export const OPEN_BACKPACK_EVENT = "compose:open-backpack";
+
+export interface OpenBackpackDetail {
+  tab?: BackpackTab;
+  agentWallet?: string;
+}
+
+export interface LayoutProps {
   children: ReactNode;
+  walletMounted?: boolean;
+  onActivateWallet?: () => void;
+  bellOpen: boolean;
+  onBellOpenChange: (open: boolean) => void;
+  backpackOpen: boolean;
+  onOpenBackpack: () => void;
+  overflowOpen: boolean;
+  onOverflowOpenChange: (open: boolean) => void;
+  onNavUtilityRef?: (el: HTMLDivElement | null) => void;
+  onHudGroupRef?: (el: HTMLDivElement | null) => void;
+  onWorkspaceRef?: (el: HTMLDivElement | null) => void;
 }
 
 const links = [
-  // { href: "/market", icon: Box, label: "Market" },
+  { href: "/market", icon: Box, label: "Market" },
   // { href: "/compose", icon: Layers, label: "Compose" },
   { href: "/dashboard", icon: BarChart3, label: "Dashboard" },
   { href: "/keys", icon: Key, label: "API Keys" },
-  { href: "/create-agent", icon: PlusCircle, label: "Create Agent" },
+  { href: "/create", icon: PlusCircle, label: "Create Agent" },
   { href: "/playground", icon: Sparkles, label: "Playground" },
   { href: "/benchmarks", icon: Scale, label: "Benchmarks" },
-  // { href: "/my-assets", icon: Activity, label: "My Assets" },
+  { href: "/profile", icon: Activity, label: "Profile" },
 ];
 
-export function Layout({ children }: LayoutProps) {
-  const [location, setLocation] = useLocation();
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [overflowOpen, setOverflowOpen] = useState(false);
-  const [bellOpen, setBellOpen] = useState(false);
+export function Layout({
+  children,
+  walletMounted = false,
+  onActivateWallet,
+  bellOpen,
+  onBellOpenChange,
+  backpackOpen,
+  onOpenBackpack,
+  overflowOpen,
+  onOverflowOpenChange,
+  onNavUtilityRef,
+  onHudGroupRef,
+  onWorkspaceRef,
+}: LayoutProps) {
+  const [location] = useLocation();
   const hudRef = useRef<HTMLDivElement | null>(null);
-  const { isConnected } = useWalletAccount();
-  const { sessionActive } = useSession();
 
   useEffect(() => {
-    setSearchOpen(false);
-    setOverflowOpen(false);
-  }, [location]);
-
-  useEffect(() => {
-    if (!searchOpen && !overflowOpen) {
+    if (!overflowOpen) {
       return;
     }
 
@@ -61,13 +80,12 @@ export function Layout({ children }: LayoutProps) {
       if (hudRef.current?.contains(event.target as Node)) {
         return;
       }
-      setSearchOpen(false);
-      setOverflowOpen(false);
+      onOverflowOpenChange(false);
     }
 
     window.addEventListener("mousedown", close);
     return () => window.removeEventListener("mousedown", close);
-  }, [overflowOpen, searchOpen]);
+  }, [overflowOpen, onOverflowOpenChange]);
 
   return (
     <AppShell
@@ -75,74 +93,44 @@ export function Layout({ children }: LayoutProps) {
       contentClassName="h-dvh min-h-0 text-foreground font-sans selection:bg-fuchsia-500/30 selection:text-fuchsia-200 overflow-hidden"
     >
       <div className="cm-app-chrome">
-        <Nav location={location} />
+        <Nav
+          location={location}
+          backpackOpen={backpackOpen}
+          onOpenBackpack={onOpenBackpack}
+          walletMounted={walletMounted}
+          onActivateWallet={onActivateWallet}
+          onNavUtilityRef={onNavUtilityRef}
+        />
 
         <div className="cm-app-chrome__hud" ref={hudRef} aria-label="Workspace controls">
-          <div className="cm-app-chrome__hud-group" data-search-open={searchOpen}>
-            <SearchControl
-              open={searchOpen}
-              onOpenChange={(open) => {
-                setSearchOpen(open);
-                if (open) {
-                  setOverflowOpen(false);
-                }
-              }}
-            />
-
-            <div className="cm-app-chrome__hud-item" data-priority="medium">
-              <button
-                type="button"
-                className="cm-hud-button cm-hud-button--icon cm-app-chrome__search-toggle"
-                aria-label="Notifications"
-                aria-expanded={bellOpen}
-                onClick={() => setBellOpen(true)}
-              >
-                <Bell className="cm-hud-icon" size={17} />
-              </button>
-            </div>
-
-            <div className="cm-app-chrome__hud-item" data-priority="low">
-              <CostReceiptIndicator />
-            </div>
-
-            {isConnected || sessionActive ? (
-              <div className="cm-app-chrome__hud-item" data-priority="medium">
-                <SessionIndicator />
-              </div>
+          <div className="cm-app-chrome__hud-group" ref={onHudGroupRef}>
+            {!walletMounted ? (
+              <HudPlaceholder
+                bellOpen={bellOpen}
+                onOpenBell={() => {
+                  onActivateWallet?.();
+                  onBellOpenChange(true);
+                }}
+                overflowOpen={overflowOpen}
+                onToggleOverflow={() => {
+                  onActivateWallet?.();
+                  onOverflowOpenChange(!overflowOpen);
+                }}
+                onActivateWallet={onActivateWallet}
+              />
             ) : null}
-
-            <div className="cm-app-chrome__hud-item" data-priority="medium">
-              <WalletConnector compact className="cm-hud-button" />
-            </div>
-
-            <OverflowControl
-              open={overflowOpen}
-              onOpenChange={(open) => {
-                setOverflowOpen(open);
-                if (open) {
-                  setSearchOpen(false);
-                }
-              }}
-              onOpenBenchmarks={() => {
-                setOverflowOpen(false);
-                setLocation("/benchmarks");
-              }}
-              onOpenNotifications={() => {
-                setOverflowOpen(false);
-                setBellOpen(true);
-              }}
-            />
           </div>
         </div>
 
         <main className="cm-app-chrome__main cm-web-main">
-          <div className="cm-shell-page cm-web-workspace animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <div
+            ref={onWorkspaceRef}
+            className="cm-shell-page cm-web-workspace"
+          >
             {children}
           </div>
         </main>
       </div>
-
-      <NotificationsDialog open={bellOpen} onOpenChange={setBellOpen} />
     </AppShell>
   );
 }
