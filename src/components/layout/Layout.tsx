@@ -241,16 +241,53 @@ function HudPlaceholder({
   );
 }
 
-function Nav({ location }: { location: string }) {
+function Nav({
+  location,
+  backpackOpen,
+  onOpenBackpack,
+  walletMounted,
+  onActivateWallet,
+  onNavUtilityRef,
+}: {
+  location: string;
+  backpackOpen: boolean;
+  onOpenBackpack: () => void;
+  walletMounted: boolean;
+  onActivateWallet?: () => void;
+  onNavUtilityRef?: (el: HTMLDivElement | null) => void;
+}) {
+  const navigate = useViewNavigate();
+
+  const warmedMarketRef = useRef(false);
+  const warmMarket = () => {
+    if (warmedMarketRef.current) return;
+    warmedMarketRef.current = true;
+    void refreshAgentCatalog();
+  };
+
+  const warmedBackpackRef = useRef(false);
+  const warmBackpack = () => {
+    if (warmedBackpackRef.current) return;
+    warmedBackpackRef.current = true;
+    void import("@/components/backpack");
+  };
+
   return (
     <nav className="cm-app-chrome__navdock" aria-label="Primary navigation">
       <div className="cm-app-chrome__navgroup">
         {links.map((link) => {
           const active = location === link.href || (link.href === "/market" && location === "/");
           return (
-            <Link
+            <a
               key={link.href}
               href={link.href}
+              onPointerEnter={link.href === "/market" ? warmMarket : undefined}
+              onFocus={link.href === "/market" ? warmMarket : undefined}
+              onClick={(event) => {
+                if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+                event.preventDefault();
+                navigate(link.href);
+              }}
               className="cm-app-chrome__navitem"
               data-active={active}
               aria-current={active ? "page" : undefined}
@@ -258,123 +295,32 @@ function Nav({ location }: { location: string }) {
               title={link.label}
             >
               <span className="cm-app-chrome__navitem-icon" aria-hidden="true">
-                <link.icon size={18} />
+                <link.icon />
               </span>
               <span className="cm-app-chrome__tooltip">{link.label}</span>
-            </Link>
+            </a>
           );
         })}
+        <button
+          type="button"
+          onPointerEnter={warmBackpack}
+          onFocus={warmBackpack}
+          onClick={onOpenBackpack}
+          className="cm-app-chrome__navitem"
+          data-active={backpackOpen}
+          aria-expanded={backpackOpen}
+          aria-label="Backpack"
+          title="Backpack"
+        >
+          <span className="cm-app-chrome__navitem-icon" aria-hidden="true">
+            <Backpack />
+          </span>
+          <span className="cm-app-chrome__tooltip">Backpack</span>
+        </button>
       </div>
-      <div className="cm-app-chrome__navutility" aria-label="Network">
-        <NetworkSelector compact showBalance className="cm-app-chrome__navselect" />
+      <div className="cm-app-chrome__navutility" aria-label="Network" ref={onNavUtilityRef}>
+        {!walletMounted ? <NavNetworkPlaceholder onActivateWallet={onActivateWallet} /> : null}
       </div>
     </nav>
-  );
-}
-
-function SearchControl({
-  open,
-  onOpenChange,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-
-    const frame = window.requestAnimationFrame(() => inputRef.current?.focus());
-    return () => window.cancelAnimationFrame(frame);
-  }, [open]);
-
-  return (
-    <div className="cm-app-chrome__search" data-open={open}>
-      <label className="cm-search cm-search--hud" aria-label="Search agents and workflows" aria-hidden={!open}>
-        <Search size={16} aria-hidden="true" />
-        <input
-          ref={inputRef}
-          className="cm-search__input"
-          type="search"
-          placeholder="Search agents, workflows..."
-          disabled={!open}
-          tabIndex={open ? 0 : -1}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              onOpenChange(false);
-            }
-          }}
-        />
-      </label>
-
-      <button
-        type="button"
-        className="cm-hud-button cm-hud-button--icon cm-app-chrome__search-toggle"
-        aria-label="Search"
-        aria-expanded={open}
-        onClick={() => onOpenChange(!open)}
-      >
-        <Search className="cm-hud-icon" size={17} />
-      </button>
-    </div>
-  );
-}
-
-function OverflowControl({
-  open,
-  onOpenChange,
-  onOpenBenchmarks,
-  onOpenNotifications,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onOpenBenchmarks: () => void;
-  onOpenNotifications: () => void;
-}) {
-  return (
-    <div className="cm-app-chrome__hud-fold">
-      <button
-        type="button"
-        className="cm-hud-button cm-hud-button--icon cm-hud-overflow"
-        aria-label="More controls"
-        aria-expanded={open}
-        onClick={() => onOpenChange(!open)}
-      >
-        <MoreHorizontal className="cm-hud-icon" size={18} />
-      </button>
-
-      {open ? (
-        <div className="cm-app-chrome__hud-popover">
-          <div className="cm-app-chrome__hud-popover-body">
-            <div className="cm-app-chrome__hud-row flex items-center justify-between gap-4 py-1 border-b border-white/5">
-              <span className="cm-app-chrome__hud-popover-title text-xs text-muted-foreground font-mono">Receipts</span>
-              <CostReceiptIndicator />
-            </div>
-            <div className="cm-app-chrome__hud-row flex items-center justify-between gap-4 py-1.5">
-              <span className="cm-app-chrome__hud-popover-title text-xs text-muted-foreground font-mono">Funds</span>
-              <DispenserButton />
-            </div>
-            <button
-              type="button"
-              onClick={onOpenBenchmarks}
-              className="cm-hud-button w-full justify-start mt-1 text-cyan-400 hover:text-cyan-300"
-            >
-              <BarChart3 className="cm-hud-icon" size={16} />
-              <span className="cm-hud-label">Model Benchmarks</span>
-            </button>
-            <button
-              type="button"
-              onClick={onOpenNotifications}
-              className="cm-hud-button w-full justify-start mt-1 text-amber-400 hover:text-amber-300"
-            >
-              <Bell className="cm-hud-icon" size={16} />
-              <span className="cm-hud-label">Notifications</span>
-            </button>
-          </div>
-        </div>
-      ) : null}
-    </div>
   );
 }
