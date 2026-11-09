@@ -2,42 +2,163 @@
  * Workflow Card Component
  *
  * Compact card displaying Workflow details with nested agent viewing.
- * Shows: identity, coordinator, agents (with fold pattern), stats, lease info, and endpoints.
- * 
  * Fold Pattern: Main Card → Agent List → Individual AgentCard
- * 
- * Styling: uses @compose-market/theme BEM classes (cm-workflow-card*).
  */
+import * as React from "react";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Excerpt } from "@compose-market/theme/shell";
-import { WorkflowCard as WorkflowCardShell } from "@compose-market/theme/workflows";
-import {
-    TooltipProvider,
-} from "@/components/ui/tooltip";
+import { Card, Skeleton, type Metric, type Section } from "@compose-market/theme/entity";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { getIpfsUrl } from "@/lib/pinata";
 import type { OnchainWorkflow, OnchainAgent } from "@/hooks/use-onchain";
 import type { AgentCard as AgentCardType } from "@/lib/pinata";
-import { AgentCard } from "@/components/agent-card";
-import { API_BASE_URL } from "@/lib/sdk";
+import { AgentCard } from "@/components/identikit";
+import { RUNTIME_BASE_URL } from "@/lib/sdk";
+import { cn } from "@/lib/utils";
 import {
-    Copy,
-    ExternalLink,
-    DollarSign,
-    Package,
-    Globe,
-    Layers,
-    Bot,
-    Clock,
-    Percent,
-    AlertTriangle,
-    Cpu,
-    ChevronRight,
-    ArrowLeft,
+  Copy,
+  ExternalLink,
+  DollarSign,
+  Package,
+  Globe,
+  Layers,
+  Bot,
+  Clock,
+  Percent,
+  AlertTriangle,
+  Cpu,
+  ChevronRight,
+  ArrowLeft,
 } from "lucide-react";
-import { evmChainId, getChainByNetwork, getContractAddress, isEvmNetwork } from "@/lib/chains";
+import { evmChainId, formatUsdcPrice, getChainByNetwork, getContractAddress, isEvmNetwork } from "@/lib/chains";
+import { safeHref } from "@/lib/performance/markdown";
+
+function formatLicensePrice(raw: string | undefined): string {
+  const trimmed = (raw ?? "0").trim();
+  if (/^\d+$/u.test(trimmed)) {
+    return formatUsdcPrice(BigInt(trimmed));
+  }
+  const parsed = Number.parseFloat(trimmed);
+  return Number.isFinite(parsed) && parsed > 0 ? `$${parsed.toFixed(2)}` : "Free";
+}
+
+export interface WorkflowStat {
+  icon: React.ReactNode;
+  value: string;
+  tooltip?: string;
+  tone?: "green" | "cyan" | "fuchsia" | "warning";
+}
+
+export interface WorkflowCardShellProps {
+  bannerSrc?: string | null;
+  title: string;
+  description?: React.ReactNode;
+  titleIcon?: React.ReactNode;
+  headerAction?: React.ReactNode;
+  badges?: React.ReactNode;
+  stats?: WorkflowStat[];
+  coordinatorIcon?: React.ReactNode;
+  coordinatorLabel?: string;
+  coordinatorValue?: string;
+  agentsCount?: number;
+  agentsIcon?: React.ReactNode;
+  onAgentsFold?: () => void;
+  agentsFoldChevron?: React.ReactNode;
+  agentsBadges?: React.ReactNode;
+  leaseSlot?: React.ReactNode;
+  endpointSlot?: React.ReactNode;
+  footer?: React.ReactNode;
+  interactive?: boolean;
+  className?: string;
+}
+
+export function WorkflowCardShell({
+  bannerSrc,
+  title,
+  description,
+  titleIcon,
+  headerAction,
+  badges,
+  stats,
+  coordinatorIcon,
+  coordinatorLabel,
+  coordinatorValue,
+  agentsCount,
+  agentsIcon,
+  onAgentsFold,
+  agentsFoldChevron,
+  agentsBadges,
+  leaseSlot,
+  endpointSlot,
+  footer,
+  interactive,
+  className,
+}: WorkflowCardShellProps) {
+  const metrics: Metric[] = (stats || []).map((stat) => ({
+    label: stat.tooltip || "",
+    value: stat.value,
+    icon: stat.icon,
+    tone: stat.tone,
+  }));
+  const sections: Section[] = [];
+  if (badges) {
+    sections.push({ children: <div className="cm-workflow-card__badges">{badges}</div> });
+  }
+  if (coordinatorValue) {
+    sections.push({
+      label: coordinatorLabel || "Coordinator",
+      children: (
+        <div className="cm-workflow-card__coordinator">
+          {coordinatorIcon ? <span className="cm-workflow-card__coordinator-icon">{coordinatorIcon}</span> : null}
+          <span className="cm-workflow-card__coordinator-value" title={coordinatorValue}>
+            {coordinatorValue}
+          </span>
+        </div>
+      ),
+    });
+  }
+  if (agentsCount != null && agentsCount > 0) {
+    sections.push({
+      children: (
+        <div className="cm-workflow-card__agents">
+          <button type="button" className="cm-workflow-card__agents-header" onClick={onAgentsFold}>
+            <span className="cm-workflow-card__agents-label">
+              {agentsIcon ? <span className="cm-workflow-card__agents-label-icon">{agentsIcon}</span> : null}
+              <span className="cm-workflow-card__agents-label-text">Agents ({agentsCount})</span>
+            </span>
+            {agentsFoldChevron}
+          </button>
+          {agentsBadges ? <div className="cm-workflow-card__agents-badges">{agentsBadges}</div> : null}
+        </div>
+      ),
+    });
+  }
+  if (leaseSlot) sections.push({ children: leaseSlot });
+  if (endpointSlot) sections.push({ children: endpointSlot });
+
+  return (
+    <Card
+      variant="market"
+      className={cn("cm-workflow-card", interactive && "cm-workflow-card--interactive", className)}
+      media={bannerSrc ? (
+        <img src={bannerSrc} alt="" className="cm-workflow-card__banner-image" loading="lazy" decoding="async" />
+      ) : titleIcon ? (
+        <span className="cm-workflow-card__icon">{titleIcon}</span>
+      ) : undefined}
+      mediaFallback={titleIcon}
+      title={title}
+      description={description}
+      metrics={metrics}
+      sections={sections}
+      footer={footer}
+      headerAction={headerAction}
+      interactive={interactive}
+    />
+  );
+}
 
 export interface WorkflowCardProps {
     workflow: OnchainWorkflow;
