@@ -280,3 +280,17 @@ function WalletShellInner({
     </>
   );
 }
+
+export default function WalletRuntime(props: WalletRuntimeProps) {
+  return (
+    <ThirdwebProvider>
+      <OwnerCacheBoundary>
+        <IdentityProvider>
+          <SessionProvider>
+            <WalletShellInner {...props} />
+          </SessionProvider>
+        </IdentityProvider>
+      </OwnerCacheBoundary>
+    </ThirdwebProvider>
+  );
+}
