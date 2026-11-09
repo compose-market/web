@@ -160,16 +160,13 @@ export function SelectedSlashCommandBadges({
 }) {
     if (selected.length === 0) return null;
     return (
-        <div className="mb-2 flex flex-wrap items-center gap-1.5">
+        <div className="cm-slash-badges" role="list" aria-label="Selected commands">
             {selected.map((name) => (
-                <span
-                    key={name}
-                    className="inline-flex h-6 items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-2 text-xs font-mono text-primary"
-                >
-                    /{name}
+                <span key={name} className="cm-slash-chip" role="listitem">
+                    <span>/{name}</span>
                     <button
                         type="button"
-                        className="inline-flex h-4 w-4 items-center justify-center rounded-full text-primary/80 hover:bg-primary/15 hover:text-primary"
+                        className="cm-slash-chip__remove"
                         aria-label={`Remove /${name}`}
                         onClick={(e) => {
                             e.preventDefault();
