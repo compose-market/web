@@ -7,7 +7,7 @@
  * Uses fuchsia brand color (Manowar theme) for consistency.
  */
 import React, { memo } from "react";
-import { StreamMedia as SharedStreamMedia } from "@compose-market/theme";
+import { StreamMedia as SharedStreamMedia } from "@/components/media";
 import {
     Sheet,
     SheetContent,
@@ -15,7 +15,6 @@ import {
     SheetTitle,
     SheetDescription,
 } from "@/components/ui/sheet";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -34,7 +33,23 @@ import {
     Layers,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { formatWeiUsd } from "@/lib/format";
+import { formatWeiUsd } from "@/lib/receipts";
+import { safeImageSrc } from "@/lib/performance/markdown";
+
+function openSafeMedia(url: string): void {
+    const safe = safeImageSrc(url);
+    if (!safe) return;
+    if (safe.startsWith("data:")) {
+        const anchor = document.createElement("a");
+        anchor.href = safe;
+        anchor.download = `output-${Date.now()}.png`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        return;
+    }
+    window.open(safe, "_blank", "noopener,noreferrer");
+}
 
 // =============================================================================
 // Types
@@ -170,7 +185,7 @@ const StepResultItem = memo(function StepResultItem({
     };
 
     return (
-        <div className="space-y-2 p-3 rounded-md bg-sidebar-accent/50 border border-sidebar-border">
+        <div className="cm-trace-node p-3 space-y-2">
             {/* Step Header */}
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -178,7 +193,7 @@ const StepResultItem = memo(function StepResultItem({
                     <span className="font-mono text-sm font-medium">{step.stepName}</span>
                 </div>
                 {step.output !== undefined && step.output !== null && (
-                    <Badge variant="outline" className="text-[10px] gap-1">
+                    <Badge variant="outline" className="text-xs gap-1">
                         {outputIcon[outputType]}
                         {outputType.toUpperCase()}
                     </Badge>
@@ -202,8 +217,8 @@ const StepResultItem = memo(function StepResultItem({
                             <Button
                                 size="sm"
                                 variant="ghost"
-                                className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity h-7 w-7 p-0"
-                                onClick={() => window.open(mediaUrl, "_blank")}
+                                className="absolute top-2 right-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity h-7 w-7 p-0"
+                                onClick={() => openSafeMedia(mediaUrl)}
                             >
                                 <Download className="w-3 h-3" />
                             </Button>
@@ -223,13 +238,13 @@ const StepResultItem = memo(function StepResultItem({
                     {/* Text Output */}
                     {outputType === "text" && typeof step.output === "string" && (
                         <div className="relative group">
-                            <pre className="text-xs font-mono bg-black/30 rounded px-2 py-1.5 overflow-auto max-h-32 whitespace-pre-wrap">
+                            <pre className="text-xs font-mono bg-black/30 rounded px-2 py-1.5 overflow-x-auto whitespace-pre-wrap">
                                 {step.output}
                             </pre>
                             <Button
                                 size="sm"
                                 variant="ghost"
-                                className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 p-0"
+                                className="absolute top-1 right-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity h-6 w-6 p-0"
                                 onClick={() => navigator.clipboard.writeText(step.output as string)}
                             >
                                 <Copy className="w-3 h-3" />
@@ -240,13 +255,13 @@ const StepResultItem = memo(function StepResultItem({
                     {/* JSON Output */}
                     {outputType === "json" && (
                         <div className="relative group">
-                            <pre className="text-xs font-mono bg-black/30 rounded px-2 py-1.5 overflow-auto max-h-32">
+                            <pre className="text-xs font-mono bg-black/30 rounded px-2 py-1.5 overflow-x-auto">
                                 {JSON.stringify(step.output, null, 2)}
                             </pre>
                             <Button
                                 size="sm"
                                 variant="ghost"
-                                className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 p-0"
+                                className="absolute top-1 right-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity h-6 w-6 p-0"
                                 onClick={() => navigator.clipboard.writeText(JSON.stringify(step.output, null, 2))}
                             >
                                 <Copy className="w-3 h-3" />
@@ -277,7 +292,7 @@ export const WorkflowOutputPanel = memo(function WorkflowOutputPanel({
     return (
         <Sheet open={open} onOpenChange={onOpenChange}>
             <SheetContent
-                className="bg-card border-sidebar-border w-full sm:max-w-lg"
+                className="cm-trace w-full sm:max-w-lg flex flex-col max-h-dvh overflow-hidden border-l border-primary/20 bg-background/95"
                 side="right"
             >
                 <SheetHeader className="pb-4">
@@ -291,7 +306,7 @@ export const WorkflowOutputPanel = memo(function WorkflowOutputPanel({
                 </SheetHeader>
 
                 {/* Summary Bar */}
-                <div className="flex items-center gap-3 py-3 px-3 rounded-md bg-sidebar-accent/50 border border-sidebar-border mb-4">
+                <div className="cm-trace-node flex items-center gap-3 py-3 px-3 mb-4">
                     <Badge
                         variant="outline"
                         className={cn(
@@ -355,10 +370,10 @@ export const WorkflowOutputPanel = memo(function WorkflowOutputPanel({
                                 <Button
                                     size="sm"
                                     variant="ghost"
-                                    className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity h-7 w-7 p-0"
+                                    className="absolute top-2 right-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity h-7 w-7 p-0"
                                     onClick={() => {
                                         const src = mediaDataUrl("image", result.output.multimodal!.output);
-                                        window.open(src, "_blank");
+                                        openSafeMedia(src);
                                     }}
                                 >
                                     <Download className="w-3 h-3" />
@@ -379,13 +394,11 @@ export const WorkflowOutputPanel = memo(function WorkflowOutputPanel({
                 )}
 
                 {/* Step Results */}
-                <ScrollArea className="h-[calc(100vh-280px)]">
-                    <div className="space-y-3 pr-4">
-                        {result.steps.map((step) => (
-                            <StepResultItem key={step.stepId} step={step} />
-                        ))}
-                    </div>
-                </ScrollArea>
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain space-y-3 pr-2">
+                    {result.steps.map((step) => (
+                        <StepResultItem key={step.stepId} step={step} />
+                    ))}
+                </div>
             </SheetContent>
         </Sheet>
     );
