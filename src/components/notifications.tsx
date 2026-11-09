@@ -1,21 +1,13 @@
 /**
  * Notifications Dialog — ChainGPT services on the user's channels.
  *
- * Bell popover component using the same styling and flow as the Backpack
- * (Dialog + cm-setting-row + Switch, @compose-market/theme conventions):
- *
- * - Two poller services (Crypto Alerts, Crypto News) with the service's
- *   built-in filter chips, a 6/12/24h frequency, and a channels selection.
- * - Two bridge services (AI Trading Assistant /'/assistant', Compliance Bot /'/compliance')
- * whose '/' commands are gated per user and per channel.
- *
- * Identity is the existing deep-link system only: the user's wallet
- * address plus their connected channel routes. Connecting a new channel
- * uses the same `sdk.channels.link` pairing flow (agentWallet resolved
- * from the user's most recent route or their own on-chain agent).
+ * Hydrates synchronously from owner-scoped localStorage snapshot + TanStack Query
+ * cache so reopen and Cmd+Shift+R reloads paint in 0 ms, while revalidating
+ * silently in the background.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
     Dialog,
     DialogContent,
@@ -32,13 +24,20 @@ import { useSelectedUserAddress } from "@/hooks/use-address";
 import { Switcher, type Option } from "@/components/control";
 import { PoweredByChainGpt } from "@/components/chaingpt";
 import { sdk } from "@/lib/sdk";
+import {
+    BACKPACK_GC_TIME,
+    BACKPACK_STALE_TIME,
+    fetchNotifications,
+    notificationsQueryKey,
+    readNotificationsCache,
+    writeNotificationsCache,
+    type NotificationsPayload,
+} from "@/lib/backpack";
 import type {
     ChannelName,
     ChannelRoute,
-    NotificationChannelState,
     NotifyFilters,
     NotifyFrequency,
-    NotifyServiceInfo,
     NotifySubscription,
 } from "@compose-market/sdk";
 import {
@@ -51,13 +50,8 @@ import {
     Scale,
     Send,
     TrendingUp,
-    Users,
     Zap,
 } from "lucide-react";
-
-// =============================================================================
-// Service metadata (display only — the service list comes from the backend)
-// =============================================================================
 
 const SERVICE_META: Record<string, { icon: React.ReactNode; tone: string }> = {
     alerts: { icon: <Zap className="w-4 h-4 text-amber-400" />, tone: "amber" },
@@ -152,20 +146,43 @@ export function NotificationsDialog({
     onOpenChange,
 }: NotificationsDialogProps) {
     const { toast } = useToast();
+    const queryClient = useQueryClient();
     const { userAddress, isResolving } = useSelectedUserAddress();
     const [isOpen, setIsOpen] = useState(false);
     const handleOpen = open !== undefined ? open : isOpen;
     const handleOpenChange = onOpenChange || setIsOpen;
 
-    const [loading, setLoading] = useState(false);
-    const [failed, setFailed] = useState(false);
     const [saving, setSaving] = useState<string | null>(null);
-    const [services, setServices] = useState<NotifyServiceInfo[]>([]);
-    const [subs, setSubs] = useState<Record<string, NotifySubscription>>({});
-    const [channelStates, setChannelStates] = useState<NotificationChannelState[]>([]);
     const [busyChannel, setBusyChannel] = useState<ChannelName | null>(null);
     const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const pollAbortRef = useRef<AbortController | null>(null);
+
+    const cachedSnapshot = useMemo(
+        () => readNotificationsCache(userAddress),
+        [userAddress],
+    );
+
+    const notificationsQuery = useQuery<NotificationsPayload, Error>({
+        queryKey: notificationsQueryKey(userAddress || ""),
+        queryFn: ({ signal }) => fetchNotifications(userAddress!, { signal }),
+        initialData: cachedSnapshot?.data,
+        initialDataUpdatedAt: cachedSnapshot?.updatedAt,
+        staleTime: BACKPACK_STALE_TIME,
+        gcTime: BACKPACK_GC_TIME,
+        enabled: handleOpen && Boolean(userAddress) && !isResolving,
+        retry: 1,
+    });
+
+    const data = notificationsQuery.data;
+    const services = data?.services ?? [];
+    const channelStates = data?.channels ?? [];
+    const subs = useMemo<Record<string, NotifySubscription>>(
+        () => Object.fromEntries((data?.subscriptions || []).map((sub) => [sub.service, sub])),
+        [data?.subscriptions],
+    );
+
+    const loading = notificationsQuery.isFetching;
+    const failed = Boolean(notificationsQuery.error) && services.length === 0;
 
     const clearPolling = useCallback(() => {
         if (pollRef.current) {
@@ -178,39 +195,19 @@ export function NotificationsDialog({
         }
     }, []);
 
-    const refresh = useCallback(async (signal?: AbortSignal) => {
-        if (!userAddress || isResolving) return;
-        setLoading(true);
-        try {
-            const data = await sdk.notifications.list({ userAddress }, { signal });
-            if (signal?.aborted) return;
-            const nextServices = data.services || [];
-            setServices(nextServices);
-            setSubs(Object.fromEntries((data.subscriptions || []).map((sub) => [sub.service, sub])));
-            setChannelStates(data.channels || []);
-            setFailed(nextServices.length === 0);
-        } catch (error) {
-            if (signal?.aborted) return;
-            console.warn("[Notifications] Could not load subscriptions:", error);
-            setFailed(true);
-        } finally {
-            if (!signal?.aborted) setLoading(false);
-        }
-    }, [isResolving, userAddress]);
-
     useEffect(() => {
-        if (handleOpen) {
-            const controller = new AbortController();
-            pollAbortRef.current?.abort();
-            pollAbortRef.current = controller;
-            void refresh(controller.signal);
-        } else {
+        if (!handleOpen) {
             clearPolling();
             setBusyChannel(null);
         }
-    }, [handleOpen, refresh, clearPolling]);
+    }, [handleOpen, clearPolling]);
 
     useEffect(() => () => clearPolling(), [clearPolling]);
+
+    const refresh = useCallback(async () => {
+        if (!userAddress || isResolving) return;
+        await notificationsQuery.refetch();
+    }, [isResolving, notificationsQuery, userAddress]);
 
     /**
      * Persist a subscription change. Enabled subscriptions with no channels
@@ -227,20 +224,29 @@ export function NotificationsDialog({
         const channels = next.channels ?? current?.channels ?? [];
         const frequencyHours = next.frequencyHours ?? current?.frequencyHours;
         const filters = next.filters ?? current?.filters;
-        const kind = current?.kind ?? services.find((item) => item.service === service)?.kind;
+        const kind = current?.kind ?? services.find((item) => item.service === service)?.kind ?? "bridge";
 
-        setSubs((previous) => ({
-            ...previous,
-            [service]: {
-                ...(previous[service] as NotifySubscription | undefined),
-                service: service as NotifySubscription["service"],
-                kind: kind ?? "bridge",
-                enabled,
-                channels,
-                ...(kind === "poller" && frequencyHours ? { frequencyHours } : {}),
-                ...(kind === "poller" && filters ? { filters } : {}),
-            } as NotifySubscription,
-        }));
+        const updatedSub = {
+            ...(current as NotifySubscription | undefined),
+            service: service as NotifySubscription["service"],
+            kind,
+            enabled,
+            channels,
+            ...(kind === "poller" && frequencyHours ? { frequencyHours } : {}),
+            ...(kind === "poller" && filters ? { filters } : {}),
+        } as NotifySubscription;
+
+        const key = notificationsQueryKey(userAddress);
+        queryClient.setQueryData<NotificationsPayload>(key, (prev) => {
+            if (!prev) return prev;
+            const filtered = (prev.subscriptions || []).filter((item) => item.service !== service);
+            const updated: NotificationsPayload = {
+                ...prev,
+                subscriptions: [...filtered, updatedSub],
+            };
+            writeNotificationsCache(userAddress, updated);
+            return updated;
+        });
 
         if (enabled && channels.length === 0) return;
 
@@ -260,11 +266,11 @@ export function NotificationsDialog({
                 description: error instanceof Error ? error.message : "Please try again.",
                 variant: "destructive",
             });
-            void refresh();
+            void queryClient.invalidateQueries({ queryKey: key });
         } finally {
             setSaving(null);
         }
-    }, [refresh, services, subs, toast, userAddress]);
+    }, [queryClient, services, subs, toast, userAddress]);
 
     const pollConnect = useCallback((channel: ChannelName) => {
         if (!userAddress) return;
@@ -272,18 +278,20 @@ export function NotificationsDialog({
         const controller = new AbortController();
         pollAbortRef.current = controller;
         let attempts = 0;
+        const key = notificationsQueryKey(userAddress);
         const tick = async () => {
             attempts += 1;
             try {
-                const data = await sdk.notifications.list({ userAddress }, { signal: controller.signal });
+                const fresh = await fetchNotifications(userAddress, { signal: controller.signal });
                 if (controller.signal.aborted) return;
-                setServices(data.services || []);
-                setSubs(Object.fromEntries((data.subscriptions || []).map((sub) => [sub.service, sub])));
-                setChannelStates(data.channels || []);
-                const connected = (data.channels || []).some((state) => state.channel === channel && state.connected);
+                queryClient.setQueryData(key, fresh);
+                const connected = (fresh.channels || []).some((state) => state.channel === channel && state.connected);
                 if (connected || attempts >= 40) {
                     clearPolling();
                     setBusyChannel(null);
+                    if (connected) {
+                        void queryClient.invalidateQueries({ queryKey: ["backpack", "channels"] });
+                    }
                 }
             } catch {
                 // Keep polling; refresh recovers the final state.
@@ -291,7 +299,7 @@ export function NotificationsDialog({
         };
         void tick();
         pollRef.current = setInterval(() => void tick(), 3000);
-    }, [clearPolling, userAddress]);
+    }, [clearPolling, queryClient, userAddress]);
 
     const connectChannel = useCallback(async (channel: ChannelName) => {
         if (!userAddress) {
@@ -353,7 +361,7 @@ export function NotificationsDialog({
 
     const renderChannelsSelection = (service: string) => (
         <div className="space-y-2 pl-1">
-            <div className="text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
+            <div className="text-xs font-mono uppercase tracking-[0.12em] text-muted-foreground">
                 Channels
             </div>
             {channelStates.map((state) => {
@@ -369,6 +377,8 @@ export function NotificationsDialog({
                             <img
                                 src={meta.logo}
                                 alt={meta.label}
+                                loading="lazy"
+                                decoding="async"
                                 className="w-5 h-5 object-contain"
                                 onError={(event) => {
                                     (event.target as HTMLImageElement).style.display = "none";
@@ -379,7 +389,7 @@ export function NotificationsDialog({
                             <div className="cm-setting-row__label flex items-center gap-1.5">
                                 {meta.label}
                                 {state.connected && (
-                                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0 border-primary/20 text-green-400 font-normal">
+                                    <Badge variant="secondary" className="text-xs px-1.5 py-0 border-primary/20 text-green-400 font-normal">
                                         connected
                                     </Badge>
                                 )}
@@ -580,7 +590,7 @@ export function NotificationsDialog({
                                             <div className="cm-setting-row__label flex items-center gap-1.5">
                                                 {info.label}
                                                 {info.command && (
-                                                    <Badge variant="outline" className="text-[10px] px-1 py-0 border-primary/20 text-muted-foreground font-mono font-normal">
+                                                    <Badge variant="outline" className="text-xs px-1 py-0 border-primary/20 text-muted-foreground font-mono font-normal">
                                                         {info.command}
                                                     </Badge>
                                                 )}
@@ -615,7 +625,7 @@ export function NotificationsDialog({
                                             {info.poller && (
                                                 <>
                                                     <div className="flex items-center justify-between gap-3">
-                                                        <span className="text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
+                                                        <span className="text-xs font-mono uppercase tracking-[0.12em] text-muted-foreground">
                                                             Frequency
                                                         </span>
                                                         <Switcher
@@ -629,13 +639,13 @@ export function NotificationsDialog({
                                                     </div>
                                                     <div className="space-y-2">
                                                         <div className="flex items-center justify-between gap-3">
-                                                            <span className="text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
+                                                            <span className="text-xs font-mono uppercase tracking-[0.12em] text-muted-foreground">
                                                                 Filters
                                                             </span>
                                                             <Input
                                                                 defaultValue={sub?.filters?.search || ""}
                                                                 placeholder={info.service === "alerts" ? "Search signals..." : "Search news..."}
-                                                                className="h-7 max-w-[200px] text-xs bg-background/70"
+                                                                className="h-7 max-w-48 text-xs bg-background/70"
                                                                 onBlur={(event) => setSearchFilter(info.service, event.target.value)}
                                                                 onKeyDown={(event) => {
                                                                     if (event.key === "Enter") {
@@ -658,7 +668,7 @@ export function NotificationsDialog({
                 )}
 
                 <div className="flex-shrink-0 border-t border-border/40 pt-2.5 mt-1 flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="text-xs text-muted-foreground">
                         Commands and digests arrive through your connected channel routes.
                     </p>
                     <PoweredByChainGpt className="ml-auto" />
