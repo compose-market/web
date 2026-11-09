@@ -10,7 +10,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@/components/ui/dropdown";
 import { thirdwebClient, getChainObject, getChainConfig, getUsdcAddress, getExplorerUrl, isEvmNetwork, evmChainId } from "@/lib/chains";
 import { useChain } from "@/contexts/Network";
 import { useTotalBalance } from "@/hooks/use-multichain";
@@ -56,12 +56,14 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
   const wallet = useActiveWallet();
   const adminWallet = useAdminWallet();
   const connectionStatus = useActiveWalletConnectionStatus();
-  const { paymentNetwork, getChainByNetworkId, evmChains, defaultNetwork } = useChain();
+  const { paymentNetwork, getChainByNetworkId, evmChains } = useChain();
   const {
     userAddress,
     evmAddress,
     solanaAddress,
     isEvm,
+    isSolana,
+    isNear,
     isResolving: userAddressResolving,
     isActivated: solanaActivated,
     requiredFundingLamports,
@@ -80,7 +82,7 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
   const isReconnecting = !account && connectionStatus === "connecting" && cachedAccount != null;
 
   useEffect(() => {
-    if (account?.address) {
+    if (account?.address && paymentNetwork) {
       writeCachedAccount(account.address, paymentNetwork, solanaAddress);
     }
   }, [account?.address, paymentNetwork, solanaAddress]);
@@ -115,12 +117,11 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
   }, [paymentNetwork, account?.address, adminWallet]);
 
   const fallbackEvmNetwork = useMemo((): EvmNetworkId | undefined => {
-    if (isEvmNetwork(defaultNetwork)) return defaultNetwork;
     const first = evmChains.find((chain) => isEvmNetwork(chain.network));
     return first?.network as EvmNetworkId | undefined;
-  }, [defaultNetwork, evmChains]);
+  }, [evmChains]);
 
-  const thirdwebNetwork = isEvm ? paymentNetwork : fallbackEvmNetwork;
+  const thirdwebNetwork = isEvm && paymentNetwork ? paymentNetwork : fallbackEvmNetwork;
   const thirdwebChainIdValue = thirdwebNetwork && isEvmNetwork(thirdwebNetwork)
     ? evmChainId(thirdwebNetwork)
     : undefined;
@@ -189,16 +190,18 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
         accountAbstraction={dynamicAccountAbstraction}
         connectButton={{
           label: "CONNECT",
-          className: `
-            !bg-cyan-500 !text-black
-            !font-bold !tracking-wider
-            !shadow-[0_0_15px_-3px_rgba(6,182,212,0.5)]
-            hover:!bg-cyan-400
-            !border-0 !rounded-full !min-h-[2.65rem]
-            ${className || ""}
-          `,
+          className: cn("cm-hud-button cm-hud-connect", className),
           style: {
-            fontFamily: "var(--font-display), Orbitron, sans-serif",
+            height: "var(--cm-hud-size)",
+            minHeight: "var(--cm-hud-size)",
+            minWidth: 0,
+            padding: "0 clamp(0.72rem, 1.25vw, 0.98rem)",
+            borderRadius: "var(--cm-hud-radius)",
+            fontFamily: "var(--font-mono), monospace",
+            fontSize: "var(--font-2xs)",
+            fontWeight: 700,
+            letterSpacing: "0.08em",
+            lineHeight: 1,
             textTransform: "uppercase",
           },
         }}
@@ -270,12 +273,13 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
   }
 
   const displayAddress = userAddress ?? (isReconnecting
-    ? (isEvm ? cachedAccount?.address ?? null : cachedAccount?.solanaAddress ?? null)
+    ? (isEvm ? cachedAccount?.address ?? null : isSolana ? cachedAccount?.solanaAddress ?? null : null)
     : null);
   const shortAddress = displayAddress
     ? `${displayAddress.slice(0, 6)}...${displayAddress.slice(-4)}`
     : userAddressResolving || isReconnecting ? "Resolving..." : "Unavailable";
-  const accountLabel = isEvm ? "Smart account" : "Solana account";
+  const accountLabel = isEvm ? "Smart account" : isSolana ? "Solana account" : isNear ? "NEAR account" : "Account";
+  const assetSymbol = chainInfo?.asset ?? "USDC";
   const requiredActivationSol = requiredFundingLamports == null
     ? null
     : (Number(requiredFundingLamports) / 1_000_000_000).toFixed(9).replace(/0+$/, "").replace(/\.$/, "");
@@ -286,7 +290,7 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
     && currentFundingLamports != null
     && currentFundingLamports >= requiredFundingLamports;
   const selectedExplorerUrl = (() => {
-    if (!displayAddress) return null;
+    if (!displayAddress || !paymentNetwork) return null;
     const url = getExplorerUrl(paymentNetwork, "address", displayAddress);
     return url === "#" ? null : url;
   })();
@@ -345,13 +349,13 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
                 ${balanceLoading ? "..." : totalBalance}
               </span>
             </div>
-            <p className="text-[10px] text-muted-foreground mt-1">
+            <p className="text-xs text-muted-foreground mt-1">
               Aggregated across all chains
             </p>
           </div>
 
           <div className="px-3 py-2 border-b border-cyan-400/15">
-            <p className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">{accountLabel}</p>
+            <p className="mb-1 text-xs uppercase tracking-wider text-muted-foreground">{accountLabel}</p>
             <div className="flex items-center justify-between">
               <span className="font-mono text-xs text-foreground">{shortAddress}</span>
               <div className="flex items-center gap-1">
@@ -374,15 +378,15 @@ export function WalletConnector({ className, compact = false }: WalletConnectorP
                 ) : null}
               </div>
             </div>
-            {!isEvm && !solanaActivated && requiredActivationSol ? (
+            {isSolana && !solanaActivated && requiredActivationSol ? (
               <div className="mt-2 rounded border border-amber-400/20 bg-amber-400/5 px-2 py-1.5">
-                <p className="text-[10px] font-mono text-amber-300">
+                <p className="text-xs font-mono text-amber-300">
                   {isActivationFunded
                     ? "Ready to activate when you create a session."
-                    : `Fund this address with ${requiredActivationSol} SOL or 5 USDC to activate it.`}
+                    : `Fund this address with ${requiredActivationSol} SOL or 5 ${assetSymbol} to activate it.`}
                 </p>
                 {currentActivationSol ? (
-                  <p className="mt-0.5 text-[9px] font-mono text-muted-foreground">
+                  <p className="mt-0.5 text-xs font-mono text-muted-foreground">
                     Detected: {currentActivationSol} SOL
                   </p>
                 ) : null}
