@@ -29,7 +29,7 @@ import { Badge } from "@/components/ui/badge";
 import { useSelectedUserAddress } from "@/hooks/use-address";
 import { useWalletPair } from "@/hooks/use-pair";
 import { sdk } from "@/lib/sdk";
-import { toast } from "sonner";
+import { toast } from "@/hooks/use-toast";
 
 export const DISCLAIMER_POLICY_VERSION = "1.0.0";
 export const DISCLAIMER_TYPE = "ai_passthrough";
@@ -58,10 +58,13 @@ export function DisclaimerModal({
   const [internalOpen, setInternalOpen] = useState(false);
 
   const activeAddress = userAddress ?? account?.address ?? null;
+  const normalizedConsentKey = activeAddress
+    ? (/^0x[a-f0-9]{40}$/i.test(activeAddress.trim()) ? activeAddress.trim().toLowerCase() : activeAddress.trim())
+    : null;
 
-  // Query consent status for this address and policy version from Neon DB
+  // Query consent status for this address and policy version
   const { data: consentStatus, isLoading: isCheckingConsent } = useQuery({
-    queryKey: ["user-consent", activeAddress?.toLowerCase(), DISCLAIMER_POLICY_VERSION],
+    queryKey: ["user-consent", normalizedConsentKey, DISCLAIMER_POLICY_VERSION],
     queryFn: async () => {
       if (!activeAddress) return { consented: false, record: null };
       try {
@@ -71,7 +74,7 @@ export function DisclaimerModal({
             policyVersion: DISCLAIMER_POLICY_VERSION,
           });
         }
-        const res = await fetch(
+        const res = await sdk.fetch(
           `/api/user/consent/${encodeURIComponent(activeAddress)}?type=${encodeURIComponent(DISCLAIMER_TYPE)}&version=${encodeURIComponent(DISCLAIMER_POLICY_VERSION)}`
         );
         if (res.ok) {
@@ -153,16 +156,10 @@ export function DisclaimerModal({
         }
       }
 
-      // If wallet produced no signature string (e.g. session / in-app key without personal_sign), generate verifiable receipt hash
       if (!signature) {
-        const encoder = new TextEncoder();
-        const data = encoder.encode(`${activeAddress}:${DISCLAIMER_POLICY_VERSION}:${timestamp}:${message}`);
-        const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        signature = "0x" + hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+        throw new Error("A cryptographic wallet signature is required to accept the terms.");
       }
 
-      // Record consent in Neon DB wallet_pairs
       const consentPayload = {
         address: activeAddress,
         svmAddress: pair?.svmAddress || (isEvm ? undefined : activeAddress),
@@ -184,14 +181,14 @@ export function DisclaimerModal({
       if (typeof sdk.user?.recordConsent === "function") {
         stored = await sdk.user.recordConsent(consentPayload);
       } else {
-        const res = await fetch("/api/user/consent", {
+        const res = await sdk.fetch("/api/user/consent", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(consentPayload),
         });
         if (!res.ok) {
           const errBody = await res.json().catch(() => ({}));
-          throw new Error(errBody.error || "Failed to record consent in database");
+          throw new Error(errBody.error || "Failed to record consent");
         }
         stored = await res.json();
       }
@@ -215,14 +212,17 @@ export function DisclaimerModal({
         );
       }
       queryClient.invalidateQueries({ queryKey: ["user-consent"] });
-      toast.success("AI Disclaimer & Terms accepted successfully!", {
+      toast({
+        title: "Terms accepted",
         description: `Signed for ${activeAddress?.slice(0, 6)}...${activeAddress?.slice(-4)}`,
       });
       setOpen(false);
     },
     onError: (error) => {
-      toast.error("Failed to sign disclaimer", {
+      toast({
+        title: "Failed to sign disclaimer",
         description: error instanceof Error ? error.message : "An unexpected error occurred.",
+        variant: "destructive",
       });
     },
     onSettled: () => {
@@ -240,7 +240,7 @@ export function DisclaimerModal({
       }
       setOpen(val);
     }}>
-      <DialogContent className="max-w-2xl bg-black/95 border-cyan-500/30 text-foreground shadow-[0_0_50px_-10px_rgba(6,182,212,0.25)] backdrop-blur-xl p-0 gap-0 overflow-hidden font-sans sm:rounded-xl">
+      <DialogContent className="cm-dialog-panel max-w-2xl bg-black/95 border-cyan-500/30 text-foreground shadow-xl shadow-cyan-500/15 backdrop-blur-xl p-0 gap-0 overflow-hidden font-sans sm:rounded-xl">
         {/* Glow Header Accent */}
         <div className="h-1 w-full bg-gradient-to-r from-cyan-500 via-fuchsia-500 to-cyan-500" />
 
@@ -253,7 +253,7 @@ export function DisclaimerModal({
                   <ShieldAlert className="w-5 h-5" />
                 </div>
                 <div>
-                  <Badge className="bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-mono text-[10px] uppercase tracking-wider mb-1">
+                  <Badge className="bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-mono text-xs uppercase tracking-wider mb-1">
                     Compliance & Liability Disclaimer
                   </Badge>
                   <DialogTitle className="text-xl font-display font-bold uppercase tracking-wider text-foreground">
@@ -263,10 +263,10 @@ export function DisclaimerModal({
               </div>
 
               <div className="hidden sm:block text-right">
-                <span className="text-[10px] font-mono text-muted-foreground block">
+                <span className="text-xs font-mono text-muted-foreground block">
                   VERSION {DISCLAIMER_POLICY_VERSION}
                 </span>
-                <span className="text-[10px] font-mono text-cyan-400">
+                <span className="text-xs font-mono text-cyan-400">
                   GDPR Art. 28 Transparent
                 </span>
               </div>
@@ -279,14 +279,14 @@ export function DisclaimerModal({
           </DialogHeader>
 
           {/* Scrollable Terms Content Box */}
-          <div className="rounded-lg border border-cyan-500/20 bg-cyan-950/20 p-4 max-h-64 overflow-y-auto space-y-3.5 text-xs text-muted-foreground font-sans leading-relaxed scrollbar-thin scrollbar-thumb-cyan-500/30 scrollbar-track-transparent">
+          <div className="rounded-lg border border-cyan-500/20 bg-cyan-950/20 p-4 pb-6 space-y-3.5 text-xs text-muted-foreground font-sans leading-relaxed">
             {/* Point 1 */}
             <div className="space-y-1">
-              <div className="flex items-center gap-2 text-foreground font-semibold font-display text-[13px]">
+              <div className="flex items-center gap-2 text-foreground font-semibold font-display text-sm">
                 <Cpu className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
                 <span>1. Technical Conduit & Aggregator</span>
               </div>
-              <p className="text-[11px] text-muted-foreground pl-5">
+              <p className="text-xs text-muted-foreground pl-5">
                 Compose.Market acts solely as a technical relay and decentralized gateway providing unified
                 cryptographic access to 650+ AI models operated by independent third-party laboratories
                 (e.g., OpenAI, Anthropic, Google Cloud, Mistral AI, Fireworks AI). Compose.Market does not
@@ -296,11 +296,11 @@ export function DisclaimerModal({
 
             {/* Point 2 */}
             <div className="space-y-1">
-              <div className="flex items-center gap-2 text-foreground font-semibold font-display text-[13px]">
+              <div className="flex items-center gap-2 text-foreground font-semibold font-display text-sm">
                 <FileText className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
                 <span>2. Third-Party Governance & Sub-Processors</span>
               </div>
-              <p className="text-[11px] text-muted-foreground pl-5">
+              <p className="text-xs text-muted-foreground pl-5">
                 Your prompts, workflows, and inputs transmitted to each model are governed solely by that
                 specific provider's Terms of Service and Privacy Policy. Direct links to all 30+ upstream
                 sub-processors, their jurisdictions, and DPAs are listed at{" "}
@@ -317,11 +317,11 @@ export function DisclaimerModal({
 
             {/* Point 3 */}
             <div className="space-y-1">
-              <div className="flex items-center gap-2 text-foreground font-semibold font-display text-[13px]">
+              <div className="flex items-center gap-2 text-foreground font-semibold font-display text-sm">
                 <Lock className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
                 <span>3. Zero Training on Your Data</span>
               </div>
-              <p className="text-[11px] text-muted-foreground pl-5">
+              <p className="text-xs text-muted-foreground pl-5">
                 Compose.Market does not use your prompt data or outputs to train foundation AI models, and
                 we contractually prohibit upstream API providers from retaining or utilizing your data for
                 general model training on our behalf.
@@ -330,11 +330,11 @@ export function DisclaimerModal({
 
             {/* Point 4 */}
             <div className="space-y-1">
-              <div className="flex items-center gap-2 text-foreground font-semibold font-display text-[13px]">
+              <div className="flex items-center gap-2 text-foreground font-semibold font-display text-sm">
                 <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                 <span>4. Probabilistic Outputs & Risk Assumption</span>
               </div>
-              <p className="text-[11px] text-muted-foreground pl-5">
+              <p className="text-xs text-muted-foreground pl-5">
                 AI model outputs are probabilistic, generated dynamically, and may contain inaccuracies,
                 hallucinations, or incomplete statements. Outputs do not constitute professional, legal, or
                 financial advice. You assume all risks and responsibility for evaluating output accuracy.
@@ -343,11 +343,11 @@ export function DisclaimerModal({
 
             {/* Point 5 */}
             <div className="space-y-1">
-              <div className="flex items-center gap-2 text-foreground font-semibold font-display text-[13px]">
+              <div className="flex items-center gap-2 text-foreground font-semibold font-display text-sm">
                 <ShieldCheck className="w-3.5 h-3.5 text-fuchsia-400 shrink-0" />
                 <span>5. Discharge of Liability</span>
               </div>
-              <p className="text-[11px] text-muted-foreground pl-5">
+              <p className="text-xs text-muted-foreground pl-5">
                 Compose.Market is not liable for any direct, indirect, incidental, or consequential damages
                 arising from third-party provider acts, service interruptions, model omissions, or data handling practices.
               </p>
@@ -384,7 +384,7 @@ export function DisclaimerModal({
 
           {/* Connected Identity Info */}
           {activeAddress && (
-            <div className="flex items-center justify-between bg-black/60 border border-white/5 rounded-lg px-3 py-2 text-[11px] font-mono">
+            <div className="flex items-center justify-between bg-black/60 border border-white/5 rounded-lg px-3 py-2 text-xs font-mono">
               <span className="text-muted-foreground">Signing Account:</span>
               <span className="text-cyan-400 font-semibold">{activeAddress.slice(0, 6)}...{activeAddress.slice(-4)}</span>
             </div>
@@ -410,7 +410,7 @@ export function DisclaimerModal({
               className={`
                 w-full sm:w-auto font-display font-bold uppercase tracking-wider text-xs px-6 py-2 rounded-lg transition-all
                 ${canSign
-                  ? "bg-cyan-500 text-black hover:bg-cyan-400 shadow-[0_0_20px_-3px_rgba(6,182,212,0.6)] cursor-pointer"
+                  ? "bg-cyan-500 text-black hover:bg-cyan-400 shadow-lg shadow-cyan-500/30 cursor-pointer"
                   : "bg-cyan-950/40 text-muted-foreground border border-cyan-500/20 cursor-not-allowed opacity-60"
                 }
               `}
