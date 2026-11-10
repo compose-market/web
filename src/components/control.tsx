@@ -240,3 +240,41 @@ export function SearchFold({
     </div>
   );
 }
+
+export function Pockets<T extends string>({
+  value,
+  options,
+  label,
+  onChange,
+  className,
+}: {
+  value: T;
+  options: Option<T>[];
+  label: string;
+  onChange: (value: T) => void;
+  className?: string;
+}) {
+  return (
+    <div className={cn("cm-pocket-bar", className)} role="tablist" aria-label={label}>
+      {options.map((option) => {
+        const active = option.value === value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            disabled={option.disabled}
+            data-active={active ? "true" : undefined}
+            className="cm-pocket-btn"
+            onClick={() => onChange(option.value)}
+          >
+            <IconNode icon={option.icon} className="cm-pocket-btn__icon" />
+            <span>{option.label}</span>
+            {option.dot ? <span className="cm-pocket-btn__dot" aria-hidden="true" /> : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
