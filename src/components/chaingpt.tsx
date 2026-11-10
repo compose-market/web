@@ -125,7 +125,7 @@ export function PoweredByChainGpt({ className, logoClassName }: PoweredByChainGp
             aria-label="Powered by ChainGPT"
             data-chaingpt-attribution="true"
             className={cn(
-                "not-prose inline-flex min-h-0 min-w-0 items-center gap-1.5 text-[11px] leading-none text-muted-foreground transition-opacity hover:opacity-100 opacity-85",
+                "not-prose inline-flex min-h-0 min-w-0 items-center gap-1.5 text-xs leading-none text-muted-foreground transition-opacity hover:opacity-100 opacity-85",
                 className,
             )}
         >
