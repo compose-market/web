@@ -195,7 +195,7 @@ function SubmitAgentSection({
                     You don't have any agents to submit.
                 </p>
                 <Button variant="outline" size="sm" asChild>
-                    <a href="/create-agent">Create an Agent</a>
+                    <a href="/create">Create an Agent</a>
                 </Button>
             </div>
         );
@@ -207,44 +207,42 @@ function SubmitAgentSection({
                 Select one of your agents to submit for this bounty:
             </p>
 
-            <ScrollArea className="h-32">
-                <div className="space-y-2">
-                    {myAgents.map((agent) => {
-                        const isSelected = selectedAgentId === agent.id;
-                        const avatarUrl = agent.metadata?.image
-                            ? (agent.metadata.image.startsWith("ipfs://")
-                                ? getIpfsUrl(agent.metadata.image.replace("ipfs://", ""))
-                                : agent.metadata.image)
-                            : null;
+            <div className="space-y-2">
+                {myAgents.map((agent) => {
+                    const isSelected = selectedAgentId === agent.id;
+                    const avatarUrl = agent.metadata?.image
+                        ? (agent.metadata.image.startsWith("ipfs://")
+                            ? getIpfsUrl(agent.metadata.image.replace("ipfs://", ""))
+                            : agent.metadata.image)
+                        : null;
 
-                        return (
-                            <button
-                                key={agent.id}
-                                onClick={() => setSelectedAgentId(agent.id)}
-                                className={`w-full p-2 rounded-sm border transition-all text-left ${isSelected
-                                    ? "border-cyan-500 bg-cyan-500/10"
-                                    : "border-sidebar-border hover:border-cyan-500/50"
-                                    }`}
-                            >
-                                <div className="flex items-center gap-2">
-                                    <Avatar className="w-6 h-6">
-                                        <AvatarImage src={avatarUrl || undefined} />
-                                        <AvatarFallback className="text-[10px]">
-                                            {agent.metadata?.name?.slice(0, 2).toUpperCase() || "AG"}
-                                        </AvatarFallback>
-                                    </Avatar>
-                                    <span className="font-mono text-xs truncate">
-                                        {agent.metadata?.name || `Agent #${agent.id}`}
-                                    </span>
-                                    {isSelected && (
-                                        <CheckCircle className="w-3 h-3 text-cyan-400 ml-auto shrink-0" />
-                                    )}
-                                </div>
-                            </button>
-                        );
-                    })}
-                </div>
-            </ScrollArea>
+                    return (
+                        <button
+                            key={agent.id}
+                            onClick={() => setSelectedAgentId(agent.id)}
+                            className={`w-full p-2 rounded-sm border transition-all text-left ${isSelected
+                                ? "border-cyan-500 bg-cyan-500/10"
+                                : "border-sidebar-border hover:border-cyan-500/50"
+                                }`}
+                        >
+                            <div className="flex items-center gap-2">
+                                <Avatar className="w-6 h-6">
+                                    <AvatarImage src={avatarUrl || undefined} />
+                                    <AvatarFallback className="text-xs">
+                                        {agent.metadata?.name?.slice(0, 2).toUpperCase() || "AG"}
+                                    </AvatarFallback>
+                                </Avatar>
+                                <span className="font-mono text-xs truncate">
+                                    {agent.metadata?.name || `Agent #${agent.id}`}
+                                </span>
+                                {isSelected && (
+                                    <CheckCircle className="w-3 h-3 text-cyan-400 ml-auto shrink-0" />
+                                )}
+                            </div>
+                        </button>
+                    );
+                })}
+            </div>
 
             <Button
                 onClick={() => selectedAgentId && onSubmit(selectedAgentId)}
@@ -259,7 +257,7 @@ function SubmitAgentSection({
                 ) : (
                     <>
                         <Send className="w-4 h-4 mr-2" />
-                        Submit Agent for ${rfa.offerAmountFormatted}
+                        Submit Agent for {rfa.offerAmountFormatted.startsWith("$") ? rfa.offerAmountFormatted : `$${rfa.offerAmountFormatted}`}
                     </>
                 )}
             </Button>
