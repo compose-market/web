@@ -420,26 +420,5 @@ export function WorkflowCard({ workflow, onCopyEndpoint }: WorkflowCardProps) {
 }
 
 export function WorkflowCardSkeleton() {
-    return (
-        <div className="cm-workflow-card-skeleton">
-            <div className="cm-workflow-card-skeleton__banner" />
-            <div className="cm-workflow-card-skeleton__body">
-                <div className="cm-workflow-card-skeleton__row">
-                    <div className="cm-workflow-card-skeleton__block" style={{ width: 20, height: 20 }} />
-                    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
-                        <div className="cm-workflow-card-skeleton__block" style={{ width: "60%", height: 20 }} />
-                        <div className="cm-workflow-card-skeleton__block" style={{ width: "100%", height: 16 }} />
-                    </div>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
-                    <div className="cm-workflow-card-skeleton__block" style={{ height: 56 }} />
-                    <div className="cm-workflow-card-skeleton__block" style={{ height: 56 }} />
-                    <div className="cm-workflow-card-skeleton__block" style={{ height: 56 }} />
-                    <div className="cm-workflow-card-skeleton__block" style={{ height: 56 }} />
-                </div>
-                <div className="cm-workflow-card-skeleton__block" style={{ height: 56 }} />
-                <div className="cm-workflow-card-skeleton__block" style={{ height: 80 }} />
-            </div>
-        </div>
-    );
+  return <Skeleton className="cm-workflow-card-skeleton" rows={5} />;
 }
