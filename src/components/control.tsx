@@ -1,12 +1,15 @@
 import { createElement, isValidElement, useEffect, useRef, type ComponentType, type ReactNode } from "react";
-import { ArrowDownUp, ChevronDown, Check, Search } from "lucide-react";
+import ArrowDownUp from "lucide-react/icons/arrow-down-up";
+import ChevronDown from "lucide-react/icons/chevron-down";
+import Check from "lucide-react/icons/check";
+import Search from "lucide-react/icons/search";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@/components/ui/dropdown";
 import { cn } from "@/lib/utils";
 
 type Icon = ComponentType<{ className?: string }> | ReactNode;
@@ -17,6 +20,7 @@ export interface Option<T extends string = string> {
   icon?: Icon;
   disabled?: boolean;
   count?: string | number;
+  dot?: boolean;
 }
 
 function IconNode({ icon, className }: { icon?: Icon; className: string }) {
@@ -63,7 +67,7 @@ export function Switcher<T extends string>({
               <IconNode icon={option.icon} className="cm-control-switcher__icon" />
               <span className="truncate">{option.label}</span>
               {option.count !== undefined && option.count !== null && (
-                <span className="cm-control-switcher__badge ml-1.5 px-1.5 py-0.5 text-[10px] font-bold bg-primary/10 rounded font-mono text-muted-foreground">
+                <span className="cm-control-switcher__badge ml-1.5 px-1.5 py-0.5 text-xs font-bold bg-primary/10 rounded font-mono text-muted-foreground">
                   {option.count}
                 </span>
               )}
@@ -84,7 +88,7 @@ export function Switcher<T extends string>({
               <span className="cm-control-switcher__label flex items-center">
                 {current.label}
                 {current.count !== undefined && current.count !== null && (
-                  <span className="cm-control-switcher__badge ml-1.5 px-1.5 py-0.5 text-[10px] font-bold bg-primary/10 rounded font-mono text-muted-foreground">
+                  <span className="cm-control-switcher__badge ml-1.5 px-1.5 py-0.5 text-xs font-bold bg-primary/10 rounded font-mono text-muted-foreground">
                     {current.count}
                   </span>
                 )}
@@ -107,7 +111,7 @@ export function Switcher<T extends string>({
                   <span className="cm-control-menu__label flex items-center">
                     {option.label}
                     {option.count !== undefined && option.count !== null && (
-                      <span className="cm-control-switcher__badge ml-1.5 px-1.5 py-0.5 text-[10px] font-bold bg-primary/10 rounded font-mono text-muted-foreground">
+                      <span className="cm-control-switcher__badge ml-1.5 px-1.5 py-0.5 text-xs font-bold bg-primary/10 rounded font-mono text-muted-foreground">
                         {option.count}
                       </span>
                     )}
@@ -204,7 +208,7 @@ export function SearchFold({
   return (
     <div className={cn("cm-control-search-fold", className)} data-open={visible}>
       <label className="cm-search cm-search--fold" aria-label={label} aria-hidden={!visible}>
-        <Search size={16} aria-hidden="true" />
+        <Search className="cm-hud-icon" aria-hidden="true" />
         <input
           ref={inputRef}
           className="cm-search__input"
@@ -231,7 +235,7 @@ export function SearchFold({
         aria-expanded={visible}
         onClick={() => onOpenChange(!visible)}
       >
-        <Search className="cm-hud-icon" size={17} />
+        <Search className="cm-hud-icon" />
       </button>
     </div>
   );
