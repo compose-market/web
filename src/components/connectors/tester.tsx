@@ -1,44 +1,54 @@
 /**
  * Connector Tester Component
  *
- * Unified testing interface for onchain and tools connectors.
- * Catalog reads go to the connectors broker
- * (https://connectors.compose.market). Execution routes through api/ for
- * x402 payment handling.
+ * Balanced 2-zone Connectors Studio mirroring Playground's Models tab:
+ * - Left pane (`.cm-split__main cm-playground__chat-cell`): source switcher,
+ *   ConnectorSelector (⌘K), tool dropdown, native scrolling execution stream,
+ *   and JSON payload composer.
+ * - Right pane (`.cm-split__side cm-playground__pane-cell`): persistent
+ *   ConnectorCard (`Overview | Params | Schema`) with schema-driven inputs
+ *   bidirectionally synced to the JSON payload.
  */
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useActiveWallet } from "thirdweb/react";
 import { sdk } from "@/lib/sdk";
-import { useChain } from "@/contexts/Network";
-import { isEvmNetwork, evmChainId } from "@/lib/chains";
 import { useSession } from "@/hooks/use-session";
+import { useSelectedUserAddress } from "@/hooks/use-address";
+import { durableQueryMeta, DURABLE_CACHE_MAX_AGE } from "@/lib/queryClient";
+import { openGlobalBackpack } from "@/components/backpack";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { ShellModelBadge } from "@compose-market/theme/shell";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown";
+import { ModelBadgeTrigger } from "@/components/models/badge";
+import { ShellNotice } from "@compose-market/theme/shell";
 import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tabs } from "@/components/ui/tabs";
+import { HighlightedCode, safeHref } from "@/lib/performance/markdown";
 import { cn } from "@/lib/utils";
-import { useRegistryMeta } from "@/hooks/use-registry";
+import { useConnectorCatalogSnapshot, useRegistryMeta } from "@/hooks/use-registry";
 import { normalizeConnectorBinding } from "@/lib/connectors";
 import { Switcher, type Option } from "@/components/control";
 import { ConnectorSelector } from "@/components/connectors/selector";
 import {
-    Loader2,
-    RefreshCw,
-    Trash2,
-    Plug,
-    Play,
-    Terminal,
-    AlertCircle,
-    ExternalLink,
-    Check,
+  ConnectorCard,
+  type ConnectorCardTab,
+  type ConnectorCredentialSpec,
+  type ConnectorToolSummary,
+} from "@/components/connectors/card";
+import {
+  Backpack,
+  ExternalLink,
+  Link2,
+  Loader2,
+  Play,
+  Plug,
+  RefreshCw,
+  Terminal,
+  Trash2,
 } from "lucide-react";
 
 // =============================================================================
@@ -63,17 +73,56 @@ interface ConnectorInfo {
 }
 
 interface ConnectorResult {
-    success: boolean;
-    connectorId: string;
-    tool: string;
-    result?: unknown;
-    error?: string;
-    txHash?: string;
-    explorer?: string;
-    executedBy?: string;
-    source?: "onchain" | "mcp";
-    executionTime?: number;
+  id: string;
+  success: boolean;
+  connectorId: string;
+  tool: string;
+  result?: unknown;
+  error?: string;
+  txHash?: string;
+  explorer?: string;
+  executedBy?: string;
+  source: ConnectorSource;
+  durationMs?: number;
 }
+
+interface OnchainStatusData {
+  initialized: boolean;
+  walletAddress: string | null;
+  chain: string | null;
+  totalTools: number;
+  connectors: Array<{
+    id: string;
+    name: string;
+    description: string;
+    toolCount: number;
+    tools: ConnectorToolSummary[];
+  }>;
+}
+
+interface McpCardData {
+  slug: string;
+  name: string;
+  description: string;
+  status: "live" | "credential_gated";
+  tools: ConnectorToolSummary[];
+  credentials: ConnectorCredentialSpec[];
+}
+
+interface AccountActionsData {
+  actions: ConnectorToolSummary[];
+  noAuth: boolean;
+}
+
+interface AccountConnectionState {
+  connected: boolean;
+  granted: boolean;
+  connectedAccountId?: string;
+  noAuth?: boolean;
+}
+
+const TOOL_CATALOG_STALE_TIME = 6 * 60 * 60 * 1000;
+const CONNECTION_STALE_TIME = 30 * 1000;
 
 interface OnchainStatus {
     initialized: boolean;
@@ -114,7 +163,12 @@ interface McpServerCard {
     credentials: Array<{ varName: string; description?: string | null; obtainUrl?: string | null }>;
 }
 
-type ConnectorSource = "onchain" | "mcp";
+// =============================================================================
+// Types
+// =============================================================================
+
+export type ConnectorSource = "mcp" | "account" | "onchain";
+export type ConnectorPocket = "runner" | "overview" | "params";
 
 const CONNECTORS_URL = (import.meta.env.VITE_CONNECTORS_URL || "https://connectors.compose.market").replace(/\/+$/, "");
 
@@ -122,38 +176,53 @@ const CONNECTORS_URL = (import.meta.env.VITE_CONNECTORS_URL || "https://connecto
 // Helpers
 // =============================================================================
 
-function generateDefaultArgs(schema: Record<string, unknown>): Record<string, unknown> {
-    const result: Record<string, unknown> = {};
-    const props = (schema as { properties?: Record<string, { type?: string; default?: unknown; description?: string }> }).properties;
-    if (!props) return result;
+function generateDefaultArgs(schema: Record<string, unknown> | null): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  if (!schema || typeof schema !== "object") return result;
+  const props = (schema as { properties?: Record<string, { type?: string | string[]; default?: unknown }> }).properties;
+  if (!props) return result;
 
-    for (const [key, prop] of Object.entries(props)) {
-        if (prop.default !== undefined) {
-            result[key] = prop.default;
-        } else if (prop.type === "string") {
-            if (key.toLowerCase().includes("address")) {
-                result[key] = "0x...";
-            } else if (key.toLowerCase().includes("amount")) {
-                result[key] = "0";
-            } else {
-                result[key] = "";
-            }
-        } else if (prop.type === "number" || prop.type === "integer") {
-            result[key] = 0;
-        } else if (prop.type === "boolean") {
-            result[key] = false;
-        } else if (prop.type === "array") {
-            result[key] = [];
-        } else if (prop.type === "object") {
-            result[key] = {};
-        }
+  for (const [key, prop] of Object.entries(props)) {
+    const propType = Array.isArray(prop.type)
+      ? prop.type.find((t) => t !== "null") ?? prop.type[0]
+      : prop.type;
+
+    if (prop.default !== undefined) {
+      result[key] = prop.default;
+    } else if (propType === "string") {
+      if (key.toLowerCase().includes("address")) {
+        result[key] = "0x...";
+      } else if (key.toLowerCase().includes("amount")) {
+        result[key] = "0";
+      } else {
+        result[key] = "";
+      }
+    } else if (propType === "number" || propType === "integer") {
+      result[key] = 0;
+    } else if (propType === "boolean") {
+      result[key] = false;
+    } else if (propType === "array") {
+      result[key] = [];
+    } else if (propType === "object") {
+      result[key] = {};
     }
-    return result;
+  }
+  return result;
 }
 
 function normalizeConnectorSlug(value: string, source: ConnectorSource): string {
-    if (!value) return "";
-    return normalizeConnectorBinding(value, { defaultOrigin: source }).slug;
+  if (!value) return "";
+  return normalizeConnectorBinding(value, { defaultOrigin: source }).slug;
+}
+
+function formatResultPayload(result: ConnectorResult): { code: string; language: string } {
+  if (result.error) return { code: result.error, language: "text" };
+  if (typeof result.result === "string") return { code: result.result, language: "text" };
+  try {
+    return { code: JSON.stringify(result.result ?? null, null, 2), language: "json" };
+  } catch {
+    return { code: String(result.result), language: "text" };
+  }
 }
 
 function formatSchemaHint(schema: Record<string, unknown>): string {
