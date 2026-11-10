@@ -21,12 +21,13 @@ import {
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useToast } from "@/hooks/use-toast";
 import { useActiveAccount, useSendTransaction } from "thirdweb/react";
 import { prepareContractCall } from "thirdweb";
+import { useChain } from "@/contexts/Network";
+import { evmChainId, isEvmNetwork, requireEvmNetwork } from "@/lib/chains";
 import {
     useRFAData,
     useRFASubmissions,
@@ -36,7 +37,7 @@ import {
 } from "@/hooks/use-onchain";
 import { useAgentsByCreator } from "@/hooks/use-agents";
 import {
-    getRFAContract,
+    getRFAContractForChain,
     RFA_CATEGORIES,
     RFA_BOUNTY_LIMITS,
     encodeSkillAsBytes32,
@@ -61,6 +62,7 @@ import {
 
 interface RFADetailsProps {
     rfaId: number | null;
+    chainId?: number;
     open: boolean;
     onOpenChange: (open: boolean) => void;
     mode?: "dialog" | "sheet";
@@ -72,16 +74,18 @@ interface RFADetailsProps {
 
 function SubmissionItem({
     submission,
+    chainId,
     isPublisher,
     onAccept,
     isAccepting,
 }: {
     submission: RFASubmission;
+    chainId?: number;
     isPublisher: boolean;
     onAccept: (agentWallet: number) => void;
     isAccepting: boolean;
 }) {
-    const { data: agent, isLoading } = useOnchainAgent(submission.agentWallet);
+    const { data: agent, isLoading } = useOnchainAgent(submission.agentWallet, chainId);
 
     const initials = agent?.metadata?.name
         ?.split(" ")
@@ -113,7 +117,7 @@ function SubmissionItem({
                         <span className="font-mono font-medium text-sm truncate">
                             {isLoading ? "Loading..." : agent?.metadata?.name || `Agent #${submission.agentWallet}`}
                         </span>
-                        <Badge variant="outline" className="text-[9px] shrink-0">
+                        <Badge variant="outline" className="text-xs shrink-0">
                             #{submission.agentWallet}
                         </Badge>
                     </div>
@@ -124,7 +128,7 @@ function SubmissionItem({
                         </p>
                     )}
 
-                    <div className="flex items-center gap-3 mt-2 text-[10px] text-muted-foreground">
+                    <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
                         <span className="flex items-center gap-1">
                             <User className="w-3 h-3" />
                             {submission.creator.slice(0, 6)}...{submission.creator.slice(-4)}
