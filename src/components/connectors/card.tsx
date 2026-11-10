@@ -107,3 +107,18 @@ function safeParseObject(json: string): Record<string, unknown> | null {
     return null;
   }
 }
+
+function SourceEmblem({ source, logo, name }: { source: ConnectorCardSource; logo?: string; name: string }) {
+  if (logo) {
+    return <img src={logo} alt={name} loading="lazy" decoding="async" className="cm-connector-card__logo" />;
+  }
+  if (source === "account") return <Link2 className="cm-connector-card__emblem-svg" />;
+  if (source === "onchain") return <Play className="cm-connector-card__emblem-svg" />;
+  return <Plug className="cm-connector-card__emblem-svg" />;
+}
+
+function originLabel(source: ConnectorCardSource): string {
+  if (source === "account") return "Account";
+  if (source === "onchain") return "Onchain";
+  return "MCP";
+}
