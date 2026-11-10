@@ -40,8 +40,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useActiveAccount, useActiveWallet, useSendTransaction } from "thirdweb/react";
 import { prepareContractCall, readContract } from "thirdweb";
 import {
-    getRFAContract,
-    getContractAddress,
+    getRFAContractForChain,
+    getContractAddressForChain,
     RFA_CATEGORIES,
     RFA_BOUNTY_LIMITS,
     encodeSkillAsBytes32,
@@ -57,7 +57,7 @@ import {
     Info,
 } from "lucide-react";
 import { useChain } from "@/contexts/Network";
-import { getUsdcContractForNetwork, requireEvmNetwork } from "@/lib/chains";
+import { evmChainId, getUsdcContractForNetwork, requireEvmNetwork } from "@/lib/chains";
 
 // =============================================================================
 // Form Schema
@@ -84,12 +84,6 @@ interface RFAComponentProps {
 }
 
 // =============================================================================
-// USDC Contract Helper - Now uses dynamic chain configuration
-// =============================================================================
-
-import { getUsdcContractForChain } from "../lib/chains";
-
-// =============================================================================
 // Component
 // =============================================================================
 
@@ -104,7 +98,8 @@ export function RFAComponent({
     const wallet = useActiveWallet();
     const account = useActiveAccount();
     const { mutateAsync: sendTransaction, isPending } = useSendTransaction();
-    const { paymentNetwork } = useChain();
+    const { paymentNetwork, selectedChain } = useChain();
+    const assetSymbol = selectedChain?.asset ?? "USDC";
 
     const [step, setStep] = useState<"form" | "approving" | "creating">("form");
 
@@ -154,11 +149,12 @@ export function RFAComponent({
 
         try {
             const evmNetwork = requireEvmNetwork(paymentNetwork, "RFA creation");
-            const rfaContract = getRFAContract();
+            const selectedChainId = evmChainId(evmNetwork);
+            const rfaContract = getRFAContractForChain(selectedChainId);
             const usdcContract = getUsdcContractForNetwork(evmNetwork);
-            const rfaAddress = getContractAddress("RFA");
+            const rfaAddress = getContractAddressForChain("RFA", selectedChainId);
 
-            // Convert offer amount to USDC wei (6 decimals)
+            // Convert offer amount to stablecoin atomic units (6 decimals)
             const offerAmountWei = usdcToWei(values.offerAmount);
 
             // Encode category as bytes32 skill
@@ -167,7 +163,7 @@ export function RFAComponent({
             // Generate title from category
             const title = `${categoryLabel} Agent Request`;
 
-            // Step 1: Check and approve USDC
+            // Step 1: Check and approve payment asset
             setStep("approving");
 
             // Check current allowance
@@ -208,7 +204,7 @@ export function RFAComponent({
                 title: "RFA Created!",
                 description: (
                     <div className="space-y-1">
-                        <p>Agent request published with ${values.offerAmount.toFixed(2)} USDC bounty.</p>
+                        <p>Agent request published with ${values.offerAmount.toFixed(2)} {assetSymbol} bounty.</p>
                         <p className="text-xs text-muted-foreground">
                             Bounty hunters can now submit agents for your request.
                         </p>
@@ -269,11 +265,11 @@ export function RFAComponent({
                                     <FormControl>
                                         <Textarea
                                             placeholder="Describe the agent you need in plain language. What should it do? What capabilities does it need?"
-                                            className="bg-background/50 border-sidebar-border resize-none min-h-[100px]"
+                                            className="bg-background/50 border-sidebar-border resize-none min-h-24"
                                             {...field}
                                         />
                                     </FormControl>
-                                    <FormDescription className="text-[10px]">
+                                    <FormDescription className="text-xs">
                                         Be specific about the agent's purpose and required capabilities.
                                     </FormDescription>
                                     <FormMessage />
@@ -322,7 +318,7 @@ export function RFAComponent({
                                 <FormItem>
                                     <FormLabel className="text-xs font-mono text-muted-foreground flex items-center gap-2">
                                         <DollarSign className="w-3 h-3" />
-                                        BOUNTY AMOUNT (USDC)
+                                        BOUNTY AMOUNT ({assetSymbol})
                                     </FormLabel>
                                     <FormControl>
                                         <div className="space-y-3">
@@ -365,13 +361,13 @@ export function RFAComponent({
                                                 <div className="flex items-center justify-between text-sm font-bold mt-2 pt-2 border-t border-sidebar-border">
                                                     <span>Total escrowed:</span>
                                                     <span className="font-mono text-cyan-400">
-                                                        ${field.value.toFixed(2)} USDC
+                                                        ${field.value.toFixed(2)} {assetSymbol}
                                                     </span>
                                                 </div>
                                             </div>
                                         </div>
                                     </FormControl>
-                                    <FormDescription className="text-[10px] flex items-start gap-1">
+                                    <FormDescription className="text-xs flex items-start gap-1">
                                         <Info className="w-3 h-3 mt-0.5 shrink-0" />
                                         <span>
                                             Basic bounty is paid for filling the agent form.
@@ -414,7 +410,7 @@ export function RFAComponent({
                         {isProcessing ? (
                             <>
                                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                {step === "approving" ? "Approving USDC..." : "Creating RFA..."}
+                                {step === "approving" ? `Approving ${assetSymbol}...` : "Creating RFA..."}
                             </>
                         ) : (
                             <>
