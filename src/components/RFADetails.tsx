@@ -269,13 +269,16 @@ function SubmitAgentSection({
 // Main Component
 // =============================================================================
 
-export function RFADetails({ rfaId, open, onOpenChange, mode = "dialog" }: RFADetailsProps) {
+export function RFADetails({ rfaId, chainId: propChainId, open, onOpenChange, mode = "dialog" }: RFADetailsProps) {
     const { toast } = useToast();
     const account = useActiveAccount();
     const { mutateAsync: sendTransaction } = useSendTransaction();
+    const { paymentNetwork } = useChain();
 
-    const { data: rfa, isLoading: isLoadingRFA } = useRFAData(rfaId);
-    const { data: submissions, isLoading: isLoadingSubmissions, refetch: refetchSubmissions } = useRFASubmissions(rfaId);
+    const activeChainId = propChainId ?? (isEvmNetwork(paymentNetwork) ? evmChainId(paymentNetwork) : undefined);
+
+    const { data: rfa, isLoading: isLoadingRFA } = useRFAData(rfaId, activeChainId);
+    const { data: submissions, isLoading: isLoadingSubmissions, refetch: refetchSubmissions } = useRFASubmissions(rfaId, activeChainId);
 
     const [actionState, setActionState] = useState<"idle" | "accepting" | "cancelling" | "submitting">("idle");
 
@@ -298,6 +301,12 @@ export function RFADetails({ rfaId, open, onOpenChange, mode = "dialog" }: RFADe
     // Format dates
     const createdDate = rfa ? new Date(rfa.createdAt * 1000) : null;
 
+    const resolveTargetChainId = (): number => {
+        if (rfa?.chainId) return rfa.chainId;
+        if (activeChainId) return activeChainId;
+        return evmChainId(requireEvmNetwork(paymentNetwork, "RFA actions"));
+    };
+
     // Handle accept agent
     const handleAcceptAgent = async (agentWallet: number) => {
         if (!rfaId) return;
@@ -308,7 +317,7 @@ export function RFADetails({ rfaId, open, onOpenChange, mode = "dialog" }: RFADe
             }
             setActionState("accepting");
 
-            const contract = getRFAContract();
+            const contract = getRFAContractForChain(resolveTargetChainId());
             const tx = prepareContractCall({
                 contract,
                 method: "function acceptAgent(uint256 rfaId, uint256 agentWallet)",
@@ -346,7 +355,7 @@ export function RFADetails({ rfaId, open, onOpenChange, mode = "dialog" }: RFADe
             }
             setActionState("cancelling");
 
-            const contract = getRFAContract();
+            const contract = getRFAContractForChain(resolveTargetChainId());
             const tx = prepareContractCall({
                 contract,
                 method: "function cancelRFA(uint256 rfaId)",
@@ -383,7 +392,7 @@ export function RFADetails({ rfaId, open, onOpenChange, mode = "dialog" }: RFADe
             }
             setActionState("submitting");
 
-            const contract = getRFAContract();
+            const contract = getRFAContractForChain(resolveTargetChainId());
             const tx = prepareContractCall({
                 contract,
                 method: "function submitAgent(uint256 rfaId, uint256 agentWallet)",
@@ -457,7 +466,7 @@ export function RFADetails({ rfaId, open, onOpenChange, mode = "dialog" }: RFADe
                                 {rfa.offerAmountFormatted}
                             </span>
                         </div>
-                        <div className="mt-2 text-[10px] text-muted-foreground">
+                        <div className="mt-2 text-xs text-muted-foreground">
                             Basic: ${RFA_BOUNTY_LIMITS.BASIC_BOUNTY.toFixed(2)} + README bonus: up to ${(parseFloat(rfa.offerAmount) - RFA_BOUNTY_LIMITS.BASIC_BOUNTY).toFixed(2)}
                         </div>
                     </div>
@@ -496,19 +505,18 @@ export function RFADetails({ rfaId, open, onOpenChange, mode = "dialog" }: RFADe
                                 <span className="text-sm text-muted-foreground">Loading submissions...</span>
                             </div>
                         ) : submissions && submissions.length > 0 ? (
-                            <ScrollArea className="h-40">
-                                <div className="space-y-2 pr-2">
-                                    {submissions.map((sub) => (
-                                        <SubmissionItem
-                                            key={`${sub.agentWallet}-${sub.submittedAt}`}
-                                            submission={sub}
-                                            isPublisher={isPublisher}
-                                            onAccept={handleAcceptAgent}
-                                            isAccepting={actionState === "accepting"}
-                                        />
-                                    ))}
-                                </div>
-                            </ScrollArea>
+                            <div className="space-y-2">
+                                {submissions.map((sub) => (
+                                    <SubmissionItem
+                                        key={`${sub.agentWallet}-${sub.submittedAt}`}
+                                        submission={sub}
+                                        chainId={rfa?.chainId ?? activeChainId}
+                                        isPublisher={isPublisher}
+                                        onAccept={handleAcceptAgent}
+                                        isAccepting={actionState === "accepting"}
+                                    />
+                                ))}
+                            </div>
                         ) : (
                             <div className="text-center py-4">
                                 <Bot className="w-6 h-6 mx-auto text-muted-foreground/30 mb-1" />
