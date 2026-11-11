@@ -89,3 +89,21 @@ function getFamilyColor(family: string): { bg: string; text: string } {
 function selectionKey(model: CatalogModel): string {
   return `${model.provider.toLowerCase()}:${model.modelId.toLowerCase()}`;
 }
+
+const FRONTIER_TYPE_ORDER = ["text", "image", "video", "music"] as const;
+type FrontierType = typeof FRONTIER_TYPE_ORDER[number];
+
+function frontierType(model: CatalogModel): FrontierType {
+  const types = getModelTypeValues(model);
+  const outputs = Array.isArray(model.output)
+    ? model.output.filter((value): value is string => typeof value === "string")
+    : typeof model.output === "string" ? [model.output] : [];
+  if (types.includes("image generation") || outputs.includes("image")) return "image";
+  if (types.includes("video generation") || outputs.includes("video")) return "video";
+  if (types.includes("music generation") || outputs.includes("audio")) return "music";
+  return "text";
+}
+
+function displayKey(group: string, model: CatalogModel): string {
+  return `${group}:${selectionKey(model)}`;
+}
