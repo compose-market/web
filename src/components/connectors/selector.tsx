@@ -1,7 +1,8 @@
-import { useState } from "react";
-import { ShellModelBadge } from "@compose-market/theme/shell";
-import { ConnectorCommandBar } from "@/components/connectors/command-bar";
-import { useRegistryServer, getOriginLabel, type RegistryServer } from "@/hooks/use-registry";
+import { useMemo, useState } from "react";
+import { ModelBadgeTrigger } from "@/components/models/badge";
+import { ConnectorCommandBar, type ConnectorOriginFilter } from "@/components/connectors/commands";
+import { useConnectorCatalogSnapshot, useRegistryServer, type RegistryServer } from "@/hooks/use-registry";
+import { normalizeConnectorBinding, type CanonicalConnectorOrigin } from "@/lib/connectors";
 import { Loader2 } from "lucide-react";
 
 interface ConnectorSelectorProps {
@@ -10,7 +11,10 @@ interface ConnectorSelectorProps {
   placeholder?: string;
   disabled?: boolean;
   selectedIds?: Set<string>;
-  origin?: "onchain" | "mcp" | "onchain,mcp";
+  origin?: ConnectorOriginFilter;
+  shortcut?: React.ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 export function ConnectorSelector({
@@ -20,11 +24,35 @@ export function ConnectorSelector({
   disabled = false,
   selectedIds,
   origin,
+  shortcut,
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
 }: ConnectorSelectorProps) {
-  const [open, setOpen] = useState(false);
-  const { data: server, isLoading } = useRegistryServer(value ? value : null);
+  const [localOpen, setLocalOpen] = useState(false);
+  const open = controlledOpen !== undefined ? controlledOpen : localOpen;
+  const setOpen = controlledOnOpenChange !== undefined ? controlledOnOpenChange : setLocalOpen;
 
-  const displayLabel = isLoading ? (
+  const defaultOrigin: CanonicalConnectorOrigin =
+    origin === "account" || origin === "onchain" || origin === "mcp"
+      ? origin
+      : "mcp";
+  const snap = useConnectorCatalogSnapshot(Boolean(value));
+  const snapshotMatch = useMemo(() => {
+    if (!value || !snap.hasData) return null;
+    const binding = normalizeConnectorBinding(value, { defaultOrigin });
+    return snap.serverByBindingId.get(binding.registryId.toLowerCase())
+      ?? snap.serverByBindingId.get(`${binding.origin}:${binding.slug.toLowerCase()}`)
+      ?? null;
+  }, [defaultOrigin, snap.hasData, snap.serverByBindingId, value]);
+
+  const { data: fetchedServer, isLoading } = useRegistryServer(
+    value && !snapshotMatch ? value : null,
+    defaultOrigin,
+  );
+  const server = snapshotMatch ?? fetchedServer ?? null;
+  const showLoading = Boolean(value) && !server && isLoading;
+
+  const displayLabel = showLoading ? (
     <span className="inline-flex items-center gap-1.5">
       <Loader2 className="w-3.5 h-3.5 animate-spin" />
       Loading...
@@ -37,10 +65,11 @@ export function ConnectorSelector({
 
   return (
     <>
-      <ShellModelBadge
+      <ModelBadgeTrigger
         placeholder={!server}
         label={displayLabel}
-        disabled={disabled || isLoading}
+        shortcut={shortcut}
+        disabled={disabled || showLoading}
         onClick={() => {
           if (!disabled) setOpen(true);
         }}
