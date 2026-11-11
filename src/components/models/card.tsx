@@ -113,6 +113,21 @@ function ModelPricing({
     );
 }
 
+function ModelRow({
+    label,
+    value,
+}: {
+    label: React.ReactNode;
+    value: React.ReactNode;
+}) {
+    return (
+        <div className="cm-model-card__metric-cell">
+            <span className="cm-model-card__metric-label">{label}</span>
+            <span className="cm-model-card__metric-val">{value}</span>
+        </div>
+    );
+}
+
 function renderParamInput(
     key: string,
     definition: ParamDefinition,
@@ -121,9 +136,7 @@ function renderParamInput(
 ) {
     const inputType = Array.isArray(definition.type) ? definition.type[0] : definition.type;
     if (definition.options && definition.options.length > 0) {
-        const selected = value === undefined
-            ? definition.default
-            : value;
+        const selected = value === undefined ? definition.default : value;
         const canDeselect = !definition.required && definition.default === undefined;
         return (
             <>
@@ -164,9 +177,7 @@ function renderParamInput(
                         }}
                         className="cm-model-card__option-select"
                     >
-                        {canDeselect && (
-                            <option value="">Default</option>
-                        )}
+                        {canDeselect && <option value="">Default</option>}
                         {definition.options.map((option) => (
                             <option key={`${key}-select-${option}`} value={String(option)}>
                                 {String(option)}
@@ -190,6 +201,16 @@ function renderParamInput(
         );
     }
 
+    if (inputType === "object" || inputType === "array") {
+        return (
+            <JsonParamTextarea
+                value={value}
+                placeholder={inputType === "array" ? "[]" : "{}"}
+                onValidChange={onChange}
+            />
+        );
+    }
+
     return (
         <Input
             type={inputType === "integer" || inputType === "number" ? "number" : "text"}
@@ -199,11 +220,13 @@ function renderParamInput(
             onChange={(event) => {
                 const rawValue = event.target.value;
                 if (inputType === "integer") {
-                    onChange(rawValue === "" ? undefined : Number.parseInt(rawValue, 10));
+                    const parsed = Number.parseInt(rawValue, 10);
+                    onChange(rawValue === "" ? undefined : (Number.isFinite(parsed) ? parsed : undefined));
                     return;
                 }
                 if (inputType === "number") {
-                    onChange(rawValue === "" ? undefined : Number.parseFloat(rawValue));
+                    const parsed = Number.parseFloat(rawValue);
+                    onChange(rawValue === "" ? undefined : (Number.isFinite(parsed) ? parsed : undefined));
                     return;
                 }
                 onChange(rawValue);
