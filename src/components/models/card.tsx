@@ -254,7 +254,7 @@ function iconLabel(label: string, kind: "input" | "output" | "price", variant: "
     return (
         <Hint label={label}>
             <span
-                className={`cm-model-card__icon-label ${variant === "section" ? "cm-model-card__icon-label--section" : ""}`}
+                className={cn("cm-model-card__icon-label", variant === "section" && "cm-model-card__icon-label--section")}
                 aria-label={label}
             >
                 {icon}
@@ -288,7 +288,6 @@ function tone(value: string): "cyan" | "fuchsia" | "green" {
 function FormatBadge({ value }: { value: string }) {
     const id = formatId(value);
     const label = formatLabel(value);
-
     return (
         <Hint label={label}>
             <span className="cm-model-card__format-badge" data-tone={tone(value)} aria-label={label}>
