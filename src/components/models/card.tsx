@@ -320,8 +320,15 @@ export function ModelCard({
     modelParams,
     paramValues = {},
     onParamValuesChange,
+    tab,
+    onTabChange,
 }: ModelCardProps) {
-    const [activeTab, setActiveTab] = useState<"details" | "custom" | "benchmarks">("details");
+    const [internalTab, setInternalTab] = useState<"details" | "custom" | "benchmarks">("details");
+    const activeTab = tab ?? internalTab;
+    const setActiveTab = (next: "details" | "custom" | "benchmarks") => {
+        setInternalTab(next);
+        onTabChange?.(next);
+    };
     const [compareDialogOpen, setCompareDialogOpen] = useState(false);
     const supportsBenchmarks = catalogModelSupportsBenchmarks(modelInfo);
 
@@ -344,306 +351,304 @@ export function ModelCard({
     const benchmarkHeadlineMetrics = benchmarkData ? headlineMetrics(benchmarkData) : [];
     const benchmarkAllMetrics = benchmarkData?.metrics ?? [];
 
+    const tabs: TabDef[] = [
+        { id: "details", label: "Details", icon: <LayoutGrid className="cm-model-card__tab-icon" />, tone: "cyan" },
+        ...(supportsBenchmarks
+            ? [{ id: "benchmarks" as const, label: "Benchmarks", icon: <BarChart3 className="cm-model-card__tab-icon" />, tone: "cyan" as const }]
+            : []),
+        { id: "custom", label: "Custom", icon: <Settings className="cm-model-card__tab-icon" />, tone: "fuchsia" },
+    ];
+
     if (!selectedModel) {
         return (
-            <ModelCardShell
-                empty
-                emptyIcon={<Cpu />}
-                emptyText="Select a model to inspect pricing, limits, and settings"
-            />
+            <aside className="cm-model-card cm-model-card--empty">
+                <Cpu className="cm-model-card__empty-icon" />
+                <p className="cm-model-card__empty-text">Select a model to inspect pricing, limits, and settings</p>
+            </aside>
         );
     }
 
+    const familyLogo = modelInfo?.family ? getFamilyLogoUrl(modelInfo.family) : null;
+
     return (
         <>
-            <ModelCardShell
-                title={activeTab === "details" || activeTab === "benchmarks" ? (
-                    <Hint label={modelInfo?.name || selectedModel}>
-                        <span className="cm-model-card__title-text">{modelInfo?.name || selectedModel}</span>
-                    </Hint>
-                ) : undefined}
-                subtitle={activeTab !== "custom" ? (
-                    <span className="cm-model-card__model-meta-row">
-                        <Hint label={modelInfo?.family || modelInfo?.provider || "unknown"}>
-                            <span className="cm-model-card__provider">
-                                {modelInfo?.family && (() => {
-                                    const logoUrl = getFamilyLogoUrl(modelInfo.family);
-                                    if (logoUrl) {
-                                        return <img src={logoUrl} alt={modelInfo.family} className="cm-family-icon" />;
-                                    }
-                                    return null;
-                                })()}
-                                <span>{modelInfo?.family || modelInfo?.provider || "unknown"}</span>
-                            </span>
-                        </Hint>
-                        <span className="cm-model-card__type-list">
-                            {typeValues.map((value) => (
-                                <Hint key={value} label={formatModelTypeLabel(value)}>
-                                    <span className="cm-model-card__type-badge" data-tone={tone(value)}>
-                                        {typeIcon(value, "cm-model-card__type-icon")}
-                                        <span>{formatModelTypeLabel(value)}</span>
-                                    </span>
-                                </Hint>
-                            ))}
+            <aside className="cm-model-card" data-tab={activeTab}>
+                {/* ── Header: Family emblem + Title + Provider & Modality Chips ── */}
+                <header className="cm-model-card__header">
+                    <div className="cm-model-card__identity">
+                        <span className="cm-model-card__emblem" aria-hidden="true">
+                            {familyLogo ? (
+                                <img src={familyLogo} alt={modelInfo?.family || ""} className="cm-family-icon" />
+                            ) : activeTab === "benchmarks" ? (
+                                <BarChart3 className="cm-model-card__emblem-svg" />
+                            ) : (
+                                <Cpu className="cm-model-card__emblem-svg" />
+                            )}
                         </span>
-                    </span>
-                ) : undefined}
-                icon={activeTab === "details" ? (() => {
-                    const logoUrl = modelInfo?.family ? getFamilyLogoUrl(modelInfo.family) : null;
-                    if (logoUrl) {
-                        return <img src={logoUrl} alt={modelInfo?.family} className="cm-family-icon" />;
-                    }
-                    return <Cpu />;
-                })() : activeTab === "benchmarks" ? (() => {
-                    const logoUrl = modelInfo?.family ? getFamilyLogoUrl(modelInfo.family) : null;
-                    if (logoUrl) {
-                        return <img src={logoUrl} alt={modelInfo?.family} className="cm-family-icon" />;
-                    }
-                    return <BarChart3 />;
-                })() : undefined}
-                tabs={[
-                    { id: "details", label: "Details", icon: <LayoutGrid />, tone: "cyan" },
-                    ...(supportsBenchmarks
-                        ? [{ id: "benchmarks", label: "Benchmarks", icon: <BarChart3 />, tone: "cyan" as const }]
-                        : []),
-                    { id: "custom", label: "Custom", icon: <Settings />, tone: "fuchsia" },
-                ]}
-                activeTab={activeTab}
-                onTabChange={(tab: string) =>
-                    setActiveTab(tab === "custom" ? "custom" : tab === "benchmarks" ? "benchmarks" : "details")
-                }
-            >
-                {activeTab === "details" && (
-                    <div className="cm-model-card__details">
-                        {modelInfo?.description && (
-                            <div className="cm-model-card__description">
-                                <Hint label={modelInfo.description}>
-                                    <span className="cm-model-card__description-hint">
-                                        <Excerpt title={modelInfo.name || selectedModel} text={modelInfo.description} lines={2}>
-                                            {modelInfo.description}
-                                        </Excerpt>
+                        <div className="cm-model-card__titles">
+                            <Hint label={modelInfo?.name || selectedModel}>
+                                <h2 className="cm-model-card__title-text">{modelInfo?.name || selectedModel}</h2>
+                            </Hint>
+                            <div className="cm-model-card__model-meta-row">
+                                <Hint label={modelInfo?.family || modelInfo?.provider || "unknown"}>
+                                    <span className="cm-model-card__provider">
+                                        {modelInfo?.family || modelInfo?.provider || "unknown"}
                                     </span>
                                 </Hint>
-                            </div>
-                        )}
-
-                        {modelInfo && (
-                            <>
-                                {(inputValues.length > 0 || outputValues.length > 0) && (
-                                    <ModelSection label={<span className="cm-model-card__section-text">Capability</span>} className="cm-model-card__section--capability">
-                                        <div className="cm-model-card__lane-grid">
-                                            {inputValues.length > 0 && (
-                                                <div className="cm-model-card__io-row cm-model-card__metric-cell">
-                                                    <span className="cm-model-card__io-label">{iconLabel("Input", "input")}</span>
-                                                    <div className="cm-model-card__io-badges">
-                                                        {inputValues.map((value) => (
-                                                            <FormatBadge key={`in-${value}`} value={value} />
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            )}
-                                            {outputValues.length > 0 && (
-                                                <div className="cm-model-card__io-row cm-model-card__metric-cell">
-                                                    <span className="cm-model-card__io-label">{iconLabel("Output", "output")}</span>
-                                                    <div className="cm-model-card__io-badges">
-                                                        {outputValues.map((value) => (
-                                                            <FormatBadge key={`out-${value}`} value={value} />
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </ModelSection>
-                                )}
-
-                                {contextEntries.length > 0 && (
-                                    <ModelSection label={<span className="cm-model-card__section-text">Context</span>} className="cm-model-card__section--context">
-                                        <div className="cm-model-card__kv-grid">
-                                            {contextEntries.map((entry) => (
-                                                <ModelRow
-                                                    key={`ctx-${entry.label}`}
-                                                    label={labelIcon(entry.label, "input")}
-                                                    value={<FieldValue value={entry.value} />}
-                                                />
-                                            ))}
-                                        </div>
-                                    </ModelSection>
-                                )}
-
-                                {pricingSections.length > 0 && (
-                                    <ModelSection label={iconLabel("Price", "price", "section")} className="cm-model-card__section--pricing">
-                                        <div className="cm-model-card__pricing-list">
-                                            {pricingSections.map((section, index) => (
-                                                <ModelPricing key={`price-${section.header}-${index}`} unit={section.unit}>
-                                                    {section.entries.map((entry) => (
-                                                        <ModelRow
-                                                            key={`${section.header}-${entry.label}`}
-                                                            label={labelIcon(entry.label, "price")}
-                                                            value={<FieldValue value={entry.value} />}
-                                                        />
-                                                    ))}
-                                                </ModelPricing>
-                                            ))}
-                                        </div>
-                                    </ModelSection>
-                                )}
-                            </>
-                        )}
-                    </div>
-                )}
-
-                {/* ── Benchmarks Tab ───────────────────────────────────── */}
-                {activeTab === "benchmarks" && supportsBenchmarks && (
-                    <div className="cm-model-card__details space-y-4 p-3 font-mono text-xs">
-                        {benchmarkLoading && (
-                            <div className="flex flex-col items-center justify-center py-10 text-muted-foreground space-y-2" role="status">
-                                <div className="w-6 h-6 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
-                                <p className="text-[11px]">Loading linked benchmark snapshot...</p>
-                            </div>
-                        )}
-
-                        {!benchmarkLoading && benchmarkData && (
-                            <>
-                                {benchmarkHeadlineMetrics.length > 0 && (
-                                    <div className="grid grid-cols-2 gap-2">
-                                        {benchmarkHeadlineMetrics.slice(0, 4).map((metric, index) => (
-                                            <div
-                                                key={metric.key}
-                                                className={`p-2.5 rounded-lg border ${index % 2 === 0 ? "bg-cyan-500/10 border-cyan-500/30" : "bg-fuchsia-500/10 border-fuchsia-500/30"}`}
-                                            >
-                                                <div className={`text-[10px] ${index % 2 === 0 ? "text-cyan-400" : "text-fuchsia-400"}`}>
-                                                    {metric.label}
-                                                </div>
-                                                <div className="mt-1 text-lg font-bold text-foreground">
-                                                    {formatBenchmarkMetric(metric)}
-                                                </div>
-                                                <span className="text-[9px] text-muted-foreground">{metric.unit}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-
-                                <div className="rounded-lg border border-border/40 overflow-hidden bg-background/40">
-                                    <div className="p-2 bg-muted/40 border-b border-border/40 font-bold text-[11px] text-foreground flex items-center justify-between">
-                                        <span>Published Benchmark Metrics</span>
-                                        <BarChart3 className="w-3 h-3 text-cyan-400" />
-                                    </div>
-                                    <div className="divide-y divide-border/20 text-[11px]">
-                                        {benchmarkAllMetrics.map((metric) => (
-                                            <div key={metric.key} className="p-2 flex justify-between gap-3">
-                                                <span className="text-muted-foreground">{metric.label}</span>
-                                                <span className="font-semibold text-foreground text-right">
-                                                    {formatBenchmarkMetric(metric)}
-                                                </span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                {cleanBenchmarkParameters(benchmarkData.parameters).length > 0 && (
-                                    <div className="rounded-lg border border-border/40 bg-background/40 p-2 text-[10px] text-muted-foreground">
-                                        Benchmark parameters: {cleanBenchmarkParameters(benchmarkData.parameters).join(", ")}
-                                    </div>
-                                )}
-
-                                <Button
-                                    onClick={() => setCompareDialogOpen(true)}
-                                    className="w-full h-8 text-xs font-mono bg-cyan-500 hover:bg-cyan-400 text-black font-bold shadow-[0_0_12px_rgba(0,240,255,0.25)]"
-                                >
-                                    <Scale className="w-3.5 h-3.5 mr-1.5" />
-                                    <span>Compare with Similar Models</span>
-                                </Button>
-
-                                <div className="text-[10px] text-muted-foreground/80 text-center pt-1">
-                                    <span>Benchmark data provided by </span>
-                                    <a
-                                        href="https://artificialanalysis.ai"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-cyan-400 hover:underline inline-flex items-center gap-0.5"
-                                    >
-                                        Artificial Analysis
-                                        <ExternalLink className="w-2.5 h-2.5" />
-                                    </a>
-                                </div>
-                            </>
-                        )}
-
-                        {!benchmarkLoading && !benchmarkData && (
-                            <div className="text-center py-8 space-y-3">
-                                <BarChart3 className="w-8 h-8 mx-auto text-muted-foreground/50" />
-                                <p className="text-xs text-muted-foreground">
-                                    No independently measured Artificial Analysis result is linked to this Compose model yet.
-                                </p>
-                            </div>
-                        )}
-                    </div>
-                )}
-
-                {activeTab === "custom" && (
-                    <div className="cm-model-card__custom-content">
-                        <ModelSection label={<span className="cm-model-card__section-text">System</span>} className="cm-model-card__section--custom">
-                            <Textarea
-                                value={systemPrompt}
-                                onChange={(event) => onSystemPromptChange(event.target.value)}
-                                placeholder="Optional system prompt..."
-                                rows={3}
-                                className="cm-model-card__text-area"
-                            />
-                        </ModelSection>
-
-                        {/* Optional Pricing */}
-                        {optionalPricingSections.length > 0 && (
-                            <ModelSection label={iconLabel("Price", "price", "section")} className="cm-model-card__section--pricing">
-                                <div className="cm-model-card__pricing-list">
-                                    {optionalPricingSections.map((section, index) => (
-                                        <ModelPricing key={`optional-price-${section.header}-${index}`} unit={section.unit}>
-                                            {section.entries.map((entry) => (
-                                                <ModelRow
-                                                    key={`${section.header}-${entry.label}`}
-                                                    label={labelIcon(entry.label, "price")}
-                                                    value={<FieldValue value={entry.value} />}
-                                                />
-                                            ))}
-                                        </ModelPricing>
-                                    ))}
-                                </div>
-                            </ModelSection>
-                        )}
-
-                        {/* Dynamic model params */}
-                        {hasOptionalParams && modelParams && (
-                            <>
-                                {Object.entries(modelParams.params).filter(([, definition]) => definition.required !== true).map(([key, definition]) => (
-                                    <ModelSection key={key} label={(
-                                        <Hint label={definition.description || key}>
-                                            <span className="cm-model-card__section-text">{key}</span>
+                                <span className="cm-model-card__type-list">
+                                    {typeValues.map((value) => (
+                                        <Hint key={value} label={formatModelTypeLabel(value)}>
+                                            <span className="cm-model-card__type-badge" data-tone={tone(value)}>
+                                                {typeIcon(value, "cm-model-card__type-icon")}
+                                                <span>{formatModelTypeLabel(value)}</span>
+                                            </span>
                                         </Hint>
-                                    )} className="cm-model-card__section--param">
-                                        <div className="cm-model-card__param-body">
-                                            {renderParamInput(
-                                                key,
-                                                definition,
-                                                paramValues[key],
-                                                (nextValue) => onParamValuesChange?.({ ...paramValues, [key]: nextValue }),
-                                            )}
+                                    ))}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* ── Unified Segmented Tab Rail ── */}
+                    <div className="cm-model-card__tabs" role="tablist" aria-label="Model inspector">
+                        {tabs.map((item) => {
+                            const active = activeTab === item.id;
+                            return (
+                                <button
+                                    key={item.id}
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={active}
+                                    className="cm-model-card__tab"
+                                    data-active={active ? "true" : "false"}
+                                    data-tone={item.tone}
+                                    onClick={() => setActiveTab(item.id)}
+                                >
+                                    {item.icon}
+                                    <span>{item.label}</span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                </header>
+
+                {/* ── Scrollable Inspector Body ── */}
+                <div className="cm-model-card__body">
+                    {activeTab === "details" && (
+                        <div className="cm-model-card__details">
+                            {modelInfo?.description && (
+                                <div className="cm-model-card__description">
+                                    <Excerpt title={modelInfo.name || selectedModel} text={modelInfo.description} lines={5}>
+                                        {modelInfo.description}
+                                    </Excerpt>
+                                </div>
+                            )}
+
+                            {modelInfo && (
+                                <>
+                                    {(inputValues.length > 0 || outputValues.length > 0) && (
+                                        <ModelSection label={<span className="cm-model-card__section-text">Capability</span>} className="cm-model-card__section--capability">
+                                            <div className="cm-model-card__lane-grid">
+                                                {inputValues.length > 0 && (
+                                                    <div className="cm-model-card__io-row cm-model-card__metric-cell">
+                                                        <span className="cm-model-card__io-label">{iconLabel("Input", "input")}</span>
+                                                        <div className="cm-model-card__io-badges">
+                                                            {inputValues.map((value) => (
+                                                                <FormatBadge key={`in-${value}`} value={value} />
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {outputValues.length > 0 && (
+                                                    <div className="cm-model-card__io-row cm-model-card__metric-cell">
+                                                        <span className="cm-model-card__io-label">{iconLabel("Output", "output")}</span>
+                                                        <div className="cm-model-card__io-badges">
+                                                            {outputValues.map((value) => (
+                                                                <FormatBadge key={`out-${value}`} value={value} />
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </ModelSection>
+                                    )}
+
+                                    {contextEntries.length > 0 && (
+                                        <ModelSection label={<span className="cm-model-card__section-text">Context</span>} className="cm-model-card__section--context">
+                                            <div className="cm-model-card__kv-grid">
+                                                {contextEntries.map((entry) => (
+                                                    <ModelRow
+                                                        key={`ctx-${entry.label}`}
+                                                        label={labelIcon(entry.label, "input")}
+                                                        value={<FieldValue value={entry.value} />}
+                                                    />
+                                                ))}
+                                            </div>
+                                        </ModelSection>
+                                    )}
+
+                                    {pricingSections.length > 0 && (
+                                        <ModelSection label={iconLabel("Price", "price", "section")} className="cm-model-card__section--pricing">
+                                            <div className="cm-model-card__pricing-list">
+                                                {pricingSections.map((section, index) => (
+                                                    <ModelPricing key={`price-${section.header}-${index}`} unit={section.unit}>
+                                                        {section.entries.map((entry) => (
+                                                            <ModelRow
+                                                                key={`${section.header}-${entry.label}`}
+                                                                label={labelIcon(entry.label, "price")}
+                                                                value={<FieldValue value={entry.value} />}
+                                                            />
+                                                        ))}
+                                                    </ModelPricing>
+                                                ))}
+                                            </div>
+                                        </ModelSection>
+                                    )}
+                                </>
+                            )}
+                        </div>
+                    )}
+
+                    {activeTab === "benchmarks" && supportsBenchmarks && (
+                        <div className="cm-model-card__benchmarks">
+                            {benchmarkLoading && (
+                                <div className="cm-model-card__bench-empty" role="status">
+                                    <div className="cm-model-card__spinner" />
+                                    <p>Loading benchmark snapshot...</p>
+                                </div>
+                            )}
+
+                            {!benchmarkLoading && benchmarkData && (
+                                <>
+                                    {benchmarkHeadlineMetrics.length > 0 && (
+                                        <div className="cm-model-card__bench-kpis">
+                                            {benchmarkHeadlineMetrics.slice(0, 4).map((metric, index) => (
+                                                <div
+                                                    key={metric.key}
+                                                    className="cm-model-card__bench-kpi"
+                                                    data-tone={index % 2 === 0 ? "cyan" : "fuchsia"}
+                                                >
+                                                    <span className="cm-model-card__bench-kpi-label">{metric.label}</span>
+                                                    <strong className="cm-model-card__bench-kpi-val">
+                                                        {formatBenchmarkMetric(metric)}
+                                                    </strong>
+                                                    <span className="cm-model-card__bench-kpi-unit">{metric.unit}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    <ModelSection label={<span className="cm-model-card__section-text">Published Metrics</span>}>
+                                        <div className="cm-model-card__bench-list">
+                                            {benchmarkAllMetrics.map((metric) => (
+                                                <div key={metric.key} className="cm-model-card__bench-row">
+                                                    <span>{metric.label}</span>
+                                                    <strong>{formatBenchmarkMetric(metric)}</strong>
+                                                </div>
+                                            ))}
                                         </div>
                                     </ModelSection>
-                                ))}
-                            </>
-                        )}
 
-                        {/* No params state */}
-                        {!hasOptionalParams && optionalPricingSections.length === 0 && (
-                            <div className="cm-model-card__no-params">
-                                No optional parameters exposed for this model.
-                            </div>
-                        )}
-                    </div>
-                )}
-            </ModelCardShell>
+                                    {cleanBenchmarkParameters(benchmarkData.parameters).length > 0 && (
+                                        <p className="cm-model-card__bench-note">
+                                            Parameters: {cleanBenchmarkParameters(benchmarkData.parameters).join(", ")}
+                                        </p>
+                                    )}
 
-            {/* Sub-Dialog: Head-to-Head Comparison */}
+                                    <Button
+                                        type="button"
+                                        onClick={() => setCompareDialogOpen(true)}
+                                        className="cm-model-card__compare-btn"
+                                    >
+                                        <Scale className="cm-model-card__tab-icon" />
+                                        <span>Compare Similar Models</span>
+                                    </Button>
+
+                                    <div className="cm-model-card__bench-attrib">
+                                        <span>Source: </span>
+                                        <a href="https://artificialanalysis.ai" target="_blank" rel="noopener noreferrer">
+                                            Artificial Analysis <ExternalLink className="cm-model-card__inline-icon" />
+                                        </a>
+                                    </div>
+                                </>
+                            )}
+
+                            {!benchmarkLoading && !benchmarkData && (
+                                <div className="cm-model-card__bench-empty">
+                                    <BarChart3 className="cm-model-card__empty-icon" />
+                                    <p>No independently measured benchmark is linked to this model yet.</p>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {activeTab === "custom" && (
+                        <div className="cm-model-card__custom-content">
+                            <ModelSection label={<span className="cm-model-card__section-text">System Prompt</span>} className="cm-model-card__section--custom">
+                                <Textarea
+                                    value={systemPrompt}
+                                    onChange={(event) => onSystemPromptChange(event.target.value)}
+                                    placeholder="Optional system prompt..."
+                                    rows={3}
+                                    className="cm-model-card__text-area"
+                                />
+                            </ModelSection>
+
+                            {optionalPricingSections.length > 0 && (
+                                <ModelSection label={iconLabel("Price", "price", "section")} className="cm-model-card__section--pricing">
+                                    <div className="cm-model-card__pricing-list">
+                                        {optionalPricingSections.map((section, index) => (
+                                            <ModelPricing key={`optional-price-${section.header}-${index}`} unit={section.unit}>
+                                                {section.entries.map((entry) => (
+                                                    <ModelRow
+                                                        key={`${section.header}-${entry.label}`}
+                                                        label={labelIcon(entry.label, "price")}
+                                                        value={<FieldValue value={entry.value} />}
+                                                    />
+                                                ))}
+                                            </ModelPricing>
+                                        ))}
+                                    </div>
+                                </ModelSection>
+                            )}
+
+                            {hasOptionalParams && modelParams && (
+                                <>
+                                    {Object.entries(modelParams.params)
+                                        .filter(([, definition]) => definition.required !== true)
+                                        .map(([key, definition]) => (
+                                            <ModelSection
+                                                key={key}
+                                                label={(
+                                                    <Hint label={definition.description || key}>
+                                                        <span className="cm-model-card__section-text">{key}</span>
+                                                    </Hint>
+                                                )}
+                                                className="cm-model-card__section--param"
+                                            >
+                                                <div className="cm-model-card__param-body">
+                                                    {renderParamInput(
+                                                        key,
+                                                        definition,
+                                                        paramValues[key],
+                                                        (nextValue) => onParamValuesChange?.({ ...paramValues, [key]: nextValue }),
+                                                    )}
+                                                </div>
+                                            </ModelSection>
+                                        ))}
+                                </>
+                            )}
+
+                            {!hasOptionalParams && optionalPricingSections.length === 0 && (
+                                <div className="cm-model-card__no-params">
+                                    No optional parameters exposed for this model.
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            </aside>
+
             <ModelComparisonDialog
                 open={compareDialogOpen}
                 onOpenChange={setCompareDialogOpen}
