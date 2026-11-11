@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { ModelBadge } from "@/components/models/badge";
-import { CommandBar } from "@/components/models/command-bar";
+import { CommandBar } from "@/components/models/commands";
 import { useModels } from "@/hooks/use-model";
 
 interface ModelSelectorProps {
