@@ -14,9 +14,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@/components/ui/dropdown";
 import { type ModelCategory, getFamilyLogoUrl, getModelTypeClass, getModelTypeVisualId } from "@/lib/models";
-import { typeIcon, typeLabel } from "@compose-market/theme/icons/react";
+import { typeIcon, typeLabel } from "@/lib/modalities";
 
 interface CapabilityChipsProps {
   selectedType: string;
@@ -51,7 +51,6 @@ function categoryClass(cat: ModelCategory, variant: "type" | "family", selected:
 
 function triggerClass(variant: "type" | "family"): string {
   return [
-    "cm-chip",
     "cm-playground__chip-trigger",
     `cm-playground__chip-trigger--${variant}`,
   ].join(" ");
@@ -72,20 +71,22 @@ function ChipContent({
   label?: string;
   isTrigger?: boolean;
 }) {
+  const textClass = isTrigger ? "cm-playground__chip-label" : "cm-chip__text";
+  const countClass = isTrigger ? "cm-playground__chip-count" : "cm-chip__count";
   return (
     <>
       {variant === "type" ? (
         <span className={`cm-type-label ${getModelTypeClass(cat.id)}`}>
           {typeIcon(getModelTypeVisualId(cat.id))}
-          <span className={isTrigger ? "cm-chip__text hidden sm:inline" : "cm-chip__text"}>{label ?? chipLabel(cat, variant)}</span>
+          <span className={textClass}>{label ?? chipLabel(cat, variant)}</span>
         </span>
       ) : (
         <>
           {familyIcon(cat.id)}
-          <span className={isTrigger ? "cm-chip__text hidden sm:inline" : "cm-chip__text"}>{label ?? chipLabel(cat, variant)}</span>
+          <span className={textClass}>{label ?? chipLabel(cat, variant)}</span>
         </>
       )}
-      <span className={isTrigger ? "cm-chip__count hidden sm:inline" : "cm-chip__count"}>{cat.count}</span>
+      <span className={countClass}>{cat.count}</span>
     </>
   );
 }
