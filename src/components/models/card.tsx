@@ -1,20 +1,14 @@
 /**
  * Model Card Component
  *
- * Side panel showing model details (pricing, limits, I/O) and settings (system prompt, tools).
- * 
- * Styling: uses @compose-market/theme BEM classes (cm-model-card*).
+ * Inspector panel showing model description, capabilities, context & pricing specs,
+ * Artificial Analysis benchmarks, and custom runtime parameters.
  */
+import * as React from "react";
 import { useEffect, useState } from "react";
-import {
-    ModelCard as ModelCardShell,
-    ModelPricing,
-    ModelRow,
-    ModelSection,
-} from "@compose-market/theme/model";
 import { Excerpt, Hint } from "@compose-market/theme/shell";
 import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
+import { JsonParamTextarea, Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import {
     Cpu,
@@ -24,11 +18,7 @@ import {
     LogOut,
     Settings,
     BarChart3,
-    Trophy,
-    Zap,
     Scale,
-    Sparkles,
-    Clock,
     ExternalLink,
 } from "lucide-react";
 import type { CanonicalModality } from "@compose-market/sdk";
@@ -51,7 +41,8 @@ import {
     type CatalogModel,
     getFamilyLogoUrl,
 } from "@/lib/models";
-import { typeIcon, typeLabel } from "@compose-market/theme/icons/react";
+import { typeIcon, typeLabel } from "@/lib/modalities";
+import { cn } from "@/lib/utils";
 
 export interface ParamDefinition {
     type: "string" | "integer" | "number" | "boolean" | "array" | "object" | Array<"string" | "integer" | "number" | "boolean" | "array" | "object">;
@@ -79,6 +70,47 @@ export interface ModelCardProps {
     modelParams?: ModelParamsSchema | null;
     paramValues?: Record<string, unknown>;
     onParamValuesChange?: (values: Record<string, unknown>) => void;
+    tab?: "details" | "custom" | "benchmarks";
+    onTabChange?: (tab: "details" | "custom" | "benchmarks") => void;
+}
+
+interface TabDef {
+    id: "details" | "benchmarks" | "custom";
+    label: string;
+    icon: React.ReactNode;
+    tone: "cyan" | "fuchsia";
+}
+
+function ModelSection({
+    label,
+    className,
+    children,
+}: {
+    label: React.ReactNode;
+    className?: string;
+    children: React.ReactNode;
+}) {
+    return (
+        <section className={cn("cm-model-card__section", className)}>
+            <div className="cm-model-card__section-label">{label}</div>
+            <div className="cm-model-card__section-body">{children}</div>
+        </section>
+    );
+}
+
+function ModelPricing({
+    unit,
+    children,
+}: {
+    unit?: string;
+    children: React.ReactNode;
+}) {
+    return (
+        <div className="cm-model-card__pricing-group">
+            {unit ? <div className="cm-model-card__pricing-unit">{unit}</div> : null}
+            <div className="cm-model-card__kv-grid">{children}</div>
+        </div>
+    );
 }
 
 function renderParamInput(
