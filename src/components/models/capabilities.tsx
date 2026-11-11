@@ -145,7 +145,7 @@ function FilterDropdown({
             aria-label={`${label}: ${triggerLabel}`}
           >
             <ChipContent cat={selectedCat} variant={variant} label={triggerLabel} isTrigger />
-            <ChevronDown className="cm-playground__chip-chevron hidden sm:inline" />
+            <ChevronDown className="cm-playground__chip-chevron" aria-hidden="true" />
           </button>
         </DropdownMenuTrigger>
       </div>
