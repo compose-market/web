@@ -660,8 +660,9 @@ export function ModelCard({
 
 export function ModelCardSkeleton() {
     return (
-        <ModelCardShell>
-            <p className="cm-model-card__param-description">Loading model details...</p>
-        </ModelCardShell>
+        <aside className="cm-model-card cm-model-card--empty">
+            <div className="cm-model-card__spinner" />
+            <p className="cm-model-card__empty-text">Loading model details...</p>
+        </aside>
     );
 }
