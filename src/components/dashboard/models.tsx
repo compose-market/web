@@ -5,7 +5,7 @@ import { formatMs, formatPct, formatTokens } from "@/lib/analytics";
 import { formatUsd } from "@/lib/receipts";
 import { getFamilyLogoUrl, formatModelTypeLabel } from "@/lib/models";
 import { BlockDropdown } from "./dropdown";
-import { ModalityBreakdown, MODALITY_METRIC_OPTIONS, type ModalityMetric } from "./by-modality";
+import { ModalityBreakdown, MODALITY_METRIC_OPTIONS, type ModalityMetric } from "./modalities";
 
 type SortKey = "totalUsd" | "calls" | "lastUsed" | "totalTokens" | "type" | "p95Ms" | "successRate";
 type SortDir = "asc" | "desc";
@@ -65,7 +65,7 @@ export function ModelUsageTable({
     const needle = query.trim().toLowerCase();
     const filtered = needle
       ? models.filter((model) =>
-          model.modelId.toLowerCase().includes(needle) || model.family.toLowerCase().includes(needle))
+        model.modelId.toLowerCase().includes(needle) || model.family.toLowerCase().includes(needle))
       : models;
     const arr = [...filtered];
     arr.sort((a, b) => {
