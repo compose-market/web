@@ -45,13 +45,13 @@ function CustomScatterTooltip({ active, payload }: { active?: boolean; payload?:
     if (!data) return null;
 
     return (
-        <div className="bg-background/95 backdrop-blur-md border border-cyan-500/40 rounded-lg p-3 shadow-2xl text-xs font-mono max-w-[280px]">
+        <div className="bg-background/95 backdrop-blur-md border border-cyan-500/40 rounded-lg p-3 shadow-2xl text-xs font-mono max-w-72">
             <div className="flex items-center justify-between gap-2 border-b border-border/50 pb-1.5 mb-2">
                 <span className="font-bold text-foreground truncate text-sm">
                     {cleanBenchmarkDisplayName(data)}
                 </span>
                 {data.isFrontier && (
-                    <span className="px-1.5 py-0.5 rounded text-[10px] bg-fuchsia-500/20 text-fuchsia-400 border border-fuchsia-500/30">
+                    <span className="px-1.5 py-0.5 rounded text-xs bg-fuchsia-500/20 text-fuchsia-400 border border-fuchsia-500/30">
                         Frontier
                     </span>
                 )}
@@ -92,7 +92,7 @@ function CustomScatterTooltip({ active, payload }: { active?: boolean; payload?:
                     </div>
                 )}
             </div>
-            <p className="mt-2 pt-1 border-t border-border/30 text-[10px] text-cyan-300/80 text-center">
+            <p className="mt-2 pt-1 border-t border-border/30 text-xs text-cyan-300/80 text-center">
                 Click point to inspect & compare
             </p>
         </div>
@@ -104,7 +104,7 @@ export function BenchmarkScatterPlot({
     selectedModelIds = [],
     onSelectModel,
     onLaunchPlayground,
-    height = "clamp(280px, 45cqh, 460px)",
+    height = "clamp(17.5rem, 45dvh, 28.75rem)",
 }: BenchmarkScatterPlotProps) {
     const [mode, setMode] = useState<ScatterMode>("price");
     const [inspectedModel, setInspectedModel] = useState<ModelBenchmark | null>(null);
@@ -211,7 +211,7 @@ export function BenchmarkScatterPlot({
                             domain={mode === "price" ? ["auto", "auto"] : [0, "auto"]}
                             tick={{
                                 fill: "rgba(255, 255, 255, 0.6)",
-                                fontSize: 10,
+                                fontSize: "var(--cm-text-xs)",
                                 fontFamily: "var(--font-mono, monospace)",
                             }}
                             label={{
@@ -222,7 +222,7 @@ export function BenchmarkScatterPlot({
                                 position: "bottom",
                                 offset: 12,
                                 fill: "rgba(255, 255, 255, 0.4)",
-                                fontSize: 10,
+                                fontSize: "var(--cm-text-xs)",
                                 fontFamily: "var(--font-mono, monospace)",
                             }}
                         />
@@ -233,7 +233,7 @@ export function BenchmarkScatterPlot({
                             domain={[0, "auto"]}
                             tick={{
                                 fill: "rgba(255, 255, 255, 0.6)",
-                                fontSize: 10,
+                                fontSize: "var(--cm-text-xs)",
                                 fontFamily: "var(--font-mono, monospace)",
                             }}
                             label={{
@@ -242,7 +242,7 @@ export function BenchmarkScatterPlot({
                                 position: "insideLeft",
                                 offset: 8,
                                 fill: "rgba(255, 255, 255, 0.4)",
-                                fontSize: 10,
+                                fontSize: "var(--cm-text-xs)",
                                 fontFamily: "var(--font-mono, monospace)",
                             }}
                         />
@@ -303,12 +303,12 @@ export function BenchmarkScatterPlot({
                                     {cleanBenchmarkDisplayName(inspectedModel)}
                                 </span>
                                 {inspectedModel.isFrontier && (
-                                    <span className="px-1.5 py-0.2 rounded text-[10px] bg-fuchsia-500/20 text-fuchsia-400 border border-fuchsia-500/30">
+                                    <span className="px-1.5 py-0.2 rounded text-xs bg-fuchsia-500/20 text-fuchsia-400 border border-fuchsia-500/30">
                                         Frontier
                                     </span>
                                 )}
                             </div>
-                            <div className="text-[11px] text-muted-foreground flex items-center gap-2 mt-0.5">
+                            <div className="text-xs text-muted-foreground flex items-center gap-2 mt-0.5">
                                 <FamilyLogo family={inspectedModel.family} />
                                 <span>{inspectedModel.family}</span>
                                 <span>·</span>
@@ -364,7 +364,7 @@ export function BenchmarkScatterPlot({
             )}
 
             {/* Legend & Guide */}
-            <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] font-mono text-muted-foreground">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs font-mono text-muted-foreground">
                 <div className="flex items-center gap-3 flex-wrap">
                     <span className="flex items-center gap-1.5">
                         <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block" />
