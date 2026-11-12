@@ -40,7 +40,7 @@ function CustomRadarTooltip({ active, payload, label }: any) {
         <div className="bg-background/95 backdrop-blur-md border border-cyan-500/30 rounded-lg p-3 shadow-xl text-xs font-mono">
             <p className="font-bold text-foreground mb-2 text-sm border-b border-border/50 pb-1 flex items-center justify-between gap-4">
                 <span>{label}</span>
-                <span className="text-[10px] text-muted-foreground uppercase">Score / 100</span>
+                <span className="text-xs text-muted-foreground uppercase">Score / 100</span>
             </p>
             <div className="space-y-1.5">
                 {payload.map((entry: any, index: number) => (
@@ -50,7 +50,7 @@ function CustomRadarTooltip({ active, payload, label }: any) {
                                 className="w-2.5 h-2.5 rounded-full inline-block"
                                 style={{ backgroundColor: entry.stroke || entry.color }}
                             />
-                            <span className="text-muted-foreground truncate max-w-[140px]">
+                            <span className="text-muted-foreground truncate max-w-36">
                                 {entry.name}
                             </span>
                         </div>
@@ -80,7 +80,7 @@ export function BenchmarkRadarChart({
     }
 
     return (
-        <div className="w-full relative min-h-[220px]" style={{ height }}>
+        <div className="w-full relative min-h-56" style={{ height }}>
             <ResponsiveContainer width="100%" height="100%">
                 <RadarChart
                     data={data}
@@ -95,7 +95,7 @@ export function BenchmarkRadarChart({
                         dataKey="metric"
                         tick={{
                             fill: "rgba(255, 255, 255, 0.7)",
-                            fontSize: compact ? 10 : 11,
+                            fontSize: 12,
                             fontFamily: "var(--font-mono, monospace)",
                         }}
                     />
@@ -110,7 +110,7 @@ export function BenchmarkRadarChart({
                         <Legend
                             wrapperStyle={{
                                 paddingTop: 8,
-                                fontSize: 11,
+                                fontSize: 12,
                                 fontFamily: "var(--font-mono, monospace)",
                             }}
                             formatter={(value) => {
