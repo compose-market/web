@@ -20,7 +20,7 @@ import {
     DropdownMenuContent,
     DropdownMenuItem,
     DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@/components/ui/dropdown";
 import {
     Tooltip,
     TooltipContent,
@@ -51,6 +51,7 @@ import {
     Bot,
     Code,
     GripVertical,
+    ChevronDown,
 } from "lucide-react";
 import { Hint } from "@compose-market/theme/shell";
 import { Ordering, SearchFold, Switcher, type Option } from "@/components/control";
@@ -120,6 +121,7 @@ export function BenchmarksExplorer({
     const [sortAsc, setSortAsc] = useState(false);
 
     const [compareModelIds, setCompareModelIds] = useState<string[]>(initialCompareModelIds);
+    const [expandedCardKey, setExpandedCardKey] = useState<string | null>(null);
 
     const isMobile = useIsMobile();
 
@@ -153,7 +155,7 @@ export function BenchmarksExplorer({
         setSortAsc(false);
     };
 
-    // Sort models
+    // Sort models — missing values always sort last, deterministic tie-break matches API
     const sortedModels = useMemo(() => {
         if (sortField === "primary") {
             return [...models].sort((left, right) => {
@@ -162,24 +164,34 @@ export function BenchmarksExplorer({
             });
         }
         return [...models].sort((a, b) => {
-            const metricA = benchmarkMetric(a, sortField);
-            const metricB = benchmarkMetric(b, sortField);
-            const valA = metricA?.value ?? (sortAsc ? Infinity : -Infinity);
-            const valB = metricB?.value ?? (sortAsc ? Infinity : -Infinity);
-            if (valA === valB) return 0;
-            const direction = metricA?.direction ?? metricB?.direction ?? "higher";
-            if (direction === "lower") return sortAsc ? valB - valA : valA - valB;
-            return sortAsc ? valA - valB : valB - valA;
+            const valA = benchmarkMetric(a, sortField)?.value ?? null;
+            const valB = benchmarkMetric(b, sortField)?.value ?? null;
+            if (valA == null && valB == null) {
+                return (a.name || a.modelId).localeCompare(b.name || b.modelId);
+            }
+            if (valA == null) return 1;
+            if (valB == null) return -1;
+            const diff = sortAsc ? valA - valB : valB - valA;
+            if (diff !== 0) return diff;
+            return (a.name || a.modelId).localeCompare(b.name || b.modelId);
         });
     }, [models, sortField, sortAsc]);
+
+    const selectSortField = (field: SortField) => {
+        setSortField(field);
+        if (field === "primary") {
+            setSortAsc(false);
+            return;
+        }
+        const metric = models.map((model) => benchmarkMetric(model, field)).find(Boolean);
+        setSortAsc(metric?.direction === "lower");
+    };
 
     const toggleSort = (field: SortField) => {
         if (sortField === field) {
             setSortAsc(!sortAsc);
         } else {
-            setSortField(field);
-            const metric = models.map((model) => benchmarkMetric(model, field)).find(Boolean);
-            setSortAsc(metric?.direction === "lower");
+            selectSortField(field);
         }
     };
 
@@ -311,7 +323,7 @@ export function BenchmarksExplorer({
             <div className="cm-control-rail cm-market-control-rail">
                 <div className="cm-market-control-rail__brand">
                     <h1 className="cm-page-header__title cm-market-control-rail__title">
-                        <span className="text-cyan-400 mr-2">//</span>
+                        <span className="text-fuchsia-500 mr-1.5">//</span>
                         BENCHMARKS
                     </h1>
                 </div>
@@ -338,7 +350,7 @@ export function BenchmarksExplorer({
                     <Ordering
                         value={sortField}
                         options={SORT_OPTIONS}
-                        onChange={(val) => setSortField(val as SortField)}
+                        onChange={(val) => selectSortField(val as SortField)}
                         label="Sort criteria"
                     />
                 </div>
@@ -367,7 +379,7 @@ export function BenchmarksExplorer({
                         type="button"
                         onClick={() => setFrontierOnly(!frontierOnly)}
                         className={`h-8 px-2.5 text-xs font-mono rounded-full border inline-flex items-center gap-1.5 transition-all cursor-pointer ${frontierOnly
-                            ? "bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/50 shadow-[0_0_8px_rgba(255,0,122,0.25)]"
+                            ? "bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/50 shadow-sm shadow-fuchsia-500/25"
                             : "bg-background/40 text-muted-foreground border-primary/20 hover:text-foreground"
                             }`}
                         title="Toggle frontier-only models"
@@ -384,7 +396,7 @@ export function BenchmarksExplorer({
                         {isLoading && (
                             <div className="flex flex-col items-center justify-center py-24 text-center space-y-3 font-mono text-xs text-muted-foreground">
                                 <div className="w-7 h-7 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
-                                <p>Loading benchmark intelligence from Artificial Analysis...</p>
+                                <p>Loading benchmarks...</p>
                             </div>
                         )}
 
@@ -499,7 +511,7 @@ export function BenchmarksExplorer({
                                                                 type="button"
                                                                 onClick={() => toggleCompareModel(model.sourceId)}
                                                                 className={`w-4 h-4 rounded flex items-center justify-center border transition-all mx-auto ${isComparing
-                                                                    ? "bg-cyan-500 text-black border-cyan-400 shadow-[0_0_8px_rgba(0,240,255,0.4)]"
+                                                                    ? "bg-cyan-500 text-black border-cyan-400 shadow-sm shadow-cyan-400/40"
                                                                     : "border-primary/20 hover:border-cyan-400/80 bg-background/50"
                                                                     }`}
                                                                 aria-label={`Toggle compare for ${cleanName}`}
@@ -511,7 +523,7 @@ export function BenchmarksExplorer({
                                                             <Button
                                                                 size="sm"
                                                                 onClick={() => handleLaunchPlayground(model.modelId)}
-                                                                className="h-6 px-2 text-[11px] font-mono bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 gap-1"
+                                                                className="h-6 px-2 text-xs font-mono bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 gap-1"
                                                             >
                                                                 <Play className="w-2.5 h-2.5 fill-current" />
                                                                 <span>Playground</span>
@@ -524,11 +536,14 @@ export function BenchmarksExplorer({
                                     </table>
                                 </div>
 
-                                {/* Mobile View: Ranked Cards Grid */}
+                                {/* Mobile View: Compact Tap-to-Expand Ranked Rows */}
                                 <div className="cm-benchmarks-cards-view cm-benchmarks-cards">
                                     {sortedModels.map((model, index) => {
+                                        const cardKey = `card:${model.operation}:${model.variant ?? "default"}:${model.sourceId}`;
+                                        const isExpanded = expandedCardKey === cardKey;
                                         const isComparing = compareModelIds.includes(model.sourceId);
                                         const cleanName = cleanBenchmarkDisplayName(model);
+                                        const cleanParams = cleanBenchmarkParameters(model.parameters);
                                         const primaryMetric = benchmarkMetric(model, model.primaryMetric);
                                         const costMetric = benchmarkMetric(model, "costPerTask") ?? benchmarkMetric(model, "priceInput");
                                         const speedMetric = benchmarkMetric(model, "speed") ?? (model.tokensPerSecond ? { key: "speed", label: "Output Speed", value: model.tokensPerSecond, format: "tokens-per-second" } : null);
@@ -537,112 +552,162 @@ export function BenchmarksExplorer({
 
                                         return (
                                             <div
-                                                key={`card:${model.operation}:${model.variant ?? "default"}:${model.sourceId}`}
+                                                key={cardKey}
                                                 className="cm-benchmarks-card"
                                                 data-comparing={isComparing ? "true" : "false"}
+                                                data-expanded={isExpanded ? "true" : undefined}
                                             >
-                                                <div className="cm-benchmarks-card__header">
-                                                    <div className="cm-benchmarks-card__rank-group">
-                                                        <span className={`cm-benchmarks-rank ${rankClass}`}>{index + 1}</span>
-                                                        <div>
+                                                <div
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    aria-expanded={isExpanded}
+                                                    className="cm-benchmarks-card__row"
+                                                    onClick={() => setExpandedCardKey(isExpanded ? null : cardKey)}
+                                                    onKeyDown={(event) => {
+                                                        if (event.key === "Enter" || event.key === " ") {
+                                                            event.preventDefault();
+                                                            setExpandedCardKey(isExpanded ? null : cardKey);
+                                                        }
+                                                    }}
+                                                >
+                                                    <span className={`cm-benchmarks-rank ${rankClass}`}>{index + 1}</span>
+                                                    <div className="cm-benchmarks-card__identity">
+                                                        <div className="cm-benchmarks-card__title-line">
+                                                            <FamilyLogo family={model.family} />
                                                             <h3 className="cm-benchmarks-card__name">{cleanName}</h3>
-                                                            <div className="cm-benchmarks-card__meta">
-                                                                <FamilyLogo family={model.family} />
-                                                                <span>{model.family}</span>
-                                                                {model.isFrontier && (
-                                                                    <span className="text-fuchsia-400 font-semibold flex items-center gap-0.5">
-                                                                        <Flame className="w-3 h-3 text-fuchsia-400" />
-                                                                        Frontier
-                                                                    </span>
-                                                                )}
-                                                            </div>
+                                                            {model.isFrontier && (
+                                                                <Flame className="w-3 h-3 text-fuchsia-400 shrink-0" aria-label="Frontier" />
+                                                            )}
+                                                        </div>
+                                                        <div className="cm-benchmarks-card__meta">
+                                                            <span>{model.family}</span>
+                                                            {cleanParams.length > 0 ? (
+                                                                <>
+                                                                    <span>·</span>
+                                                                    <span>{cleanParams.join(", ")}</span>
+                                                                </>
+                                                            ) : null}
                                                         </div>
                                                     </div>
-                                                </div>
 
-                                                <div className="cm-benchmarks-card__metrics">
-                                                    <div className="cm-benchmarks-card__metric-item">
-                                                        <span className="cm-benchmarks-card__metric-label">
-                                                            <Hint label={primaryMetric?.label ?? "Primary score"}>
-                                                                <span>{primaryMetric ? benchmarkMetricShortLabel(primaryMetric) : "Score"}</span>
-                                                            </Hint>
-                                                        </span>
-                                                        <span className="cm-benchmarks-card__metric-value cm-benchmarks-card__metric-value--primary">
+                                                    <div className="cm-benchmarks-card__score-pill">
+                                                        <span className="cm-benchmarks-card__score-value">
                                                             {formatBenchmarkMetric(primaryMetric)}
                                                         </span>
+                                                        <span className="cm-benchmarks-card__score-label">
+                                                            {primaryMetric ? benchmarkMetricShortLabel(primaryMetric) : "Score"}
+                                                        </span>
                                                     </div>
 
-                                                    {speedMetric && (
-                                                        <div className="cm-benchmarks-card__metric-item">
-                                                            <span className="cm-benchmarks-card__metric-label">
-                                                                <Hint label={speedMetric.label}>
-                                                                    <span>{benchmarkMetricShortLabel(speedMetric as any)}</span>
-                                                                </Hint>
-                                                            </span>
-                                                            <span className="cm-benchmarks-card__metric-value cm-benchmarks-card__metric-value--speed">
-                                                                {formatBenchmarkMetric(speedMetric as any)}
-                                                            </span>
-                                                        </div>
-                                                    )}
-
-                                                    {costMetric && (
-                                                        <div className="cm-benchmarks-card__metric-item">
-                                                            <span className="cm-benchmarks-card__metric-label">
-                                                                <Hint label={costMetric.label}>
-                                                                    <span>{benchmarkMetricShortLabel(costMetric)}</span>
-                                                                </Hint>
-                                                            </span>
-                                                            <span className="cm-benchmarks-card__metric-value cm-benchmarks-card__metric-value--price">
-                                                                {formatBenchmarkMetric(costMetric)}
-                                                            </span>
-                                                        </div>
-                                                    )}
-
-                                                    {latencyMetric && (
-                                                        <div className="cm-benchmarks-card__metric-item">
-                                                            <span className="cm-benchmarks-card__metric-label">
-                                                                <Hint label={latencyMetric.label}>
-                                                                    <span>{benchmarkMetricShortLabel(latencyMetric as any)}</span>
-                                                                </Hint>
-                                                            </span>
-                                                            <span className="cm-benchmarks-card__metric-value">
-                                                                {formatBenchmarkMetric(latencyMetric as any)}
-                                                            </span>
-                                                        </div>
-                                                    )}
+                                                    <div className="cm-benchmarks-card__row-actions">
+                                                        <button
+                                                            type="button"
+                                                            onClick={(event) => {
+                                                                event.stopPropagation();
+                                                                toggleCompareModel(model.sourceId);
+                                                            }}
+                                                            aria-label={isComparing ? `Remove ${cleanName} from comparison` : `Compare ${cleanName}`}
+                                                            title={isComparing ? "Comparing" : "Compare"}
+                                                            className={`inline-flex h-6 w-6 items-center justify-center rounded border transition-colors ${isComparing
+                                                                ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/40"
+                                                                : "border-primary/20 text-muted-foreground hover:text-foreground"
+                                                                }`}
+                                                        >
+                                                            {isComparing ? (
+                                                                <Check className="w-3 h-3 text-cyan-400" />
+                                                            ) : (
+                                                                <Plus className="w-3 h-3" />
+                                                            )}
+                                                        </button>
+                                                        <ChevronDown className="cm-benchmarks-card__chevron" />
+                                                    </div>
                                                 </div>
 
-                                                <div className="cm-benchmarks-card__footer">
-                                                    <Button
-                                                        size="sm"
-                                                        variant="outline"
-                                                        onClick={() => toggleCompareModel(model.sourceId)}
-                                                        className={`h-7 px-2.5 text-xs font-mono gap-1.5 ${isComparing
-                                                            ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/40"
-                                                            : "border-primary/20 text-muted-foreground hover:text-foreground"
-                                                            }`}
-                                                    >
-                                                        {isComparing ? (
-                                                            <>
-                                                                <Check className="w-3 h-3 text-cyan-400" />
-                                                                <span>Comparing</span>
-                                                            </>
+                                                <div className="cm-benchmarks-card__drawer">
+                                                    <div className="cm-benchmarks-card__metrics">
+                                                        {speedMetric ? (
+                                                            <div className="cm-benchmarks-card__metric-item">
+                                                                <span className="cm-benchmarks-card__metric-label">
+                                                                    <Hint label={speedMetric.label}>
+                                                                        <span>{benchmarkMetricShortLabel(speedMetric as any)}</span>
+                                                                    </Hint>
+                                                                </span>
+                                                                <span className="cm-benchmarks-card__metric-value cm-benchmarks-card__metric-value--speed">
+                                                                    {formatBenchmarkMetric(speedMetric as any)}
+                                                                </span>
+                                                            </div>
                                                         ) : (
-                                                            <>
-                                                                <Plus className="w-3 h-3" />
-                                                                <span>Compare</span>
-                                                            </>
+                                                            <div className="cm-benchmarks-card__metric-item">
+                                                                <span className="cm-benchmarks-card__metric-label">
+                                                                    <Hint label={primaryMetric?.label ?? "Primary score"}>
+                                                                        <span>{primaryMetric ? benchmarkMetricShortLabel(primaryMetric) : "Score"}</span>
+                                                                    </Hint>
+                                                                </span>
+                                                                <span className="cm-benchmarks-card__metric-value cm-benchmarks-card__metric-value--primary">
+                                                                    {formatBenchmarkMetric(primaryMetric)}
+                                                                </span>
+                                                            </div>
                                                         )}
-                                                    </Button>
 
-                                                    <Button
-                                                        size="sm"
-                                                        onClick={() => handleLaunchPlayground(model.modelId)}
-                                                        className="h-7 px-2.5 text-xs font-mono bg-cyan-500 hover:bg-cyan-400 text-black font-bold gap-1"
-                                                    >
-                                                        <Play className="w-3 h-3 fill-current" />
-                                                        <span>Playground</span>
-                                                    </Button>
+                                                        {costMetric && (
+                                                            <div className="cm-benchmarks-card__metric-item">
+                                                                <span className="cm-benchmarks-card__metric-label">
+                                                                    <Hint label={costMetric.label}>
+                                                                        <span>{benchmarkMetricShortLabel(costMetric)}</span>
+                                                                    </Hint>
+                                                                </span>
+                                                                <span className="cm-benchmarks-card__metric-value cm-benchmarks-card__metric-value--price">
+                                                                    {formatBenchmarkMetric(costMetric)}
+                                                                </span>
+                                                            </div>
+                                                        )}
+
+                                                        {latencyMetric && (
+                                                            <div className="cm-benchmarks-card__metric-item">
+                                                                <span className="cm-benchmarks-card__metric-label">
+                                                                    <Hint label={latencyMetric.label}>
+                                                                        <span>{benchmarkMetricShortLabel(latencyMetric as any)}</span>
+                                                                    </Hint>
+                                                                </span>
+                                                                <span className="cm-benchmarks-card__metric-value">
+                                                                    {formatBenchmarkMetric(latencyMetric as any)}
+                                                                </span>
+                                                            </div>
+                                                        )}
+                                                    </div>
+
+                                                    <div className="cm-benchmarks-card__footer">
+                                                        <Button
+                                                            size="sm"
+                                                            variant="outline"
+                                                            onClick={() => toggleCompareModel(model.sourceId)}
+                                                            className={`h-7 px-2.5 text-xs font-mono gap-1.5 ${isComparing
+                                                                ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/40"
+                                                                : "border-primary/20 text-muted-foreground hover:text-foreground"
+                                                                }`}
+                                                        >
+                                                            {isComparing ? (
+                                                                <>
+                                                                    <Check className="w-3 h-3 text-cyan-400" />
+                                                                    <span>Comparing</span>
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    <Plus className="w-3 h-3" />
+                                                                    <span>Compare</span>
+                                                                </>
+                                                            )}
+                                                        </Button>
+
+                                                        <Button
+                                                            size="sm"
+                                                            onClick={() => handleLaunchPlayground(model.modelId)}
+                                                            className="h-7 px-2.5 text-xs font-mono bg-cyan-500 hover:bg-cyan-400 text-black font-bold gap-1"
+                                                        >
+                                                            <Play className="w-3 h-3 fill-current" />
+                                                            <span>Playground</span>
+                                                        </Button>
+                                                    </div>
                                                 </div>
                                             </div>
                                         );
@@ -667,7 +732,7 @@ export function BenchmarksExplorer({
                                     <p className="font-bold text-foreground text-sm">
                                         {benchmarkOperationLabel(selectedOperation)} Arena Quality Ranking
                                     </p>
-                                    <p className="mt-0.5 text-muted-foreground text-[11px]">
+                                    <p className="mt-0.5 text-muted-foreground text-xs">
                                         Independent benchmark metrics published by Artificial Analysis.
                                     </p>
                                 </div>
@@ -692,7 +757,7 @@ export function BenchmarksExplorer({
                                                         <span className="text-cyan-400 font-bold">{index + 1}.</span>
                                                         <span className="font-bold text-foreground truncate">{cleanName}</span>
                                                         <FamilyLogo family={model.family} />
-                                                        <span className="text-muted-foreground text-[10px]">({model.family})</span>
+                                                        <span className="text-muted-foreground text-xs">({model.family})</span>
                                                     </div>
                                                     <div className="flex items-center gap-2 shrink-0">
                                                         <span className="text-cyan-300 font-bold">{formatBenchmarkMetric(metric)}</span>
@@ -700,7 +765,7 @@ export function BenchmarksExplorer({
                                                             size="sm"
                                                             variant="outline"
                                                             onClick={() => toggleCompareModel(model.sourceId)}
-                                                            className={`h-5 px-1.5 text-[10px] font-mono ${isComparing
+                                                            className={`h-5 px-1.5 text-xs font-mono ${isComparing
                                                                 ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/40"
                                                                 : "border-primary/20 text-muted-foreground"
                                                                 }`}
@@ -710,7 +775,7 @@ export function BenchmarksExplorer({
                                                         <Button
                                                             size="sm"
                                                             onClick={() => handleLaunchPlayground(model.modelId)}
-                                                            className="h-5 px-1.5 text-[10px] font-mono bg-cyan-500 hover:bg-cyan-400 text-black font-bold"
+                                                            className="h-5 px-1.5 text-xs font-mono bg-cyan-500 hover:bg-cyan-400 text-black font-bold"
                                                         >
                                                             Playground
                                                         </Button>
@@ -761,83 +826,83 @@ export function BenchmarksExplorer({
                         <span className="cm-benchmarks-dock__folded-count">{compareModelIds.length}</span>
                     </button>
                 ) : (
-                <div
-                    ref={(node) => { dockRef.current = node; }}
-                    className="cm-benchmarks-dock"
-                    style={{ transform: `translate(calc(-50% + ${dockOffset.x}px), ${dockOffset.y}px)` }}
-                    onPointerDown={handleDockPointerDown}
-                    onPointerMove={handleDockPointerMove}
-                    onPointerUp={handleDockPointerUp}
-                    onPointerCancel={handleDockPointerUp}
-                >
-                    <button
-                        type="button"
-                        className="cm-benchmarks-dock__grip"
-                        onClick={() => setDockFolded(true)}
-                        aria-label="Fold comparison tray"
+                    <div
+                        ref={(node) => { dockRef.current = node; }}
+                        className="cm-benchmarks-dock"
+                        style={{ transform: `translate(calc(-50% + ${dockOffset.x}px), ${dockOffset.y}px)` }}
+                        onPointerDown={handleDockPointerDown}
+                        onPointerMove={handleDockPointerMove}
+                        onPointerUp={handleDockPointerUp}
+                        onPointerCancel={handleDockPointerUp}
                     >
-                        <GripVertical className="w-3.5 h-3.5" />
-                    </button>
-                    <div className="cm-benchmarks-dock__models">
-                        <span className="text-muted-foreground shrink-0 text-xs hidden sm:inline">Comparing:</span>
-                        {dockVisible.map(({ id, label }) => (
-                            <span key={id} className="cm-benchmarks-dock__pill">
-                                <span className="cm-benchmarks-dock__pill-label">{label}</span>
-                                {compareModelIds.length > 1 && (
-                                    <button
-                                        type="button"
-                                        onClick={() => toggleCompareModel(id)}
-                                        className="hover:text-red-400 ml-0.5 shrink-0"
-                                        aria-label={`Remove ${label}`}
-                                    >
-                                        <X className="w-3 h-3" />
-                                    </button>
-                                )}
-                            </span>
-                        ))}
-                        {dockOverflow.length > 0 && (
-                            <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                    <button
-                                        type="button"
-                                        className="cm-benchmarks-dock__pill cm-benchmarks-dock__pill--more"
-                                        aria-label={`${dockOverflow.length} more compared models`}
-                                    >
-                                        +{dockOverflow.length}
-                                    </button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent side="top" align="center" sideOffset={8} className="cm-control-menu">
-                                    {dockOverflow.map(({ id, label }) => (
-                                        <DropdownMenuItem
-                                            key={id}
-                                            className="cm-control-menu__item"
-                                            onSelect={() => toggleCompareModel(id)}
-                                        >
-                                            <span className="cm-control-menu__label">{label}</span>
-                                            <X className="w-3 h-3 ml-auto text-muted-foreground" />
-                                        </DropdownMenuItem>
-                                    ))}
-                                </DropdownMenuContent>
-                            </DropdownMenu>
-                        )}
-                    </div>
-
-                    <div className="cm-benchmarks-dock__actions">
-                        <Button
-                            size="sm"
-                            onClick={() => setActiveTab("battle")}
-                            className="cm-benchmarks-dock__battle h-6 px-2.5 text-xs font-mono bg-cyan-500 hover:bg-cyan-400 text-black font-bold gap-1 shadow-[0_0_12px_rgba(0,240,255,0.4)]"
+                        <button
+                            type="button"
+                            className="cm-benchmarks-dock__grip"
+                            onClick={() => setDockFolded(true)}
+                            aria-label="Fold comparison tray"
                         >
-                            <Scale className="w-3 h-3" />
-                            <span className="cm-benchmarks-dock__battle-label">Battle ({compareModelIds.length})</span>
-                        </Button>
+                            <GripVertical className="w-3.5 h-3.5" />
+                        </button>
+                        <div className="cm-benchmarks-dock__models">
+                            <span className="text-muted-foreground shrink-0 text-xs hidden sm:inline">Comparing:</span>
+                            {dockVisible.map(({ id, label }) => (
+                                <span key={id} className="cm-benchmarks-dock__pill">
+                                    <span className="cm-benchmarks-dock__pill-label">{label}</span>
+                                    {compareModelIds.length > 1 && (
+                                        <button
+                                            type="button"
+                                            onClick={() => toggleCompareModel(id)}
+                                            className="hover:text-red-400 ml-0.5 shrink-0"
+                                            aria-label={`Remove ${label}`}
+                                        >
+                                            <X className="w-3 h-3" />
+                                        </button>
+                                    )}
+                                </span>
+                            ))}
+                            {dockOverflow.length > 0 && (
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <button
+                                            type="button"
+                                            className="cm-benchmarks-dock__pill cm-benchmarks-dock__pill--more"
+                                            aria-label={`${dockOverflow.length} more compared models`}
+                                        >
+                                            +{dockOverflow.length}
+                                        </button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent side="top" align="center" sideOffset={8} className="cm-control-menu">
+                                        {dockOverflow.map(({ id, label }) => (
+                                            <DropdownMenuItem
+                                                key={id}
+                                                className="cm-control-menu__item"
+                                                onSelect={() => toggleCompareModel(id)}
+                                            >
+                                                <span className="cm-control-menu__label">{label}</span>
+                                                <X className="w-3 h-3 ml-auto text-muted-foreground" />
+                                            </DropdownMenuItem>
+                                        ))}
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+                            )}
+                        </div>
+
+                        <div className="cm-benchmarks-dock__actions">
+                            <Button
+                                size="sm"
+                                onClick={() => setActiveTab("battle")}
+                                className="cm-benchmarks-dock__battle h-6 px-2.5 text-xs font-mono bg-cyan-500 hover:bg-cyan-400 text-black font-bold gap-1 shadow-md shadow-cyan-400/40"
+                            >
+                                <Scale className="w-3 h-3" />
+                                <span className="cm-benchmarks-dock__battle-label">Battle ({compareModelIds.length})</span>
+                            </Button>
+                        </div>
                     </div>
-                </div>
                 )
             )}
 
             {/* Attribution Bar */}
-            <div className="cm-benchmarks-attribution mt-2">
+            <div className="cm-benchmarks-attribution">
                 <span>
                     Powered by{" "}
                     <a
@@ -858,7 +923,7 @@ export function BenchmarksExplorer({
     if (variant === "dialog") {
         return (
             <Dialog open={open} onOpenChange={onOpenChange}>
-                <DialogContent className="w-[calc(100vw-2rem)] max-w-6xl max-h-[92dvh] flex flex-col p-0 bg-background/95 backdrop-blur-xl border border-cyan-500/30 shadow-2xl overflow-hidden font-sans">
+                <DialogContent className="w-[calc(100dvi-2rem)] max-w-6xl max-h-[92dvh] flex flex-col p-0 bg-background/95 backdrop-blur-xl border border-cyan-500/30 shadow-2xl overflow-hidden font-sans">
                     <div className="flex-1 overflow-y-auto p-4">
                         {content}
                     </div>
