@@ -8,7 +8,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@/components/ui/dropdown";
 
 function successTone(rate: number | null): "emerald" | "amber" | "danger" | undefined {
   if (rate === null) return undefined;
@@ -96,7 +96,7 @@ function buildStats(summary: Summary, spendSeries: number[]): StatDefinition[] {
       label: "Avg Latency",
       icon: Gauge,
       value: summary.avgLatencyMs !== null ? formatMs(summary.avgLatencyMs) : "—",
-      sub: `P95 ${formatMs(summary.p95LatencyMs ?? 0)}`,
+      sub: summary.p95LatencyMs !== null ? `P95 ${formatMs(summary.p95LatencyMs)}` : "P95 —",
     },
     {
       id: "ttft",
