@@ -20,7 +20,7 @@ import {
     DropdownMenuContent,
     DropdownMenuItem,
     DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@/components/ui/dropdown";
 import {
     ArrowRight,
     ExternalLink,
@@ -265,7 +265,7 @@ export function ModelComparisonView({
                                                     {candidate.isFrontier && <Flame className="w-3 h-3 text-fuchsia-400 shrink-0" />}
                                                     <span className="font-semibold text-foreground truncate">{cleanName}</span>
                                                 </div>
-                                                <span className="text-[10px] text-muted-foreground uppercase shrink-0 flex items-center gap-1">
+                                                <span className="text-xs text-muted-foreground uppercase shrink-0 flex items-center gap-1">
                                                     <FamilyLogo family={candidate.family} />
                                                     {candidate.family}
                                                 </span>
@@ -273,7 +273,7 @@ export function ModelComparisonView({
                                         );
                                     })}
                                     {filteredCandidates.length === 0 && (
-                                        <div className="py-4 text-center text-muted-foreground text-[11px]">
+                                        <div className="py-4 text-center text-muted-foreground text-xs">
                                             No matching candidate models found
                                         </div>
                                     )}
@@ -304,7 +304,7 @@ export function ModelComparisonView({
 
                             return (
                                 <div key={key} className="cm-benchmarks-battle__podium-card">
-                                    <div className="flex items-center justify-between text-[11px] text-cyan-400 font-bold">
+                                    <div className="flex items-center justify-between text-xs text-cyan-400 font-bold">
                                         <Hint label={metric?.label ?? key}>
                                             <span>{benchmarkMetricShortLabel(metric ?? { key, label: key })}</span>
                                         </Hint>
@@ -314,10 +314,10 @@ export function ModelComparisonView({
                                         {cleanName}
                                     </p>
                                     <div className="flex items-center gap-1.5 mt-0.5">
-                                        <Badge className="w-fit bg-cyan-500/20 text-cyan-300 border-cyan-500/40 text-[10px] py-0 px-1.5 font-mono">
+                                        <Badge className="w-fit bg-cyan-500/20 text-cyan-300 border-cyan-500/40 text-xs py-0 px-1.5 font-mono">
                                             {formatBenchmarkMetric(metric)}
                                         </Badge>
-                                        <span className="text-[10px] text-emerald-400 font-bold">Leader</span>
+                                        <span className="text-xs text-emerald-400 font-bold">Leader</span>
                                     </div>
                                 </div>
                             );
@@ -329,9 +329,9 @@ export function ModelComparisonView({
                         <div className="cm-benchmarks-battle__radar-card cm-benchmarks-snap-block p-3.5 rounded-xl bg-background/30 border border-primary/15">
                             <div className="flex items-center justify-between mb-1 text-xs font-mono">
                                 <span className="font-bold text-foreground">Relative Capability Profile</span>
-                                <span className="text-[10px] text-muted-foreground">Normalized / 100 among candidates</span>
+                                <span className="text-xs text-muted-foreground">Normalized / 100 among candidates</span>
                             </div>
-                            <BenchmarkRadarChart data={comparison.radarData} models={models} height="clamp(200px, 30cqh, 300px)" />
+                            <BenchmarkRadarChart data={comparison.radarData} models={models} height="clamp(12.5rem, 30cqb, 18.75rem)" />
                         </div>
                     )}
 
@@ -340,7 +340,7 @@ export function ModelComparisonView({
                         <table>
                             <caption className="sr-only">Head-to-head model benchmark comparison</caption>
                             <thead>
-                                <tr className="border-b border-primary/20 text-muted-foreground text-[11px] bg-background/80">
+                                <tr className="border-b border-primary/20 text-muted-foreground text-xs bg-background/80">
                                     <th scope="col">Benchmarks</th>
                                     {models.map((model, index) => {
                                         const cleanName = cleanBenchmarkDisplayName(model);
@@ -349,7 +349,7 @@ export function ModelComparisonView({
                                             <th scope="col" key={`${model.variant ?? "default"}:${model.sourceId}`} className={`font-bold ${modelTone(index).text}`}>
                                                 <div>{cleanName}</div>
                                                 {cleanParams.length > 0 && (
-                                                    <div className="text-[10px] font-normal text-muted-foreground">{cleanParams.join(", ")}</div>
+                                                    <div className="text-xs font-normal text-muted-foreground">{cleanParams.join(", ")}</div>
                                                 )}
                                             </th>
                                         );
@@ -444,7 +444,7 @@ export function ModelComparisonDialog({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="w-[calc(100vw-2rem)] max-w-4xl max-h-[92dvh] flex flex-col p-0 bg-background/95 backdrop-blur-xl border border-cyan-500/30 shadow-2xl overflow-hidden font-sans">
+            <DialogContent className="w-[calc(100dvi-2rem)] max-w-4xl max-h-[92dvh] flex flex-col p-0 bg-background/95 backdrop-blur-xl border border-cyan-500/30 shadow-2xl overflow-hidden font-sans">
                 <DialogHeader className="p-4 sm:p-5 border-b border-border/50 bg-background/60">
                     <DialogTitle className="font-display font-bold text-lg sm:text-xl text-foreground flex items-center gap-2">
                         <Scale className="w-5 h-5 text-cyan-400" />
