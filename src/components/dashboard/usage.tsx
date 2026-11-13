@@ -82,7 +82,7 @@ function toRows(timeline: TimelineBucket[]): Row[] {
 
 const AXIS_TICK = {
   fill: MUTED,
-  fontSize: 10,
+  fontSize: "var(--font-2xs)",
   fontFamily: "var(--font-mono), monospace",
 } as const;
 
@@ -165,12 +165,14 @@ function TimeAxis({ interval }: { interval: AnalyticsInterval }) {
       type="number"
       scale="time"
       domain={["dataMin", "dataMax"]}
+      padding={{ left: 6, right: 16 }}
       tickFormatter={(value: number) => tickTime(value, interval)}
       tick={AXIS_TICK}
       tickLine={false}
       axisLine={{ stroke: "hsl(var(--primary) / 0.12)" }}
-      minTickGap={32}
-      tickMargin={6}
+      minTickGap={26}
+      tickMargin={5}
+      height={24}
     />
   );
 }
@@ -205,7 +207,7 @@ export function UsageChart({
     <div className="cm-chart-frame">
       <ResponsiveContainer width="100%" height="100%">
         {tab === "spend" ? (
-          <AreaChart data={rows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+          <AreaChart data={rows} margin={{ top: 6, right: 14, bottom: 4, left: 2 }}>
             <defs>
               <linearGradient id={`${gradientId}-spend`} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor={CYAN} stopOpacity="0.32" />
@@ -215,8 +217,8 @@ export function UsageChart({
             {grid}
             {xAxis}
             <YAxis
-              width={44}
-              tickFormatter={(value: number) => (value >= 1 ? `$${numberLabel(value)}` : `$${value.toFixed(3)}`)}
+              width={52}
+              tickFormatter={(value: number) => (value === 0 ? "$0" : value >= 1 ? `$${numberLabel(value)}` : `$${value.toFixed(3)}`)}
               tick={AXIS_TICK}
               tickLine={false}
               axisLine={false}
@@ -233,26 +235,26 @@ export function UsageChart({
             />
           </AreaChart>
         ) : tab === "requests" ? (
-          <BarChart data={rows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+          <BarChart data={rows} margin={{ top: 6, right: 14, bottom: 4, left: 2 }}>
             {grid}
             {xAxis}
-            <YAxis width={44} tickFormatter={numberLabel} tick={AXIS_TICK} tickLine={false} axisLine={false} allowDecimals={false} />
+            <YAxis width={36} tickFormatter={numberLabel} tick={AXIS_TICK} tickLine={false} axisLine={false} allowDecimals={false} />
             {tooltip}
             <Bar dataKey="succeeded" stackId="requests" fill={EMERALD} maxBarSize={26} />
             <Bar dataKey="failed" stackId="requests" fill={RED} maxBarSize={26} />
             <Bar dataKey="aborted" stackId="requests" fill={AMBER} maxBarSize={26} radius={[2, 2, 0, 0]} />
           </BarChart>
         ) : tab === "tokens" && hasTokenSplit ? (
-          <BarChart data={rows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+          <BarChart data={rows} margin={{ top: 6, right: 14, bottom: 4, left: 2 }}>
             {grid}
             {xAxis}
-            <YAxis width={44} tickFormatter={formatTokens} tick={AXIS_TICK} tickLine={false} axisLine={false} />
+            <YAxis width={40} tickFormatter={formatTokens} tick={AXIS_TICK} tickLine={false} axisLine={false} />
             {tooltip}
             <Bar dataKey="tokensIn" stackId="tokens" fill={CYAN} maxBarSize={26} />
             <Bar dataKey="tokensOut" stackId="tokens" fill={FUCHSIA} maxBarSize={26} radius={[2, 2, 0, 0]} />
           </BarChart>
         ) : tab === "tokens" ? (
-          <AreaChart data={rows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+          <AreaChart data={rows} margin={{ top: 6, right: 14, bottom: 4, left: 2 }}>
             <defs>
               <linearGradient id={`${gradientId}-tokens`} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor={CYAN} stopOpacity="0.28" />
@@ -261,7 +263,7 @@ export function UsageChart({
             </defs>
             {grid}
             {xAxis}
-            <YAxis width={44} tickFormatter={formatTokens} tick={AXIS_TICK} tickLine={false} axisLine={false} />
+            <YAxis width={40} tickFormatter={formatTokens} tick={AXIS_TICK} tickLine={false} axisLine={false} />
             {tooltip}
             <Area
               type="monotone"
@@ -274,10 +276,10 @@ export function UsageChart({
             />
           </AreaChart>
         ) : (
-          <LineChart data={rows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+          <LineChart data={rows} margin={{ top: 6, right: 14, bottom: 4, left: 2 }}>
             {grid}
             {xAxis}
-            <YAxis width={44} tickFormatter={(value: number) => formatMs(value)} tick={AXIS_TICK} tickLine={false} axisLine={false} />
+            <YAxis width={42} tickFormatter={(value: number) => formatMs(value)} tick={AXIS_TICK} tickLine={false} axisLine={false} />
             {tooltip}
             <Line type="monotone" dataKey="p50" stroke={CYAN} strokeWidth={1.6} dot={false} connectNulls activeDot={{ r: 3, fill: CYAN, stroke: "none" }} />
             <Line type="monotone" dataKey="p95" stroke={AMBER} strokeWidth={1.4} dot={false} connectNulls activeDot={{ r: 3, fill: AMBER, stroke: "none" }} />
