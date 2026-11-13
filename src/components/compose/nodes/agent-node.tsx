@@ -5,52 +5,12 @@
  * Features multi-directional handles on all 4 sides for flexible connections.
  */
 
-import { Handle, Position, useNodeId, useReactFlow } from "@xyflow/react";
+import { Position, useNodeId, useReactFlow } from "@xyflow/react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Bot, Loader2, CheckCircle2, XCircle, Sparkles, Shield, Plus } from "lucide-react";
-import { inputHandleStyle, outputHandleStyle, type AgentNodeData } from "./index";
-
-// Custom handle that shows "+" when not connected  
-const DirectionalHandle = ({
-    type,
-    position,
-    id,
-    isConnected = false,
-    isManowar = false,
-}: {
-    type: "source" | "target";
-    position: Position;
-    id: string;
-    isConnected?: boolean;
-    isManowar?: boolean;
-}) => {
-    const baseStyle = type === "source" ? outputHandleStyle : inputHandleStyle;
-    // Use fuchsia for external agents
-    const customStyle = !isManowar && type === "source"
-        ? baseStyle.replace("fuchsia", "fuchsia")
-        : baseStyle;
-
-    const positionStyles: Record<Position, string> = {
-        [Position.Left]: "!-left-2.5",
-        [Position.Right]: "!-right-2.5",
-        [Position.Top]: "!-top-2.5",
-        [Position.Bottom]: "!-bottom-2.5",
-    };
-
-    return (
-        <Handle
-            type={type}
-            position={position}
-            id={`${id}-${position}`}
-            className={`${customStyle} ${positionStyles[position]} ${!isConnected ? "!bg-muted flex items-center justify-center" : ""}`}
-        >
-            {!isConnected && (
-                <Plus className="w-2.5 h-2.5 text-muted-foreground pointer-events-none" />
-            )}
-        </Handle>
-    );
-};
+import { Bot, Loader2, CheckCircle2, XCircle, Sparkles, Shield } from "lucide-react";
+import { DirectionalHandle } from "./handle";
+import type { AgentNodeData } from "./index";
 
 export function AgentNode({ data }: { data: AgentNodeData }) {
     const { agent, status = "pending", error } = data;
@@ -75,7 +35,7 @@ export function AgentNode({ data }: { data: AgentNodeData }) {
 
     const statusStyles = {
         pending: isManowar ? "border-cyan-500/40 bg-cyan-500/5" : "border-fuchsia-500/40 bg-fuchsia-500/5",
-        running: "border-cyan-500 bg-cyan-500/10 shadow-[0_0_25px_-5px_hsl(188_95%_43%/0.5)]",
+        running: "border-cyan-500 bg-cyan-500/10 shadow-lg shadow-cyan-500/35",
         success: "border-green-500 bg-green-500/5",
         error: "border-red-500 bg-red-500/5",
     };
@@ -83,10 +43,10 @@ export function AgentNode({ data }: { data: AgentNodeData }) {
     return (
         <div className={`relative w-64 rounded-lg border-2 backdrop-blur-md overflow-visible group transition-all duration-200 hover:scale-[1.02] ${statusStyles[status]}`}>
             {/* Multi-directional handles */}
-            <DirectionalHandle type="target" position={Position.Left} id={nodeId || ""} isConnected={leftConnected} isManowar={isManowar} />
-            <DirectionalHandle type="source" position={Position.Right} id={nodeId || ""} isConnected={rightConnected} isManowar={isManowar} />
-            <DirectionalHandle type="target" position={Position.Top} id={nodeId || ""} isConnected={topConnected} isManowar={isManowar} />
-            <DirectionalHandle type="source" position={Position.Bottom} id={nodeId || ""} isConnected={bottomConnected} isManowar={isManowar} />
+            <DirectionalHandle type="target" position={Position.Left} id={nodeId || ""} isConnected={leftConnected} />
+            <DirectionalHandle type="source" position={Position.Right} id={nodeId || ""} isConnected={rightConnected} />
+            <DirectionalHandle type="target" position={Position.Top} id={nodeId || ""} isConnected={topConnected} />
+            <DirectionalHandle type="source" position={Position.Bottom} id={nodeId || ""} isConnected={bottomConnected} />
 
             {/* Colored header bar */}
             <div className={`h-1.5 w-full ${isManowar ? "bg-gradient-to-r from-cyan-500 to-cyan-400" : "bg-gradient-to-r from-fuchsia-500 to-fuchsia-400"}`} />
@@ -108,7 +68,7 @@ export function AgentNode({ data }: { data: AgentNodeData }) {
                             {isManowar && <Sparkles className="w-3.5 h-3.5 text-cyan-400 shrink-0" />}
                             {agent.verified && !isManowar && <Shield className="w-3.5 h-3.5 text-green-400 shrink-0" />}
                         </div>
-                        <p className="text-[10px] text-muted-foreground truncate font-mono">
+                        <p className="text-xs text-muted-foreground truncate font-mono">
                             {agent.protocols?.[0]?.name || "default"}
                         </p>
                     </div>
@@ -118,7 +78,7 @@ export function AgentNode({ data }: { data: AgentNodeData }) {
                 </div>
 
                 {error && (
-                    <div className="text-[10px] text-red-400 font-mono bg-red-500/10 p-1.5 rounded mt-2 truncate">
+                    <div className="text-xs text-red-400 font-mono bg-red-500/10 p-1.5 rounded mt-2 truncate">
                         {error}
                     </div>
                 )}
@@ -126,7 +86,7 @@ export function AgentNode({ data }: { data: AgentNodeData }) {
                 <div className="flex justify-between items-center mt-2 pt-2 border-t border-sidebar-border/50">
                     <Badge
                         variant="outline"
-                        className={`text-[9px] h-4 px-1.5 font-mono ${isManowar ? "border-cyan-500/30 text-cyan-400" : "border-fuchsia-500/30 text-fuchsia-400"}`}
+                        className={`text-xs h-4 px-1.5 font-mono ${isManowar ? "border-cyan-500/30 text-cyan-400" : "border-fuchsia-500/30 text-fuchsia-400"}`}
                     >
                         {isManowar ? "on-chain" : agent.registry}
                     </Badge>
