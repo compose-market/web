@@ -51,7 +51,9 @@ function RequestsList({ requests, filter, focused }: {
               {row.model}
             </span>
             <span className="cm-receipt-item__meta">
-              <span className="cm-settlement-badge" data-tone="violet">{formatMs(row.latencyMs)}</span>
+              {(row.latencyMs > 0 || row.ttftMs === null) && (
+                <span className="cm-settlement-badge" data-tone="violet">{formatMs(row.latencyMs)}</span>
+              )}
               {row.ttftMs !== null && (
                 <span className="cm-settlement-badge" data-tone="emerald">TTFT {formatMs(row.ttftMs)}</span>
               )}
