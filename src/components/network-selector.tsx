@@ -44,12 +44,12 @@ export function NetworkSelector({
 
     const currentChain = getChainByNetworkId(selectedNetwork);
     const colorClass = currentChain?.isTestnet
-        ? "border-red-500/50 text-red-400"
-        : "border-blue-500/50 text-blue-400";
+        ? "border-amber-500/40 text-amber-300"
+        : "border-primary/35 text-foreground";
 
     if (compact) {
         return (
-            <Select value={selectedNetwork} onValueChange={handleChange}>
+            <Select value={selectedNetwork ?? undefined} onValueChange={handleChange}>
                 <SelectTrigger
                     className={cn(
                         "cm-hud-button font-mono text-xs",
@@ -85,7 +85,7 @@ export function NetworkSelector({
     }
 
     return (
-        <Select value={selectedNetwork} onValueChange={handleChange}>
+        <Select value={selectedNetwork ?? undefined} onValueChange={handleChange}>
             <SelectTrigger
                 className={cn(
                     "w-full border bg-background/50 font-mono text-sm",
@@ -102,15 +102,15 @@ export function NetworkSelector({
                 {chains.map((network) => {
                     const balance = balances?.find(b => b.network === network.network);
                     return (
-                        <SelectItem key={network.network} value={network.network} className="font-mono">
-                            <div className="flex items-center justify-between gap-4 w-full min-w-[200px]">
+                        <SelectItem key={network.network} value={network.network} className="font-mono text-sm">
+                            <div className="flex items-center justify-between gap-4 w-full">
                                 <div className="flex items-center gap-2">
                                     <NetworkGlyph network={network.network} name={network.name} />
                                     <span>{network.name}</span>
                                 </div>
                                 {showBalance && balance && (
                                     <span className="text-muted-foreground text-xs">
-                                        ${balance.formatted} USDC
+                                        ${balance.formatted} {network.asset}
                                     </span>
                                 )}
                             </div>
@@ -126,13 +126,13 @@ export function NetworkBadge({ network, className }: { network: NetworkId; class
     const { getChainByNetworkId } = useChain();
     const config = getChainByNetworkId(network);
     const colorClass = config?.isTestnet
-        ? "border-red-500/30 text-red-400 bg-red-500/10"
-        : "border-blue-500/30 text-blue-400 bg-blue-500/10";
+        ? "border-amber-500/35 text-amber-300 bg-amber-500/10"
+        : "border-primary/35 text-primary bg-primary/10";
 
     return (
         <div
             className={cn(
-                "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-xs font-mono",
+                "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm border text-2xs leading-tight whitespace-nowrap shrink-0 font-mono",
                 colorClass,
                 className
             )}
