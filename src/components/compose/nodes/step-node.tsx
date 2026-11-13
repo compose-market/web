@@ -5,46 +5,11 @@
  * Features multi-directional handles on all 4 sides for flexible connections.
  */
 
-import { Handle, Position, useNodeId, useReactFlow } from "@xyflow/react";
+import { Position, useNodeId, useReactFlow } from "@xyflow/react";
 import { Badge } from "@/components/ui/badge";
-import { Plug, Loader2, CheckCircle2, XCircle, Wrench, Plus } from "lucide-react";
-import { inputHandleStyle, outputHandleStyle, type StepNodeData } from "./index";
-
-// Custom handle that shows "+" when not connected  
-const DirectionalHandle = ({
-    type,
-    position,
-    id,
-    isConnected = false,
-}: {
-    type: "source" | "target";
-    position: Position;
-    id: string;
-    isConnected?: boolean;
-}) => {
-    const baseStyle = type === "source" ? outputHandleStyle : inputHandleStyle;
-
-    // Position offsets for each side
-    const positionStyles: Record<Position, string> = {
-        [Position.Left]: "!-left-2.5",
-        [Position.Right]: "!-right-2.5",
-        [Position.Top]: "!-top-2.5",
-        [Position.Bottom]: "!-bottom-2.5",
-    };
-
-    return (
-        <Handle
-            type={type}
-            position={position}
-            id={`${id}-${position}`}
-            className={`${baseStyle} ${positionStyles[position]} ${!isConnected ? "!bg-muted flex items-center justify-center" : ""}`}
-        >
-            {!isConnected && (
-                <Plus className="w-2.5 h-2.5 text-muted-foreground pointer-events-none" />
-            )}
-        </Handle>
-    );
-};
+import { Plug, Loader2, CheckCircle2, XCircle, Wrench } from "lucide-react";
+import { DirectionalHandle } from "./handle";
+import type { StepNodeData } from "./index";
 
 export function StepNode({ data }: { data: StepNodeData }) {
     const nodeId = useNodeId();
@@ -59,7 +24,7 @@ export function StepNode({ data }: { data: StepNodeData }) {
 
     const statusStyles = {
         pending: "border-sidebar-border bg-card/80",
-        running: "border-cyan-500 bg-cyan-500/5 shadow-[0_0_25px_-5px_hsl(188_95%_43%/0.4)]",
+        running: "border-cyan-500 bg-cyan-500/5 shadow-lg shadow-cyan-500/30",
         success: "border-green-500 bg-green-500/5",
         error: "border-red-500 bg-red-500/5",
     };
@@ -92,7 +57,7 @@ export function StepNode({ data }: { data: StepNodeData }) {
                         <h3 className="font-bold font-display text-sm truncate text-foreground leading-tight">
                             {data.step.name}
                         </h3>
-                        <p className="text-[10px] text-muted-foreground truncate font-mono">
+                        <p className="text-xs text-muted-foreground truncate font-mono">
                             {data.step.connectorId}
                         </p>
                     </div>
@@ -102,13 +67,13 @@ export function StepNode({ data }: { data: StepNodeData }) {
                 </div>
 
                 {data.error && (
-                    <div className="text-[10px] text-red-400 font-mono bg-red-500/10 p-1.5 rounded mt-2 truncate">
+                    <div className="text-xs text-red-400 font-mono bg-red-500/10 p-1.5 rounded mt-2 truncate">
                         {data.error}
                     </div>
                 )}
 
                 <div className="flex justify-between items-center mt-2 pt-2 border-t border-sidebar-border/50">
-                    <Badge variant="outline" className="text-[9px] h-4 px-1.5 border-cyan-500/30 text-cyan-400 font-mono">
+                    <Badge variant="outline" className="text-xs h-4 px-1.5 border-cyan-500/30 text-cyan-400 font-mono">
                         {data.step.toolName}
                     </Badge>
                     <Wrench className="w-3 h-3 text-muted-foreground/50" />
