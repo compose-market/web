@@ -11,7 +11,6 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Loader2, Filter, Star, Shield, Sparkles, ExternalLink } from "lucide-react";
 import { useAgents } from "@/hooks/use-agents";
 import { getIpfsUrl } from "@/lib/pinata";
@@ -63,10 +62,10 @@ export function AgentsPicker({ onSelect }: AgentsPickerProps) {
     }, [data?.tags]);
 
     return (
-        <div className="space-y-4">
+        <div className="space-y-3">
             {/* Filter by Tag */}
-            <div>
-                <Label className="text-xs font-mono text-muted-foreground mb-2 block">FILTER BY TAG</Label>
+            <div className="snap-start">
+                <Label className="text-xs font-mono text-muted-foreground mb-1.5 block">FILTER BY TAG</Label>
                 <Select value={selectedTag} onValueChange={setSelectedTag}>
                     <SelectTrigger className="w-full bg-background/50 border-sidebar-border text-sm">
                         <Filter className="w-3 h-3 mr-2 text-muted-foreground" />
@@ -85,7 +84,7 @@ export function AgentsPicker({ onSelect }: AgentsPickerProps) {
 
             {/* Agent List */}
             <div>
-                <Label className="text-xs font-mono text-muted-foreground mb-2 block">
+                <Label className="text-xs font-mono text-muted-foreground mb-1.5 block">
                     SELECT AGENT {manowarAgents.length > 0 && `(${manowarAgents.length} on-chain)`}
                 </Label>
                 {isLoading ? (
@@ -100,19 +99,17 @@ export function AgentsPicker({ onSelect }: AgentsPickerProps) {
                 ) : allAgents.length === 0 ? (
                     <div className="text-sm text-muted-foreground">No agents found</div>
                 ) : (
-                    <ScrollArea className="h-56">
-                        <div className="space-y-2 pr-2">
-                            {allAgents.map((agent) => (
-                                <AgentPickerCard key={agent.id} agent={agent} onSelect={onSelect} />
-                            ))}
-                        </div>
-                    </ScrollArea>
+                    <div className="space-y-1.5">
+                        {allAgents.map((agent) => (
+                            <AgentPickerCard key={agent.id} agent={agent} onSelect={onSelect} />
+                        ))}
+                    </div>
                 )}
             </div>
 
             {/* Browse More Link */}
-            <div className="pt-2 border-t border-sidebar-border">
-                <Link href="/agents">
+            <div className="pt-2 border-t border-sidebar-border snap-start">
+                <Link href="/market">
                     <Button
                         variant="ghost"
                         size="sm"
@@ -163,12 +160,12 @@ export function AgentPickerCard({ agent, onSelect }: AgentPickerCardProps) {
                 e.dataTransfer.setData("application/compose-agent", JSON.stringify(agent));
                 e.dataTransfer.effectAllowed = "copy";
             }}
-            className={`w-full p-2 rounded-sm border bg-background/30 hover:border-fuchsia-500/50 hover:bg-fuchsia-500/5 transition-all text-left group cursor-grab active:cursor-grabbing ${isManowar ? "border-cyan-500/30" : "border-sidebar-border"}`}
+            className={`w-full p-2 rounded-sm border bg-background/30 hover:border-fuchsia-500/50 hover:bg-fuchsia-500/5 transition-all text-left group cursor-grab active:cursor-grabbing snap-start ${isManowar ? "border-cyan-500/30" : "border-sidebar-border"}`}
         >
             <div className="flex items-start gap-2">
                 <Avatar className={`w-8 h-8 border group-hover:border-fuchsia-500/50 ${isManowar ? "border-cyan-500/50" : "border-sidebar-border"}`}>
                     <AvatarImage src={resolvedAvatarUrl || undefined} alt={agent.name} />
-                    <AvatarFallback className={`font-mono text-[10px] ${isManowar ? "bg-cyan-500/10 text-cyan-400" : "bg-fuchsia-500/10 text-fuchsia-400"}`}>
+                    <AvatarFallback className={`font-mono text-xs ${isManowar ? "bg-cyan-500/10 text-cyan-400" : "bg-fuchsia-500/10 text-fuchsia-400"}`}>
                         {initials}
                     </AvatarFallback>
                 </Avatar>
@@ -184,7 +181,7 @@ export function AgentPickerCard({ agent, onSelect }: AgentPickerCardProps) {
                             <Shield className="w-3 h-3 text-green-400 shrink-0" />
                         )}
                     </div>
-                    <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         {isManowar ? (
                             <span className="text-cyan-400">on-chain</span>
                         ) : (
