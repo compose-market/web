@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useDeferredValue } from "react";
 import { Link, useLocation } from "wouter";
-import { usePostHog } from "@posthog/react";
 import { Excerpt } from "@compose-market/theme/shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -38,14 +37,16 @@ import { useAgentCatalog } from "@/hooks/use-agents";
 import { agentKey, toOnchainAgent } from "@/lib/agents";
 import { getIpfsUrl } from "@/lib/pinata";
 import { evmChainId, getChainByNetwork, isEvmNetwork } from "@/lib/chains";
-import { formatUsdcPrice, getContractAddress, getRFAContract, weiToUsdc } from "@/lib/contracts";
+import { formatUsdcPrice, getContractAddress, getRFAContractForChain, weiToUsdc } from "@/lib/contracts";
+import { useChain } from "@/contexts/Network";
 import { useTabs } from "@/hooks/use-tabs";
 import { RFADetails } from "@/components/RFADetails";
 import { ShareSuccessDialog } from "@/components/share";
 import { getMintSuccessForShare, clearMintSuccessShare, type MintShareData } from "@/lib/share";
-import { AgentCard as SharedAgentCard, AgentCardSkeleton as SharedAgentCardSkeleton } from "@/components/agent-card";
+import { AgentCard as SharedAgentCard, AgentCardSkeleton as SharedAgentCardSkeleton } from "@/components/identikit";
 import { Ordering, SearchFold, Switcher, type Option } from "@/components/control";
-import { WorkflowCard as WorkflowCardShell, WorkflowCardSkeleton } from "@compose-market/theme/workflows";
+import { WalletConnector } from "@/components/connector";
+import { WorkflowCardShell, WorkflowCardSkeleton } from "@/components/workflow-card";
 
 type AgentSort = "newest" | "price-low" | "price-high";
 type WorkflowSort = "newest" | "price-low" | "price-high";
@@ -56,12 +57,6 @@ type TabStatus = {
   busy: boolean;
 };
 
-const tabs: Option<AssetTab>[] = [
-  { value: "agents", label: "Agents", icon: Bot },
-  { value: "workflows", label: "Workflows", icon: Layers },
-  { value: "rfas", label: "RFAs", icon: Award },
-];
-
 const orders: Option<AgentSort>[] = [
   { value: "newest", label: "Newest", icon: Clock },
   { value: "price-low", label: "Price: Low to High", icon: DollarSign },
@@ -71,7 +66,7 @@ const orders: Option<AgentSort>[] = [
 export default function MyAssetsPage() {
   const { toast } = useToast();
   const account = useActiveAccount();
-  const [activeTab, setActiveTab] = useTabs("my-assets", "agents");
+  const [activeTab, setActiveTab] = useTabs("profile", "agents");
   const tab: AssetTab = activeTab === "workflows" || activeTab === "rfas" ? activeTab : "agents";
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -143,6 +138,7 @@ export default function MyAssetsPage() {
 
   // RFA detail dialog state
   const [selectedRfaId, setSelectedRfaId] = useState<number | null>(null);
+  const [selectedRfaChainId, setSelectedRfaChainId] = useState<number | undefined>(undefined);
   const [showRFADetails, setShowRFADetails] = useState(false);
 
   // Share success dialog state
@@ -174,25 +170,16 @@ export default function MyAssetsPage() {
     }
   };
 
-  const copyAddress = (address: string) => {
-    navigator.clipboard.writeText(address);
-    toast({ title: "Address copied!" });
-  };
-
-  const handleRefresh = () => {
-    refreshers.current[tab]?.();
-  };
-
   if (!account) {
     return (
       <div className="cm-web-page">
-        <div className="cm-web-page__canvas cm-workspace-canvas--fade">
+        <div className="cm-web-page__canvas cm-web-page__canvas--scroll cm-workspace-canvas--fade">
           <div className="cm-web-page__body cm-web-page__body--narrow">
             <div className="cm-shell-page-header px-0">
               <div className="cm-shell-page-header__copy">
                 <h1 className="cm-shell-page-header__title">
                   <span className="text-cyan-500 mr-2">//</span>
-                  MY ASSETS
+                  PROFILE
                 </h1>
                 <p className="cm-shell-page-header__subtitle">
                   View and manage your on-chain agents and workflows.
@@ -201,12 +188,15 @@ export default function MyAssetsPage() {
             </div>
 
             <Card className="glass-panel border-primary/20">
-              <CardContent className="p-6 sm:p-8 text-center space-y-3">
+              <CardContent className="p-6 sm:p-8 text-center space-y-4">
                 <Shield className="w-12 h-12 sm:w-16 sm:h-16 mx-auto text-muted-foreground/50" />
                 <h2 className="text-lg sm:text-xl font-display text-foreground">Sign In Required</h2>
                 <p className="text-muted-foreground font-mono text-xs sm:text-sm max-w-md mx-auto">
                   Connect with email, social, or wallet to view your on-chain assets.
                 </p>
+                <div className="flex justify-center pt-1">
+                  <WalletConnector />
+                </div>
               </CardContent>
             </Card>
           </div>
@@ -222,7 +212,7 @@ export default function MyAssetsPage() {
           <div className="cm-market-control-rail__brand">
             <h1 className="cm-page-header__title cm-market-control-rail__title">
               <span className="text-cyan-500 mr-2">//</span>
-              MY ASSETS
+              PROFILE
             </h1>
           </div>
 
@@ -249,7 +239,7 @@ export default function MyAssetsPage() {
             {tab === "workflows" ? (
               <Ordering value={workflowSort} options={orders} onChange={setWorkflowSort} />
             ) : null}
-            <Link href="/create-agent">
+            <Link href="/create">
               <Button size="sm" className="bg-cyan-500 text-black hover:bg-cyan-400 font-bold font-mono text-xs h-9 px-2 sm:px-3">
                 <Plus className="w-3.5 h-3.5 sm:mr-1" />
                 <span className="hidden sm:inline">CREATE</span>
@@ -290,8 +280,9 @@ export default function MyAssetsPage() {
               publisher={account.address}
               searchQuery={deferredQuery}
               onStatus={onStatus}
-              onView={(id) => {
+              onView={(id, chainId) => {
                 setSelectedRfaId(id);
+                setSelectedRfaChainId(chainId);
                 setShowRFADetails(true);
               }}
             />
@@ -307,6 +298,7 @@ export default function MyAssetsPage() {
 
       <RFADetails
         rfaId={selectedRfaId}
+        chainId={selectedRfaChainId}
         open={showRFADetails}
         onOpenChange={setShowRFADetails}
       />
@@ -394,7 +386,7 @@ function AssetAgentsTab({
             {visibleAgents.map((agent) => (
               <div
                 key={agent.walletAddress || `agent-${agent.id}`}
-                className="cm-market-agent-slot [content-visibility:auto] [contain-intrinsic-size:360px]"
+                className="cm-market-agent-slot"
               >
                 <AgentAssetCard agent={agent} />
               </div>
@@ -420,7 +412,7 @@ function AssetAgentsTab({
           <p className="text-muted-foreground text-sm sm:text-base">
             No agents minted by this account yet
           </p>
-          <Link href="/create-agent">
+          <Link href="/create">
             <Button className="mt-4 bg-cyan-500 text-black hover:bg-cyan-400 font-bold font-mono text-sm">
               <Plus className="w-4 h-4 mr-2" />
               CREATE AGENT
@@ -527,7 +519,7 @@ function RFAsTab({
   publisher: string;
   searchQuery: string;
   onStatus: (tab: AssetTab, status: TabStatus & { refresh?: () => void }) => void;
-  onView: (id: number) => void;
+  onView: (id: number, chainId?: number) => void;
 }) {
   const { data: rfas, isLoading: isLoadingRFAs, refetch: refetchRFAs } = useRFAsByPublisher(publisher);
   const filteredRFAs = useMemo(() => {
@@ -566,9 +558,9 @@ function RFAsTab({
         <div className="cm-market-row-grid">
           {filteredRFAs.map((rfa) => (
             <RFAAssetCard
-              key={rfa.id}
+              key={`${rfa.chainId ?? "default"}:${rfa.id}`}
               rfa={rfa}
-              onViewDetails={() => onView(rfa.id)}
+              onViewDetails={() => onView(rfa.id, rfa.chainId)}
               onRefresh={refetchRFAs}
             />
           ))}
@@ -602,7 +594,7 @@ function AgentAssetCard({ agent }: { agent: OnchainAgent }) {
   // Agent page URL using wallet address (primary) or ID (fallback)
   const agentPageUrl = agent.walletAddress
     ? `/agent/${agent.walletAddress}`
-    : agent.id > 0 ? `/agent/${agent.id}` : "/agents";
+    : agent.id > 0 ? `/agent/${agent.id}` : "/market";
 
   return (
     <SharedAgentCard
@@ -649,23 +641,23 @@ function WorkflowAssetCard({ workflow }: { workflow: OnchainWorkflow }) {
         )}
         badges={(
           <>
-            <Badge variant="outline" className="text-[8px] sm:text-[10px] font-mono border-fuchsia-500/30 text-fuchsia-400 bg-fuchsia-500/10 px-1 sm:px-1.5 py-0">
+            <Badge variant="outline" className="text-xs font-mono border-fuchsia-500/30 text-fuchsia-400 bg-fuchsia-500/10 px-1 sm:px-1.5 py-0">
               <Sparkles className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
               nestable NFT
             </Badge>
             {workflow.leaseEnabled && (
-              <Badge variant="outline" className="text-[8px] sm:text-[10px] font-mono border-green-500/30 text-green-400 bg-green-500/10 px-1 sm:px-1.5 py-0">
+              <Badge variant="outline" className="text-xs font-mono border-green-500/30 text-green-400 bg-green-500/10 px-1 sm:px-1.5 py-0">
                 <Clock className="w-2 h-2 sm:w-2.5 sm:h-2.5 mr-0.5 sm:mr-1" />
                 leasable ({workflow.leasePercent}%)
               </Badge>
             )}
             {workflow.hasActiveRfa && (
-              <Badge variant="outline" className="text-[8px] sm:text-[10px] font-mono border-yellow-500/30 text-yellow-400 bg-yellow-500/10 px-1 sm:px-1.5 py-0">
+              <Badge variant="outline" className="text-xs font-mono border-yellow-500/30 text-yellow-400 bg-yellow-500/10 px-1 sm:px-1.5 py-0">
                 active RFA
               </Badge>
             )}
             {workflow.coordinatorModel && (
-              <Badge variant="outline" className="text-[8px] sm:text-[10px] font-mono border-purple-500/30 text-purple-400 bg-purple-500/10 px-1 sm:px-1.5 py-0">
+              <Badge variant="outline" className="text-xs font-mono border-purple-500/30 text-purple-400 bg-purple-500/10 px-1 sm:px-1.5 py-0">
                 + coordinator
               </Badge>
             )}
@@ -692,7 +684,7 @@ function RFAAssetCard({
   onRefresh: () => void;
 }) {
   const { toast } = useToast();
-  const posthog = usePostHog();
+  const { paymentNetwork } = useChain();
   const { mutateAsync: sendTransaction, isPending } = useSendTransaction();
   const [isCancelling, setIsCancelling] = useState(false);
 
@@ -705,8 +697,12 @@ function RFAAssetCard({
 
     try {
       setIsCancelling(true);
+      const targetChainId = rfa.chainId ?? (isEvmNetwork(paymentNetwork) ? evmChainId(paymentNetwork) : null);
+      if (!targetChainId) {
+        throw new Error("Select an EVM network to cancel this RFA");
+      }
 
-      const contract = getRFAContract();
+      const contract = getRFAContractForChain(targetChainId);
       const tx = prepareContractCall({
         contract,
         method: "function cancelRFA(uint256 rfaId)",
@@ -714,13 +710,6 @@ function RFAAssetCard({
       });
 
       await sendTransaction(tx);
-
-      posthog?.capture("rfa_cancelled", {
-        rfa_id: rfa.id,
-        rfa_title: rfa.title,
-        offer_amount: rfa.offerAmount,
-        workflow_id: rfa.workflowId,
-      });
 
       onRefresh();
     } catch (error) {
@@ -752,10 +741,10 @@ function RFAAssetCard({
         description={rfa.description}
         badges={(
           <>
-            <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-[9px]">
+            <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-xs">
               RFA #{rfa.id}
             </Badge>
-            <Badge variant="outline" className={`text-[9px] ${statusColor}`}>
+            <Badge variant="outline" className={`text-xs ${statusColor}`}>
               {rfa.status === 'Open' && <Clock className="w-2 h-2 mr-1" />}
               {rfa.status === 'Fulfilled' && <CheckCircle className="w-2 h-2 mr-1" />}
               {rfa.status === 'Cancelled' && <XCircle className="w-2 h-2 mr-1" />}
@@ -801,7 +790,7 @@ function RFAAssetCard({
             )}
 
             {rfa.status === 'Fulfilled' && (
-              <div className="flex items-center gap-2 p-2 rounded-sm bg-cyan-500/5 border border-cyan-500/20 text-[10px] w-full mt-2">
+              <div className="flex items-center gap-2 p-2 rounded-sm bg-cyan-500/5 border border-cyan-500/20 text-xs w-full mt-2">
                 <CheckCircle className="w-3 h-3 text-cyan-400" />
                 <span className="text-cyan-400">Fulfilled by Agent #{rfa.fulfilledByAgentId}</span>
               </div>
