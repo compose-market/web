@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
     Dialog,
     DialogContent,
@@ -162,7 +161,7 @@ export function ConnectorDetailDialog({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-2xl bg-card border-cyan-500/30">
+            <DialogContent className="cm-dialog-panel max-w-2xl bg-card border-cyan-500/30">
                 <DialogHeader>
                     <div className="flex items-center gap-3">
                         <div className={`w-10 h-10 rounded-sm flex items-center justify-center border ${style.bg} ${style.border}`}>
@@ -211,7 +210,7 @@ export function ConnectorDetailDialog({
                     {server.tags.length > 0 && (
                         <div className="flex flex-wrap gap-1">
                             {server.tags.slice(0, 8).map((tag) => (
-                                <span key={tag} className="text-[10px] text-muted-foreground">
+                                <span key={tag} className="text-xs text-muted-foreground">
                                     #{tag}
                                 </span>
                             ))}
@@ -224,25 +223,24 @@ export function ConnectorDetailDialog({
                             <Label className="text-xs font-mono text-muted-foreground mb-2 block">
                                 AVAILABLE TOOLS ({tools.length})
                             </Label>
-                            <ScrollArea className="h-32">
-                                <div className="space-y-1 pr-2">
-                                    {tools.map((tool) => (
-                                        <button
-                                            key={tool.name}
-                                            onClick={() => setSelectedTool(tool.name)}
-                                            className={`w-full text-left p-2 rounded-sm border transition-all ${selectedTool === tool.name
-                                                ? "border-cyan-500/50 bg-cyan-500/10"
-                                                : "border-sidebar-border hover:border-cyan-500/30"
-                                                }`}
-                                        >
-                                            <div className="font-mono text-xs text-cyan-400">{tool.name}</div>
-                                            {tool.description && (
-                                                <p className="text-[10px] text-muted-foreground mt-0.5">{tool.description}</p>
-                                            )}
-                                        </button>
-                                    ))}
-                                </div>
-                            </ScrollArea>
+                            <div className="max-h-36 overflow-y-auto overscroll-contain snap-y snap-mandatory space-y-1 pr-1">
+                                {tools.map((tool) => (
+                                    <button
+                                        type="button"
+                                        key={tool.name}
+                                        onClick={() => setSelectedTool(tool.name)}
+                                        className={`w-full text-left p-2 rounded-sm border transition-all snap-start ${selectedTool === tool.name
+                                            ? "border-cyan-500/50 bg-cyan-500/10"
+                                            : "border-sidebar-border hover:border-cyan-500/30"
+                                            }`}
+                                    >
+                                        <div className="font-mono text-xs text-cyan-400">{tool.name}</div>
+                                        {tool.description && (
+                                            <p className="text-xs text-muted-foreground mt-0.5">{tool.description}</p>
+                                        )}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                     )}
 
@@ -273,7 +271,7 @@ export function ConnectorDetailDialog({
                                             <Copy className="w-3 h-3" />
                                         </Button>
                                     </div>
-                                    <pre className="text-[10px] font-mono overflow-auto max-h-20">
+                                    <pre className="text-xs font-mono overflow-auto max-h-20">
                                         {JSON.stringify(testResult.content || testResult.error, null, 2)}
                                     </pre>
                                 </div>
