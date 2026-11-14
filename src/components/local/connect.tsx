@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useLocation } from "wouter";
 import { WalletConnector } from "@/components/connector";
 import { useWalletAccount } from "@/hooks/use-wallet";
 import { Button } from "@/components/ui/button";
@@ -11,7 +12,6 @@ import { resolveAgentCardCid } from "@/lib/local-install";
 import { useChain } from "@/contexts/Network";
 import { useSelectedUserAddress } from "@/hooks/use-address";
 
-const WEB_APP_URL = "https://compose.market";
 const FALLBACK_INSTALL_PATH = "/install-local";
 interface LocalLinkTokenResponse {
   success: boolean;
@@ -31,8 +31,14 @@ function isValidDeviceId(deviceId: string | null): boolean {
 
 function normalizeWallet(value: string | null): string | null {
   if (!value) return null;
-  const normalized = value.trim().toLowerCase();
-  return /^0x[a-f0-9]{40}$/.test(normalized) ? normalized : null;
+  const trimmed = value.trim();
+  if (/^0x[a-f0-9]{40}$/i.test(trimmed)) return trimmed.toLowerCase();
+  if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(trimmed)) return trimmed;
+  const lower = trimmed.toLowerCase();
+  if (lower.length >= 2 && lower.length <= 64 && (/^[0-9a-f]{64}$/.test(lower) || /^(([a-z\d]+[-_])*[a-z\d]+\.)+([a-z\d]+[-_])*[a-z\d]+$/.test(lower))) {
+    return lower;
+  }
+  return null;
 }
 
 function parseQueryParams(): {
@@ -51,7 +57,23 @@ function parseQueryParams(): {
   return { deviceId, redirect, agentWallet, mode: "local-first" };
 }
 
+function isSafeDeepLinkUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === "compose:" || parsed.protocol === "compose-local:" || parsed.protocol === "https:") {
+      return true;
+    }
+    if (parsed.protocol === "http:" && (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1")) {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export default function ConnectLocalPage() {
+  const [, setLocation] = useLocation();
   const { isConnected } = useWalletAccount();
   const { userAddress, isResolving: userAddressResolving } = useSelectedUserAddress();
   const { paymentNetwork } = useChain();
@@ -63,6 +85,14 @@ export default function ConnectLocalPage() {
   const [success, setSuccess] = useState(false);
   const [deepLinkUrl, setDeepLinkUrl] = useState<string | null>(null);
   const [issuedToken, setIssuedToken] = useState<string | null>(null);
+  const fallbackTimerRef = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (fallbackTimerRef.current !== null) {
+      window.clearTimeout(fallbackTimerRef.current);
+      fallbackTimerRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     const query = parseQueryParams();
@@ -96,7 +126,6 @@ export default function ConnectLocalPage() {
     setError(null);
 
     try {
-      const linkedAgentWallet = agentWallet ? (agentWallet.toLowerCase() as `0x${string}`) : null;
       const response = await sdk.fetch(`/api/local/link-token`, {
         method: "POST",
         headers: {
@@ -105,7 +134,7 @@ export default function ConnectLocalPage() {
         body: JSON.stringify({
           deviceId: mode === "local-first" ? deviceId : undefined,
           agentWallet: agentWallet || undefined,
-          agentCardCid: linkedAgentWallet ? await resolveAgentCardCid(linkedAgentWallet) : undefined,
+          agentCardCid: agentWallet ? await resolveAgentCardCid(agentWallet).catch(() => undefined) : undefined,
           userAddress,
           network: paymentNetwork,
         }),
@@ -119,13 +148,23 @@ export default function ConnectLocalPage() {
         return;
       }
 
+      if (!isSafeDeepLinkUrl(data.deepLinkUrl)) {
+        setError("Received an unsupported deep link URL from server");
+        setIsAuthorizing(false);
+        return;
+      }
+
       setSuccess(true);
       setIssuedToken(data.token);
       setDeepLinkUrl(data.deepLinkUrl);
       window.location.href = data.deepLinkUrl;
 
       if (mode === "web-first") {
-        window.setTimeout(() => {
+        if (fallbackTimerRef.current !== null) {
+          window.clearTimeout(fallbackTimerRef.current);
+        }
+        fallbackTimerRef.current = window.setTimeout(() => {
+          fallbackTimerRef.current = null;
           const params = new URLSearchParams();
           params.set("token", data.token);
           if (agentWallet) params.set("agent_wallet", agentWallet);
@@ -148,7 +187,7 @@ export default function ConnectLocalPage() {
 
   if (error && mode === "local-first" && !deviceId) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+      <div className="h-full min-h-0 bg-background flex items-center justify-center p-4">
         <Card className="w-full max-w-md bg-card border-sidebar-border">
           <CardHeader>
             <CardTitle className="font-display text-destructive flex items-center gap-2">
@@ -160,10 +199,10 @@ export default function ConnectLocalPage() {
             <p className="text-muted-foreground mb-4">{error}</p>
             <Button
               variant="outline"
-              onClick={() => window.location.href = WEB_APP_URL}
+              onClick={() => setLocation("/")}
               className="w-full"
             >
-              Go to Compose.Market
+              Return to Compose.Market
             </Button>
           </CardContent>
         </Card>
@@ -173,7 +212,7 @@ export default function ConnectLocalPage() {
 
   if (!isConnected) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+      <div className="h-full min-h-0 overflow-y-auto bg-background flex items-center justify-center p-4">
         <Card className="w-full max-w-md bg-card border-sidebar-border">
           <CardHeader>
             <CardTitle className="font-display text-cyan-400 flex items-center gap-2">
@@ -201,7 +240,7 @@ export default function ConnectLocalPage() {
 
             <Button
               variant="ghost"
-              onClick={() => window.location.href = WEB_APP_URL}
+              onClick={() => setLocation("/")}
               className="w-full text-muted-foreground"
             >
               <X className="w-4 h-4 mr-2" />
@@ -215,7 +254,7 @@ export default function ConnectLocalPage() {
 
   if (success) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+      <div className="h-full min-h-0 overflow-y-auto bg-background flex items-center justify-center p-4">
         <Card className="w-full max-w-md bg-card border-sidebar-border">
           <CardHeader>
             <CardTitle className="font-display text-green-400 flex items-center gap-2">
@@ -257,7 +296,7 @@ export default function ConnectLocalPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+    <div className="h-full min-h-0 overflow-y-auto bg-background flex items-center justify-center p-4">
       <Card className="w-full max-w-md bg-card border-sidebar-border">
         <CardHeader>
           <CardTitle className="font-display text-cyan-400 flex items-center gap-2">
@@ -277,7 +316,7 @@ export default function ConnectLocalPage() {
             {mode === "local-first" && (
               <div className="flex items-center justify-between">
                 <span className="text-sm text-muted-foreground font-mono">Device ID</span>
-                <span className="text-xs font-mono text-muted-foreground truncate max-w-[180px]">
+                <span className="text-xs font-mono text-muted-foreground truncate max-w-44">
                   {deviceId?.slice(0, 8)}...{deviceId?.slice(-4)}
                 </span>
               </div>
@@ -310,7 +349,7 @@ export default function ConnectLocalPage() {
 
           <Button
             variant="ghost"
-            onClick={() => window.location.href = WEB_APP_URL}
+            onClick={() => setLocation("/")}
             className="w-full text-muted-foreground"
             disabled={isAuthorizing}
           >
