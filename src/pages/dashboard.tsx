@@ -11,7 +11,7 @@ import { SpendingChart } from "@/components/dashboard/spending";
 import { ModelUsageTable } from "@/components/dashboard/models";
 import { ReceiptFeed } from "@/components/dashboard/receipts";
 import { NetworkFilter } from "@/components/dashboard/networks";
-import { Switcher, type Option } from "@/components/control";
+import { Pockets, Switcher, type Option } from "@/components/control";
 
 const RANGES = [
   { label: "24h", ms: 86_400_000, interval: "hour" },
@@ -38,6 +38,7 @@ export default function DashboardPage() {
   const { chains } = useChain();
   const [range, setRange] = useState<(typeof RANGES)[number]>(RANGES[2]);
   const [selectedNetworks, setSelectedNetworks] = useState<NetworkId[]>([]);
+  const [pocket, setPocket] = useState<"overview" | "models" | "activity">("overview");
   const { containerRef, focused, toggleFocus } = useFocus();
 
   const supportedNetworks = useMemo(
@@ -73,7 +74,7 @@ export default function DashboardPage() {
   const header = (
     <div className="cm-control-rail cm-dashboard-control-rail">
       <div className="cm-dashboard-control-rail__brand">
-        <h1 className="cm-page-header__title cm-dashboard-control-rail__title">
+        <h1 className="cm-page-header__title cm-dashboard-control-rail__title" data-route-heading>
           <span className="text-fuchsia-500 mr-2">//</span>
           DASHBOARD
         </h1>
@@ -110,8 +111,22 @@ export default function DashboardPage() {
     </div>
   );
 
+  const mobilePockets = (
+    <Pockets
+      value={pocket}
+      label="Dashboard view"
+      className="cm-pocket-bar--dashboard"
+      onChange={setPocket}
+      options={[
+        { value: "overview", label: "Overview" },
+        { value: "models", label: "Models" },
+        { value: "activity", label: "Activity" },
+      ]}
+    />
+  );
+
   const empty = (title: string, text: string, loading = false) => (
-    <div className="cm-dashboard" ref={containerRef} data-focus={focused ?? undefined}>
+    <div className="cm-dashboard" ref={containerRef} data-focus={focused ?? undefined} data-pocket={pocket}>
       {header}
       <div className="cm-dashboard__empty">
         {loading
@@ -129,10 +144,11 @@ export default function DashboardPage() {
   if (!summary || summary.requestCount === 0) return empty("No usage yet", "Head to the Playground to make your first inference call.");
 
   return (
-    <div className="cm-dashboard" ref={containerRef} data-focus={focused ?? undefined}>
+    <div className="cm-dashboard" ref={containerRef} data-focus={focused ?? undefined} data-pocket={pocket}>
       {header}
+      {mobilePockets}
       {error ? (
-        <div className="rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-400">
+        <div className="cm-dashboard__banner" role="alert">
           Unable to update usage data: {error.message}
         </div>
       ) : null}
