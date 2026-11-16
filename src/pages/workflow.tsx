@@ -8,8 +8,6 @@
  * Uses shared MultimodalCanvas component and hooks for the chat interface.
  */
 import { useState, useCallback, useRef } from "react";
-import { usePostHog } from "@posthog/react";
-import { mpTrack, mpError } from "@/lib/mixpanel";
 import { useParams } from "wouter";
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
 import { sdk } from "@/lib/sdk";
@@ -24,28 +22,23 @@ import { useSelectedUserAddress } from "@/hooks/use-address";
 import { SessionBudgetDialog } from "@/components/session";
 import { useOnchainWorkflowByIdentifier } from "@/hooks/use-onchain";
 import { MultimodalCanvas } from "@/components/chat";
+import { Trace } from "@/components/trace";
 import { toAttachment, useChat } from "@/hooks/use-chat";
 import { useConversationThread, type ThreadKey } from "@/hooks/use-thread";
 import { useStream } from "@/hooks/use-stream";
-import { CostReceiptIndicator } from "@/components/receipt-indicator";
 import { WorkflowCard, WorkflowCardSkeleton } from "@/components/workflow-card";
-import {
-    Sheet,
-    SheetContent,
-    SheetHeader,
-    SheetTitle,
-} from "@/components/ui/sheet";
+import { Pockets } from "@/components/control";
 import {
     ArrowLeft,
     Shield,
     Layers,
-    IdCard,
     StopCircle,
+    PanelRightClose,
+    PanelRightOpen,
 } from "lucide-react";
 
 
 export default function ManowarPage() {
-    const posthog = usePostHog();
     const params = useParams<{ id: string }>();
     const workflowIdentifier = params.id || null;
 
@@ -75,6 +68,9 @@ export default function ManowarPage() {
         addUserMessage, createAssistantPlaceholder,
         failAssistant,
         activityState,
+        latestActivity,
+        latestReceipt,
+        latestUsage,
         // Attachments
         attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, clearFiles,
         // Recording
@@ -91,6 +87,8 @@ export default function ManowarPage() {
     const [sending, setSending] = useState(false);
     const [chatError, setChatError] = useState<string | null>(null);
     const [continuousEnabled, setContinuousEnabled] = useState(false);
+    const [traceOpen, setTraceOpen] = useState(false);
+    const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
 
     const getWorkflowThreadKey = useCallback((): ThreadKey | null => {
@@ -105,8 +103,9 @@ export default function ManowarPage() {
     // Session dialog
     const [showSessionDialog, setShowSessionDialog] = useState(false);
 
-    // Mobile card sheet
-    const [mobileCardOpen, setMobileCardOpen] = useState(false);
+    // Mobile in-stage pocket + Desktop collapse state
+    const [pocket, setPocket] = useState<"run" | "spec">("run");
+    const [paneCollapsed, setPaneCollapsed] = useState(false);
 
     // Send chat message with x402 payment
     const handleSendMessage = useCallback(async () => {
@@ -153,19 +152,6 @@ export default function ManowarPage() {
         setChatError(null);
         abortControllerRef.current = new AbortController();
 
-        posthog?.capture("workflow_executed", {
-            workflow_wallet: workflowWallet,
-            workflow_title: workflow?.title,
-            has_attachment: attachedFiles.length > 0,
-            continuous: continuousEnabled,
-            network: paymentNetwork,
-        });
-
-        mpTrack("Launch AI");
-        mpTrack("AI Prompt Sent and Prompt Text", {
-            "Prompt Text": inputValue.trim().slice(0, 500),
-        });
-
         const assistantId = createAssistantPlaceholder();
         const runId = crypto.randomUUID();
         const replayEventIndex = 0;
@@ -202,7 +188,7 @@ export default function ManowarPage() {
                 options: {
                     key: activeKeyToken,
                     userAddress: selectedUserAddress,
-                    network: paymentNetwork,
+                    ...(paymentNetwork ? { network: paymentNetwork } : {}),
                 },
             });
         } catch (err) {
@@ -212,37 +198,66 @@ export default function ManowarPage() {
             const errorMsg = err instanceof Error ? err.message : String(err);
             setChatError(errorMsg);
             failAssistant(assistantId, errorMsg);
-            mpError("workflow_execution", errorMsg, { workflow_wallet: workflowWallet });
         } finally {
             setSending(false);
             abortControllerRef.current = null;
         }
-    }, [inputValue, sending, workflow, workflowWallet, wallet, account, toast, attachedFiles, addUserMessage, clearFiles, createAssistantPlaceholder, failAssistant, paymentNetwork, sessionActive, budgetRemaining, keyToken, resolveActiveKeyToken, continuousEnabled, ensureConversationThread, streamer, posthog, selectedUserAddress, userAddressResolving]);
+    }, [inputValue, sending, workflow, workflowWallet, wallet, account, toast, attachedFiles, addUserMessage, clearFiles, createAssistantPlaceholder, failAssistant, paymentNetwork, sessionActive, budgetRemaining, keyToken, resolveActiveKeyToken, continuousEnabled, ensureConversationThread, streamer, selectedUserAddress, userAddressResolving]);
 
     const handleStopExecution = useCallback(async () => {
         if (!workflow?.walletAddress || !threadIdRef.current) return;
         try {
             abortControllerRef.current?.abort();
             await sdk.workflow.stop(workflow.walletAddress, threadIdRef.current);
-            posthog?.capture("workflow_stopped", {
-                workflow_wallet: workflow.walletAddress,
-                workflow_title: workflow.title,
-                thread_id: threadIdRef.current,
-            });
             chat.clearActivityState();
             setSending(false);
             toast({ title: "Stopped", description: "Workflow execution stopped" });
         } catch {
             toast({ title: "Stop failed", description: "Could not stop workflow", variant: "destructive" });
         }
-    }, [workflow?.walletAddress, workflow?.title, threadIdRef, toast, posthog, chat]);
+    }, [workflow?.walletAddress, threadIdRef, toast, chat]);
 
-    const copyEndpoint = () => {
+    const copyEndpoint = useCallback(() => {
         toast({
             title: "Copied!",
-            description: "Manowar endpoint copied to clipboard",
+            description: "Workflow endpoint copied to clipboard",
         });
-    };
+    }, [toast]);
+
+    const handleStartSession = useCallback(() => {
+        setShowSessionDialog(true);
+    }, []);
+
+    const handleFileSelectClick = useCallback(() => {
+        fileInputRef.current?.click();
+    }, [fileInputRef]);
+
+    const handleStopClick = useCallback(() => {
+        void handleStopExecution();
+    }, [handleStopExecution]);
+
+    const handleInspectFlow = useCallback((nodeId?: string) => {
+        setFocusedNodeId(nodeId ?? null);
+        setTraceOpen(true);
+    }, []);
+
+    const handleCopyMessage = useCallback((content: string) => {
+        void navigator.clipboard.writeText(content);
+        toast({ title: "Copied!", description: "Message copied to clipboard" });
+    }, [toast]);
+
+    const handleRetryMessage = useCallback((content: string) => {
+        setInputValue(content);
+        toast({ title: "Retry", description: "Message loaded for re-sending" });
+    }, [toast]);
+
+    const handleDeleteMessage = useCallback((id: string) => {
+        setMessages((prev) => prev.filter((m) => m.id !== id));
+    }, [setMessages]);
+
+    const handleCloseTrace = useCallback(() => {
+        setTraceOpen(false);
+    }, []);
 
     if (isLoading) {
         return (
@@ -251,11 +266,11 @@ export default function ManowarPage() {
                     <Skeleton className="h-8 w-32" />
                     <Skeleton className="h-6 w-24" />
                 </div>
-                <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-3 gap-4">
-                    <div className="lg:col-span-2">
+                <div className="cm-split">
+                    <div className="cm-split__main">
                         <Skeleton className="h-full w-full rounded-lg" />
                     </div>
-                    <div className="lg:col-span-1 hidden lg:block">
+                    <div className="cm-split__side">
                         <WorkflowCardSkeleton />
                     </div>
                 </div>
@@ -274,7 +289,7 @@ export default function ManowarPage() {
                 <div className="flex-1 flex items-center justify-center border border-dashed border-red-500/30 rounded-lg">
                     <div className="text-center">
                         <Shield className="w-10 h-10 mx-auto text-red-400/50 mb-3" />
-                        <p className="text-red-400 font-mono">Manowar not found</p>
+                        <p className="text-red-400 font-mono">Workflow not found</p>
                         <p className="text-muted-foreground text-xs mt-1">This workflow may not exist.</p>
                     </div>
                 </div>
@@ -285,13 +300,18 @@ export default function ManowarPage() {
     return (
         <div className="cm-chat-workspace">
             {/* Compact Header */}
-            <div className="shrink-0 mb-3 flex items-center justify-between">
-                <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-fuchsia-400 -ml-2 h-7 px-2" onClick={() => history.back()}>
+            <div className="cm-control-rail cm-control-rail--compact cm-control-rail--inline">
+                <Button
+                    variant="ghost"
+                    size="sm"
+                    className="cm-shell-button cm-shell-button--ghost cm-shell-button--sm"
+                    onClick={() => history.back()}
+                >
                     <ArrowLeft className="w-3.5 h-3.5 mr-1" />
                     <span className="hidden sm:inline">Back</span>
                 </Button>
 
-                <div className="flex items-center gap-3">
+                <div className="cm-control-rail__main flex items-center gap-3">
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         <Checkbox
                             id="continuous-execution"
@@ -305,7 +325,7 @@ export default function ManowarPage() {
                     <Button
                         variant="ghost"
                         size="sm"
-                        className="text-muted-foreground hover:text-red-400 h-7 w-7 p-0"
+                        className="cm-shell-button cm-shell-button--ghost cm-shell-button--sm text-muted-foreground hover:text-red-400"
                         onClick={handleStopExecution}
                         disabled={!sending}
                         aria-label="Stop workflow"
@@ -314,28 +334,41 @@ export default function ManowarPage() {
                     </Button>
                     <Badge className="bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30 text-xs">
                         <Layers className="w-3 h-3 mr-1" />
-                        Manowar {workflow.walletAddress?.slice(0, 6)}…{workflow.walletAddress?.slice(-4)}
+                        Workflow {workflow.walletAddress?.slice(0, 6)}…{workflow.walletAddress?.slice(-4)}
                     </Badge>
                 </div>
 
-                {/* Mobile Card Button - only visible on mobile */}
-                <div className="flex items-center gap-1">
+                <div className="cm-control-rail__actions">
+                    <Pockets
+                        value={pocket}
+                        label="Workflow view"
+                        className="cm-pocket-bar--split"
+                        onChange={setPocket}
+                        options={[
+                            { value: "run", label: "Run" },
+                            { value: "spec", label: "Spec" },
+                        ]}
+                    />
                     <Button
                         variant="ghost"
                         size="sm"
-                        className="lg:hidden text-muted-foreground hover:text-fuchsia-400 h-7 w-7 p-0"
-                        onClick={() => setMobileCardOpen(true)}
-                        aria-label="View workflow details"
+                        className="cm-shell-button cm-shell-button--ghost cm-shell-button--sm cm-split__collapse-btn"
+                        onClick={() => setPaneCollapsed((prev) => !prev)}
+                        aria-label={paneCollapsed ? "Show workflow spec" : "Hide workflow spec"}
+                        title={paneCollapsed ? "Show workflow spec" : "Hide workflow spec"}
                     >
-                        <IdCard className="w-4 h-4" />
+                        {paneCollapsed ? <PanelRightOpen className="w-3.5 h-3.5" /> : <PanelRightClose className="w-3.5 h-3.5" />}
                     </Button>
                 </div>
             </div>
 
-            {/* Main Layout: Chat on Left, Card on Right */}
-            <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-3 gap-4">
-                {/* Chat Section (2/3 width on desktop, full on mobile) */}
-                <div className="lg:col-span-2 min-h-0 flex flex-col">
+            {/* Main Layout: Desktop side-by-side, Mobile in-stage pockets */}
+            <div
+                className="cm-split"
+                data-pocket={pocket === "run" ? "main" : "side"}
+                data-collapsed={paneCollapsed ? "true" : undefined}
+            >
+                <div className="cm-split__main flex flex-col">
                     {!hasCoordinator ? (
                         <div className="flex-1 flex items-center justify-center border border-dashed border-yellow-500/30 rounded-lg bg-yellow-500/5">
                             <div className="text-center p-6">
@@ -349,7 +382,7 @@ export default function ManowarPage() {
                     ) : (
                         <MultimodalCanvas
                             variant="workflow"
-                            title={`Execute ${workflow.title || `Manowar #${workflow.id}`}`}
+                            title={`Execute ${workflow.title || `Workflow #${workflow.id}`}`}
                             messages={messages}
                             inputValue={inputValue}
                             onInputChange={setInputValue}
@@ -357,11 +390,13 @@ export default function ManowarPage() {
                             sending={sending}
                             status={sending ? "streaming" : "idle"}
                             activityState={activityState}
+                            stepCount={activityState.tools.length}
+                            latestReceipt={latestReceipt}
                             error={chatError}
                             sessionActive={sessionActive}
-                            onStartSession={() => setShowSessionDialog(true)}
+                            onStartSession={handleStartSession}
                             attachedFiles={attachedFiles}
-                            onFileSelect={() => fileInputRef.current?.click()}
+                            onFileSelect={handleFileSelectClick}
                             onRemoveFile={handleRemoveFile}
                             fileInputRef={fileInputRef}
                             onFileInputChange={handleFileSelect}
@@ -369,18 +404,14 @@ export default function ManowarPage() {
                             recordingSupported={recordingSupported}
                             onStartRecording={startRecording}
                             onStopRecording={stopRecording}
+                            onStop={handleStopClick}
+                            onInspectFlow={handleInspectFlow}
                             scrollContainerRef={scrollContainerRef}
                             messagesEndRef={messagesEndRef}
                             showMessageActions
-                            onCopyMessage={(content) => {
-                                navigator.clipboard.writeText(content);
-                                toast({ title: "Copied!", description: "Message copied to clipboard" });
-                            }}
-                            onRetryMessage={(content) => {
-                                setInputValue(content);
-                                toast({ title: "Retry", description: "Message loaded for re-sending" });
-                            }}
-                            onDeleteMessage={(id) => setMessages(prev => prev.filter(m => m.id !== id))}
+                            onCopyMessage={handleCopyMessage}
+                            onRetryMessage={handleRetryMessage}
+                            onDeleteMessage={handleDeleteMessage}
                             height="h-full"
                             emptyStateText="Ready to execute workflow."
                             emptyStateSubtext={`Input will be sent to Coordinator: ${workflow.coordinatorModel || "Model"}`}
@@ -388,8 +419,7 @@ export default function ManowarPage() {
                     )}
                 </div>
 
-                {/* Workflow Card (1/3 width on desktop, hidden on mobile) */}
-                <div className="lg:col-span-1 hidden lg:flex flex-col min-h-0">
+                <div className="cm-split__side overflow-y-auto">
                     <WorkflowCard
                         workflow={workflow}
                         onCopyEndpoint={copyEndpoint}
@@ -397,27 +427,17 @@ export default function ManowarPage() {
                 </div>
             </div>
 
+            <Trace
+                open={traceOpen}
+                onClose={handleCloseTrace}
+                activity={latestActivity}
+                receipt={latestReceipt}
+                usage={latestUsage}
+                focusedNodeId={focusedNodeId}
+            />
+
             {/* Session Budget Dialog */}
             <SessionBudgetDialog open={showSessionDialog} onOpenChange={setShowSessionDialog} showTrigger={false} />
-
-            {/* Mobile Card Sheet */}
-            <Sheet open={mobileCardOpen} onOpenChange={setMobileCardOpen}>
-                <SheetContent side="right" className="cm-sheet-panel w-[340px] sm:w-[400px] p-0">
-                    <SheetHeader className="p-4 border-b border-sidebar-border shrink-0">
-                        <SheetTitle className="font-display text-fuchsia-400 flex items-center gap-2">
-                            <IdCard className="w-4 h-4" />
-                            Workflow Details
-                        </SheetTitle>
-                    </SheetHeader>
-                    <div className="cm-sheet-body p-4">
-                        <WorkflowCard
-                            workflow={workflow}
-                            onCopyEndpoint={copyEndpoint}
-                        />
-                    </div>
-                </SheetContent>
-            </Sheet>
-
         </div>
     );
 }
