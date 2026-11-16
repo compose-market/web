@@ -1,44 +1,46 @@
 /**
- * Agent Detail Page with Chat Interface
- * 
- * Shows agent info and provides interactive chat with x402 payments.
- * Includes knowledge upload and file attachments.
- * 
- * Layout: Chat on left, AgentCard on right
- * Uses shared MultimodalCanvas component and hooks for the chat interface.
+ * Agent Workspace Page
+ *
+ * Balanced 2-zone human-agentic studio powered by the 3-surface SSE architecture:
+ * - Surface 1 (MultimodalCanvas): Inline CoT, Plan & Clarify gates, Connector gates,
+ *   media/deliveries/snippets, and per-turn x402 settlement receipt pill.
+ * - Surface 2 (Pulse): Above-composer spring-animated live action rail with Stop & Flow drawer trigger.
+ * - Surface 3 (Trace): On-demand full-readability slide-over / bottom snap-sheet for all
+ *   Agent ↔ Sub-Agent, Agent ↔ Connector, Swarm Bus, Memory, Plan versions, and x402 bills.
+ * - Companion Info Rail: AgentCard + live 3D Activity Graph filling the side-panel height.
  */
-import { useState, useCallback, useRef, useEffect } from "react";
-import { usePostHog } from "@posthog/react";
-import { mpTrack, mpError } from "@/lib/mixpanel";
-import { useParams } from "wouter";
-import { Link } from "wouter";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useParams, Link } from "wouter";
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
-import { sdk } from "@/lib/sdk";
+import { hasSessionAuth, sdk } from "@/lib/sdk";
 import { uploadWorkspaceFiles } from "@/lib/workspace";
-import { cn } from "@/lib/utils";
 import { useChain } from "@/contexts/Network";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Hint, ShellButton } from "@compose-market/theme/shell";
 import { useToast } from "@/hooks/use-toast";
 import { useSession } from "@/hooks/use-session.tsx";
 import { useSelectedUserAddress } from "@/hooks/use-address";
 import { SessionBudgetDialog } from "@/components/session";
-import { BackpackDialog } from "@/components/backpack";
 import { useAgentByIdentifier } from "@/hooks/use-agents";
 import { MultimodalCanvas } from "@/components/chat";
-import { toAttachment, useChat, type Plan } from "@/hooks/use-chat";
+import {
+  Threads,
+  hydrateThreadMessages,
+  listAgentThreads,
+  loadAgentThread,
+  type ThreadSummary,
+} from "@/components/threads";
+import { Trace } from "@/components/trace";
+import { toAttachment, useChat, type ConnectorRequest, type Plan } from "@/hooks/use-chat";
+import { useTurnReceipts } from "@/hooks/use-receipts";
 import { useConversationThread, type ThreadKey } from "@/hooks/use-thread";
 import { useStream } from "@/hooks/use-stream";
-import { MissionControlSidePanel } from "@/components/mission-control";
-import { CostReceiptIndicator } from "@/components/receipt-indicator";
 import {
-  getCachedBackpackPermissions,
+  getCachedPermissions,
   resolveBackpackUserId,
-  type BackpackCloudPermission,
 } from "@/lib/backpack";
-import { AgentCard, AgentCardSkeleton } from "@/components/agent-card";
+import { AgentCard, AgentCardSkeleton, sizedAvatarUrl } from "@/components/identikit";
+import { Graph, type GraphPhase } from "@/motion/graph";
 import {
   Dialog,
   DialogContent,
@@ -47,28 +49,24 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+import { Pockets } from "@/components/control";
 import {
   ArrowLeft,
-  Sparkles,
-  Shield,
   Download,
-  X,
-  IdCard,
-  Backpack,
-  Activity,
+  GitBranch,
   Loader2,
+  PanelRightClose,
+  PanelRightOpen,
+  Pause,
+  Play,
+  Shield,
+  X,
 } from "lucide-react";
 
+const TERMINAL_PLAN_STATES = new Set(["completed", "failed", "cancelled", "expired", "rejected"]);
+
 export default function AgentDetailPage() {
-  const posthog = usePostHog();
   const params = useParams<{ id: string }>();
-  // id is always the wallet address (preferred)
   const identifier = params.id || null;
   const { data: agent, isLoading, error, isIndexing } = useAgentByIdentifier(identifier);
   const { toast } = useToast();
@@ -79,48 +77,77 @@ export default function AgentDetailPage() {
     userAddress: selectedUserAddress,
     isResolving: userAddressResolving,
   } = useSelectedUserAddress();
-  const { sessionActive, budgetRemaining, keyToken, resolveActiveKeyToken } = useSession();
+  const { sessionActive, budgetRemaining, formatBudget, keyToken, resolveActiveKeyToken } = useSession();
 
-  // Build the A2A-compatible endpoint URL using wallet address (canonical identifier)
   const agentWallet = agent?.walletAddress;
 
-  // Chat state from shared hook (includes messages, attachments, and recording)
   const chat = useChat({
-    conversationId: `agent-${agentWallet || 'unknown'}`,
+    conversationId: `agent-${agentWallet || "unknown"}`,
     onError: (err) => setChatError(err),
   });
-  const { messages, setMessages, clearMessages, scrollContainerRef, messagesEndRef,
-    addUserMessage, createAssistantPlaceholder, updateAssistantMessage,
+  const {
+    messages,
+    setMessages,
+    clearMessages,
+    scrollContainerRef,
+    messagesEndRef,
+    addUserMessage,
+    createAssistantPlaceholder,
+    updateAssistantMessage,
     failAssistant,
     activityState,
-    latestActivity, latestPlan,
-    // Attachments
-    attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, clearFiles,
-    // Recording
-    isRecording, recordingSupported, startRecording, stopRecording,
+    latestActivity,
+    latestPlan,
+    latestReceipt,
+    latestReceipts,
+    latestUsage,
+    reconcileAssistantReceipts,
+    attachedFiles,
+    fileInputRef,
+    handleFileSelect,
+    handleRemoveFile,
+    clearFiles,
+    isRecording,
+    recordingSupported,
+    startRecording,
+    stopRecording,
   } = chat;
 
-  // Shared SDK streaming dispatcher. All rich SSE events (text, thinking,
-  // tool-use, receipts, budget, sessionInvalid) are dispatched into the
-  // chat activity sink + the sdk.events bus — nothing handled per-page.
-  const streamer = useStream(chat, {
-    onError: (e) => setChatError(e.message),
-    onDone: () => setSending(false),
-  });
   const [inputValue, setInputValue] = useState("");
   const [sending, setSending] = useState(false);
+  const [watching, setWatching] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [workspaceFiles, setWorkspaceFiles] = useState<File[]>([]);
   const [workspaceUploading, setWorkspaceUploading] = useState(false);
-
-  // Session dialog
   const [showSessionDialog, setShowSessionDialog] = useState(false);
-  const [backpackOpen, setBackpackOpen] = useState(false);
+  const [threads, setThreads] = useState<ThreadSummary[]>([]);
+  const [threadsLoading, setThreadsLoading] = useState(false);
 
-  // Side panel tab state — both AgentCard and MissionControl always accessible
-  const [activeSideTab, setActiveSideTab] = useState<"agent" | "mission">("agent");
-  const [mobileSideOpen, setMobileSideOpen] = useState(false);
+  const streamer = useStream(chat, {
+    onError: (e) => setChatError(e.message),
+    onDone: () => setSending(false),
+    onWatchingChange: (active) => setWatching(active),
+  });
+
+  const isStreamingActive = sending || watching;
+
+  // Responsive pockets (mobile) + desktop rail toggle + on-demand Surface 3 Trace sheet
+  const [pocket, setPocket] = useState<"chat" | "agent">("chat");
+  const [paneCollapsed, setPaneCollapsed] = useState(false);
+  const [traceOpen, setTraceOpen] = useState(false);
+  const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
+  const [inspectedMessageId, setInspectedMessageId] = useState<string | null>(null);
+  const [graphPaused, setGraphPaused] = useState(false);
+
+  useTurnReceipts({
+    messages,
+    userAddress: selectedUserAddress,
+    network: paymentNetwork,
+    mode: "agent",
+    isStreaming: isStreamingActive,
+    onReconcile: reconcileAssistantReceipts,
+  });
 
   const getConversationThreadKey = useCallback((): ThreadKey | null => {
     if (!agentWallet || !selectedUserAddress || userAddressResolving) {
@@ -133,45 +160,250 @@ export default function AgentDetailPage() {
     };
   }, [agentWallet, selectedUserAddress, userAddressResolving]);
 
-  const { threadIdRef, rootRunIdRef, resetConversationThread, ensureConversationThread, ensureConversationRootRun } = useConversationThread(getConversationThreadKey);
+  const {
+    threadId,
+    restoredRun,
+    threadIdRef,
+    rootRunIdRef,
+    markWatchableRun,
+    clearWatchableRun,
+    resetConversationThread,
+    selectConversationThread,
+    ensureConversationThread,
+    createTurnRunId,
+  } = useConversationThread(getConversationThreadKey);
 
-  const showMissionControl = sending || Boolean(latestActivity) || Boolean(latestPlan);
+  const backpackUser = useMemo(
+    () => (selectedUserAddress ? resolveBackpackUserId(selectedUserAddress) : ""),
+    [selectedUserAddress],
+  );
 
-  // Auto-switch to mission tab when streaming starts
-  const prevSending = useRef(sending);
-  useEffect(() => {
-    if (sending && !prevSending.current) {
-      setActiveSideTab("mission");
+  const hasAuth = Boolean(keyToken || hasSessionAuth(backpackUser, paymentNetwork));
+
+  const refreshThreads = useCallback(async () => {
+    if (!agentWallet || !backpackUser || !hasAuth) {
+      setThreads([]);
+      return;
     }
-    prevSending.current = sending;
-  }, [sending]);
+    setThreadsLoading(true);
+    try {
+      const list = await listAgentThreads(agentWallet, backpackUser);
+      setThreads(list);
+    } catch {
+      // Keep existing list on transient error
+    } finally {
+      setThreadsLoading(false);
+    }
+  }, [agentWallet, backpackUser, hasAuth]);
+
+  useEffect(() => {
+    void refreshThreads();
+  }, [refreshThreads]);
+
+  const handleSelectThread = useCallback(async (item: ThreadSummary) => {
+    if (!agentWallet || isStreamingActive) return;
+    streamer.stopWatch();
+    setChatError(null);
+    chat.clearActivityState();
+    selectConversationThread(item.threadId, item.rootRunId ?? item.runId);
+    rehydratedKeyRef.current = `${agentWallet}:${item.threadId}:${item.rootRunId ?? item.runId ?? ""}`;
+    try {
+      const loaded = await loadAgentThread(agentWallet, item.threadId, backpackUser);
+      if (!loaded) {
+        clearMessages();
+        return;
+      }
+      const hydrated = hydrateThreadMessages(loaded);
+      setMessages(hydrated);
+      const lastPlanMsg = [...hydrated].reverse().find((m) => m.proposal);
+      chat.planMessageIdRef.current = lastPlanMsg?.id ?? null;
+      const hasActivePlan = Boolean(
+        lastPlanMsg?.proposal
+        && !TERMINAL_PLAN_STATES.has(lastPlanMsg.proposal.state),
+      );
+      const pendingConnector = [...hydrated]
+        .reverse()
+        .flatMap((m) => m.connectorRequests ?? [])
+        .find((req) => req.state === "requested" || req.state === "escalated");
+      const runToWatch = lastPlanMsg?.proposal?.rootRunId
+        ?? lastPlanMsg?.proposal?.runId
+        ?? pendingConnector?.runId
+        ?? loaded.rootRunId
+        ?? loaded.runId
+        ?? item.rootRunId
+        ?? item.runId;
+      if ((hasActivePlan || pendingConnector) && runToWatch) {
+        markWatchableRun(runToWatch, item.threadId);
+        void streamer.rehydrateRun({
+          agentWallet,
+          runId: runToWatch,
+          threadId: item.threadId,
+        }).then((activeRun) => {
+          if (!activeRun) clearWatchableRun();
+        });
+      }
+    } catch (err) {
+      setChatError(err instanceof Error ? err.message : "Could not load thread");
+    }
+  }, [agentWallet, backpackUser, chat, clearMessages, clearWatchableRun, isStreamingActive, markWatchableRun, selectConversationThread, setMessages, streamer]);
+
+  // Clean up any active watch stream on unmount
+  useEffect(() => () => streamer.stopWatch(), [streamer]);
+
+  // Keep watchable run persistence scoped strictly to non-terminal plans and pending connector gates
+  useEffect(() => {
+    const activePlanRunId = latestPlan && !TERMINAL_PLAN_STATES.has(latestPlan.state)
+      ? (latestPlan.rootRunId ?? latestPlan.runId)
+      : undefined;
+    const pendingConnectorRunId = [...messages]
+      .reverse()
+      .flatMap((m) => m.connectorRequests ?? [])
+      .find((req) => req.state === "requested" || req.state === "escalated")
+      ?.runId;
+    const watchRunId = activePlanRunId ?? pendingConnectorRunId;
+    if (watchRunId && threadId) {
+      markWatchableRun(watchRunId, threadId);
+    } else if (messages.length > 0) {
+      clearWatchableRun();
+    }
+  }, [clearWatchableRun, latestPlan, markWatchableRun, messages, threadId]);
+
+  // Rehydrate any live/gated run restored from sessionStorage so reload never orphans an active execution
+  const rehydratedKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!agentWallet || !restoredRun || !hasAuth) return;
+    const key = `${agentWallet}:${restoredRun.threadId}:${restoredRun.rootRunId}`;
+    if (rehydratedKeyRef.current === key) return;
+    rehydratedKeyRef.current = key;
+    void streamer.rehydrateRun({
+      agentWallet,
+      runId: restoredRun.rootRunId,
+      threadId: restoredRun.threadId,
+    }).then((activeRun) => {
+      if (!activeRun) clearWatchableRun();
+    });
+  }, [agentWallet, clearWatchableRun, hasAuth, restoredRun, streamer]);
+
+  // Collect all plan versions in chronological order for Surface 3 Trace version switcher
+  const planVersions = useMemo(() => {
+    const byKey = new Map<string, Plan>();
+    for (const msg of messages) {
+      if (msg.proposal) {
+        const key = `${msg.proposal.proposalId}:${msg.proposal.version}`;
+        byKey.set(key, msg.proposal);
+      }
+    }
+    return Array.from(byKey.values()).sort((a, b) => a.version - b.version);
+  }, [messages]);
+
+  // Count visible steps for Pulse badge & Live Activity graph
+  const activity = useMemo(() => {
+    const nodes = latestActivity ? Object.values(latestActivity.nodes) : [];
+    const visible = nodes.filter((n) => {
+      if (n.kind === "trace" || n.kind === "plan" || n.kind === "connector") return false;
+      if (n.kind === "message" && !n.parentId) return false;
+      return true;
+    });
+    const activeChildren = visible.filter((n) => n.kind === "agent" && n.status === "running").length;
+    const activeTools = visible.filter((n) => (n.kind === "tool" || n.kind === "connector") && n.status === "running").length;
+    const hasConclave = visible.some((n) => n.kind === "conclave" && n.status === "running");
+
+    let phase: GraphPhase = "idle";
+    if (chatError || activityState.phase === "error") phase = "error";
+    else if (latestPlan?.state === "awaiting_approval" || latestPlan?.state === "clarify") phase = "awaiting_gate";
+    else if (hasConclave) phase = "conclave";
+    else if (activeChildren > 0) phase = "delegating";
+    else if (activeTools > 0 || activityState.phase === "tool") phase = "tool";
+    else if (latestPlan?.state === "executing" || latestPlan?.state === "monitoring" || latestPlan?.state === "refining") phase = "planning";
+    else if (isStreamingActive || activityState.phase === "thinking" || activityState.phase === "streaming") phase = "thinking";
+    else if (latestReceipt) phase = "settled";
+
+    return {
+      stepCount: Math.max(visible.length, activityState.tools.length),
+      activeChildren,
+      activeTools,
+      phase,
+    };
+  }, [activityState.phase, activityState.tools.length, chatError, isStreamingActive, latestActivity, latestPlan?.state, latestReceipt]);
+
+  const openTrace = useCallback((nodeId?: string, messageId?: string) => {
+    setFocusedNodeId(nodeId ?? null);
+    setInspectedMessageId(messageId ?? null);
+    setTraceOpen(true);
+  }, []);
+
+  const inspectedMessage = useMemo(
+    () => (inspectedMessageId ? messages.find((m) => m.id === inspectedMessageId) ?? null : null),
+    [inspectedMessageId, messages],
+  );
+
+  const handleStop = useCallback(async () => {
+    if (!agentWallet) return;
+    const planActive = Boolean(
+      latestPlan
+      && (latestPlan.state === "approved"
+        || latestPlan.state === "executing"
+        || latestPlan.state === "monitoring"
+        || latestPlan.state === "refining"),
+    );
+    const targetRunId = (planActive ? latestPlan?.runId : undefined)
+      ?? rootRunIdRef.current
+      ?? latestPlan?.rootRunId
+      ?? undefined;
+    await streamer.stopAgent(
+      agentWallet,
+      targetRunId,
+      threadIdRef.current ?? undefined,
+    );
+    if (planActive && latestPlan) {
+      setMessages((prev) => prev.map((msg) => {
+        if (msg.proposal?.proposalId !== latestPlan.proposalId) return msg;
+        const settledTasks = msg.proposal.tasks?.map((task) => (
+          task.status === "doing" ? { ...task, status: "failed" as const } : task
+        ));
+        const settledActivity = msg.activity
+          ? {
+            ...msg.activity,
+            nodes: Object.fromEntries(
+              Object.entries(msg.activity.nodes).map(([nodeId, node]) => [
+                nodeId,
+                node.status === "running"
+                  ? { ...node, status: "failed" as const, updatedAt: Date.now() }
+                  : node,
+              ]),
+            ),
+          }
+          : msg.activity;
+        return {
+          ...msg,
+          activity: settledActivity,
+          proposal: {
+            ...msg.proposal,
+            state: "cancelled",
+            pending: false,
+            failureReason: "Stopped by user",
+            ...(settledTasks ? { tasks: settledTasks } : {}),
+          },
+        };
+      }));
+    }
+    clearWatchableRun();
+    chat.clearActivityState();
+    setSending(false);
+    setWatching(false);
+    toast({ title: "Run stopped" });
+    void refreshThreads();
+  }, [agentWallet, chat, clearWatchableRun, latestPlan, refreshThreads, rootRunIdRef, setMessages, streamer, threadIdRef, toast]);
 
   const handleClearChat = useCallback(() => {
+    streamer.stopWatch();
     clearMessages();
     clearFiles();
+    chat.clearActivityState();
     setChatError(null);
     resetConversationThread();
-  }, [clearFiles, clearMessages, resetConversationThread]);
-
-  const openBackpack = useCallback(() => {
-    if (!agentWallet) {
-      toast({
-        title: "Agent unavailable",
-        description: "Wait for the agent to load before opening your backpack.",
-        variant: "destructive",
-      });
-      return;
-    }
-    if (!selectedUserAddress || userAddressResolving) {
-      toast({
-        title: "Connect wallet",
-        description: "Wait for the selected network account before opening your backpack.",
-        variant: "destructive",
-      });
-      return;
-    }
-    setBackpackOpen(true);
-  }, [agentWallet, selectedUserAddress, toast, userAddressResolving]);
+    rehydratedKeyRef.current = null;
+  }, [chat, clearFiles, clearMessages, resetConversationThread, streamer]);
 
   const openWorkspaceDialog = useCallback(() => {
     if (!sessionActive || budgetRemaining <= 0) {
@@ -183,30 +415,24 @@ export default function AgentDetailPage() {
       setShowSessionDialog(true);
       return;
     }
-
     setWorkspaceOpen(true);
   }, [budgetRemaining, sessionActive, toast]);
 
   const handleWorkspaceFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(e.target.files || []);
-    if (selected.length === 0) {
-      return;
-    }
+    if (selected.length === 0) return;
 
     setWorkspaceFiles((prev) => {
       const seen = new Set(prev.map((file) => `${file.name}:${file.size}:${file.lastModified}`));
       const next = [...prev];
       for (const file of selected) {
         const key = `${file.name}:${file.size}:${file.lastModified}`;
-        if (seen.has(key)) {
-          continue;
-        }
+        if (seen.has(key)) continue;
         seen.add(key);
         next.push(file);
       }
       return next;
     });
-
     e.target.value = "";
   }, []);
 
@@ -227,7 +453,6 @@ export default function AgentDetailPage() {
       });
       return;
     }
-
     if (!selectedUserAddress || userAddressResolving) {
       toast({
         title: "Account resolving",
@@ -236,7 +461,6 @@ export default function AgentDetailPage() {
       });
       return;
     }
-
     if (workspaceFiles.length === 0) {
       toast({
         title: "No files selected",
@@ -247,7 +471,6 @@ export default function AgentDetailPage() {
     }
 
     const activeKeyToken = await resolveActiveKeyToken();
-
     if (!activeKeyToken) {
       toast({
         title: "Session Sync Required",
@@ -264,17 +487,16 @@ export default function AgentDetailPage() {
         agentWallet,
         userAddress: selectedUserAddress,
       });
-
       toast({
         title: "Workspace indexed",
         description: `Indexed ${result.indexed} private knowledge chunks for this user-agent pair.`,
       });
       setWorkspaceFiles([]);
       setWorkspaceOpen(false);
-    } catch (error) {
+    } catch (err) {
       toast({
         title: "Workspace upload failed",
-        description: error instanceof Error ? error.message : "Unable to index workspace knowledge",
+        description: err instanceof Error ? err.message : "Unable to index workspace knowledge",
         variant: "destructive",
       });
     } finally {
@@ -282,16 +504,14 @@ export default function AgentDetailPage() {
     }
   }, [account, agentWallet, keyToken, resolveActiveKeyToken, selectedUserAddress, toast, userAddressResolving, workspaceFiles]);
 
-  // Send chat message with x402 payment
   const handleSendMessage = useCallback(async (selectedSlashCommands: string[] = []) => {
-    if (attachedFiles.some(f => f.uploading)) return false;
+    if (attachedFiles.some((f) => f.uploading)) return false;
     if ((!inputValue.trim() && attachedFiles.length === 0) || sending || !agentWallet) return false;
 
     if (!wallet || !account) {
       toast({ title: "Connect wallet", description: "Please connect your wallet to chat", variant: "destructive" });
       return false;
     }
-
     if (!selectedUserAddress || userAddressResolving) {
       toast({
         title: "Account resolving",
@@ -300,13 +520,11 @@ export default function AgentDetailPage() {
       });
       return false;
     }
-
-    // Require active session for all chains (enables session bypass for <100ms latency)
     if (!sessionActive || budgetRemaining <= 0) {
       toast({
         title: "Session Required",
         description: "Please create a session to continue. Sessions enable faster responses.",
-        variant: "destructive"
+        variant: "destructive",
       });
       setShowSessionDialog(true);
       return false;
@@ -316,9 +534,7 @@ export default function AgentDetailPage() {
     const userAddress = selectedUserAddress;
     const backpackUserId = resolveBackpackUserId(userAddress);
     const prompt = inputValue.trim();
-    // Smart Contracts: an attached .sol file's SOURCE rides the message as a
-    // solidity code fence (plain input_text — the agent passes it to the
-    // audit tool itself); the file chip + upload URL keep working unchanged.
+
     let message = prompt;
     const attachedSource = attached?.file && /\.sol$/i.test(attached.file.name)
       ? await attached.file.text().catch(() => "")
@@ -331,6 +547,7 @@ export default function AgentDetailPage() {
         "```",
       ].join("\n\n");
     }
+
     const selected = new Set(selectedSlashCommands);
     const selectedControls = {
       ...(selected.has("plan") ? { plan: true } : {}),
@@ -344,7 +561,6 @@ export default function AgentDetailPage() {
         },
       } : {}),
     };
-    let accepted = false;
 
     addUserMessage(prompt, {
       type: attached?.type === "image" || attached?.type === "audio" || attached?.type === "video" ? attached.type : "text",
@@ -356,26 +572,9 @@ export default function AgentDetailPage() {
     clearFiles();
     setSending(true);
     setChatError(null);
-    accepted = true;
-
-    posthog?.capture("agent_chat_sent", {
-      agent_wallet: agentWallet,
-      agent_name: agent?.metadata?.name,
-      has_attachment: attachedFiles.length > 0,
-      attachment_type: attachedFiles[0]?.type ?? null,
-      network: paymentNetwork,
-    });
-
-    mpTrack("Launch AI");
-    mpTrack("AI Prompt Sent and Prompt Text", {
-      "Prompt Text": inputValue.trim().slice(0, 500),
-    });
 
     const assistantId = createAssistantPlaceholder();
-    // Stable per-thread root run: every turn of this conversation lands in
-    // one runstate namespace (archive, conclave, watch); the runtime mints
-    // a fresh child runId per turn.
-    const runId = ensureConversationRootRun();
+    const runId = createTurnRunId();
 
     try {
       if (!agent) throw new Error("Agent not loaded");
@@ -392,22 +591,22 @@ export default function AgentDetailPage() {
       sdk.keys.use(activeKeyToken);
 
       const threadId = ensureConversationThread();
-
       const attachmentPart = toAttachment(attached);
+
       await streamer.runAgent({
         agentWallet,
         message,
         threadId,
         userAddress: backpackUserId,
-        runId: runId,
-        cloudPermissions: getCachedBackpackPermissions(agentWallet),
+        runId,
+        cloudPermissions: getCachedPermissions(agentWallet),
         ...(attachmentPart ? { attachment: attachmentPart } : {}),
         ...selectedControls,
         assistantId,
         options: {
           key: activeKeyToken,
           userAddress,
-          network: paymentNetwork,
+          ...(paymentNetwork ? { network: paymentNetwork } : {}),
         },
       });
     } catch (err) {
@@ -415,13 +614,13 @@ export default function AgentDetailPage() {
         const errorMsg = err instanceof Error ? err.message : String(err);
         setChatError(errorMsg);
         failAssistant(assistantId, errorMsg);
-        mpError("agent_chat", errorMsg, { agent_wallet: agentWallet });
       }
     } finally {
       setSending(false);
+      void refreshThreads();
     }
-    return accepted;
-  }, [inputValue, sending, agentWallet, wallet, account, toast, agent, attachedFiles, addUserMessage, clearFiles, createAssistantPlaceholder, failAssistant, paymentNetwork, sessionActive, budgetRemaining, keyToken, resolveActiveKeyToken, ensureConversationThread, ensureConversationRootRun, streamer, posthog, selectedUserAddress, userAddressResolving]);
+    return true;
+  }, [inputValue, sending, agentWallet, wallet, account, toast, agent, attachedFiles, addUserMessage, clearFiles, createAssistantPlaceholder, failAssistant, paymentNetwork, sessionActive, budgetRemaining, keyToken, resolveActiveKeyToken, ensureConversationThread, createTurnRunId, streamer, selectedUserAddress, userAddressResolving, refreshThreads]);
 
   const handlePlanDecision = useCallback(async (
     messageId: string,
@@ -439,8 +638,65 @@ export default function AgentDetailPage() {
     }
     updateAssistantMessage(messageId, { proposal: { ...plan, pending: true, error: undefined } });
     try {
+      if (decision === "cancelled") {
+        await streamer.stopAgent(
+          agentWallet,
+          runId,
+          threadIdRef.current ?? undefined,
+        );
+        setMessages((prev) => prev.map((msg) => {
+          if (msg.id !== messageId) return msg;
+          const settledTasks = msg.proposal?.tasks?.map((task) => (
+            task.status === "doing" ? { ...task, status: "failed" as const } : task
+          ));
+          const settledActivity = msg.activity
+            ? {
+              ...msg.activity,
+              nodes: Object.fromEntries(
+                Object.entries(msg.activity.nodes).map(([nodeId, node]) => [
+                  nodeId,
+                  node.status === "running"
+                    ? { ...node, status: "failed" as const, updatedAt: Date.now() }
+                    : node,
+                ]),
+              ),
+            }
+            : msg.activity;
+          return {
+            ...msg,
+            activity: settledActivity,
+            proposal: {
+              ...(msg.proposal ?? plan),
+              state: "cancelled",
+              decision: "cancelled",
+              pending: false,
+              error: undefined,
+              failureReason: "Cancelled by user",
+              clarify: undefined,
+              questions: undefined,
+              missingInputs: undefined,
+              ...(settledTasks ? { tasks: settledTasks } : {}),
+            },
+          };
+        }));
+        clearWatchableRun();
+        chat.clearActivityState();
+        setSending(false);
+        setWatching(false);
+        toast({ title: "Plan cancelled" });
+        void refreshThreads();
+        return;
+      }
+
       const activeKeyToken = await resolveActiveKeyToken();
       if (activeKeyToken) sdk.keys.use(activeKeyToken);
+      const trimmedFeedback = feedback?.trim() || undefined;
+      if (decision === "clarify" && !trimmedFeedback) {
+        updateAssistantMessage(messageId, {
+          proposal: { ...plan, pending: false, error: "Provide an answer before submitting." },
+        });
+        return;
+      }
       await sdk.agent.decide({
         agentWallet,
         runId,
@@ -448,52 +704,138 @@ export default function AgentDetailPage() {
         proposalVersion: plan.version,
         decision,
         approver: selectedUserAddress ?? undefined,
-        ...(feedback ? { feedback, reason: feedback } : {}),
+        ...(decision === "clarify" && trimmedFeedback
+          ? { answer: trimmedFeedback, feedback: trimmedFeedback }
+          : trimmedFeedback
+            ? { feedback: trimmedFeedback, reason: trimmedFeedback }
+            : {}),
       });
+      chat.planMessageIdRef.current = messageId;
+      const nextState = decision === "approved"
+        ? "executing"
+        : decision === "clarify"
+          ? "refining"
+          : decision;
       updateAssistantMessage(messageId, {
         proposal: {
           ...plan,
           pending: false,
           decision,
-          state: decision === "approved" ? "approved" : decision,
-          feedback,
+          state: nextState,
+          feedback: trimmedFeedback,
+          ...(decision === "clarify" || decision === "approved"
+            ? { clarify: undefined, questions: undefined, missingInputs: undefined }
+            : {}),
         },
       });
-      if (decision === "approved" && threadIdRef.current) {
-        void streamer.watchPlan({ agentWallet, runId, threadId: threadIdRef.current });
+      if (decision === "approved" || decision === "clarify" || decision === "changes_requested") {
+        setWatching(true);
+        chat.clearActivityState();
+        chat.setActivityPhase(
+          "thinking",
+          decision === "approved"
+            ? "Executing plan"
+            : decision === "clarify"
+              ? "Applying clarification"
+              : "Revising plan",
+        );
+      }
+      // Resume watch stream on ALL decisions (approved, changes_requested, rejected, clarify)
+      // so revised plans, post-clarify execution, and final receipts stream live!
+      const threadId = threadIdRef.current ?? ensureConversationThread();
+      if (threadId) {
+        void streamer.watchPlan({ agentWallet, runId, threadId });
       }
       toast({
-        title: decision === "approved" ? "Plan approved" : decision === "changes_requested" ? "Changes requested" : "Plan rejected",
+        title:
+          decision === "approved"
+            ? "Plan approved"
+            : decision === "changes_requested"
+              ? "Changes requested"
+              : decision === "clarify"
+                ? "Clarification submitted"
+                : "Plan rejected",
       });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
       updateAssistantMessage(messageId, {
-        proposal: { ...plan, pending: false, error: message },
+        proposal: { ...plan, pending: false, error: msg },
       });
       toast({
         title: "Plan decision failed",
-        description: message,
+        description: msg,
         variant: "destructive",
       });
     }
-  }, [agentWallet, keyToken, resolveActiveKeyToken, selectedUserAddress, toast, updateAssistantMessage]);
+  }, [agentWallet, chat, clearWatchableRun, ensureConversationThread, refreshThreads, resolveActiveKeyToken, selectedUserAddress, setMessages, streamer, threadIdRef, toast, updateAssistantMessage]);
 
-  const copyEndpoint = () => {
+  const handleConnectorDecided = useCallback((request: ConnectorRequest) => {
+    if (!agentWallet || !request.runId) return;
+    const threadId = threadIdRef.current ?? ensureConversationThread();
+    if (threadId) {
+      void streamer.watchPlan({ agentWallet, runId: request.runId, threadId });
+    }
+  }, [agentWallet, ensureConversationThread, streamer, threadIdRef]);
+
+  const handleTracePlanDecision = useCallback(
+    (plan: Plan, decision: NonNullable<Plan["decision"]>, feedback?: string) => {
+      const targetMsg = [...messages].reverse().find((m) => m.proposal?.proposalId === plan.proposalId);
+      if (targetMsg) {
+        void handlePlanDecision(targetMsg.id, plan, decision, feedback);
+      }
+    },
+    [handlePlanDecision, messages],
+  );
+
+  const copyEndpoint = useCallback(() => {
     toast({
       title: "Copied!",
       description: "Agent endpoint copied to clipboard",
     });
-  };
+  }, [toast]);
+
+  const handleStartSession = useCallback(() => {
+    setShowSessionDialog(true);
+  }, []);
+
+  const handleFileSelectClick = useCallback(() => {
+    fileInputRef.current?.click();
+  }, [fileInputRef]);
+
+  const handleStopClick = useCallback(() => {
+    void handleStop();
+  }, [handleStop]);
+
+  const handleCopyMessage = useCallback((content: string) => {
+    void navigator.clipboard.writeText(content);
+    toast({ title: "Copied!", description: "Message copied to clipboard" });
+  }, [toast]);
+
+  const handleRetryMessage = useCallback((content: string) => {
+    setInputValue(content);
+    toast({ title: "Retry", description: "Message loaded for re-sending" });
+  }, [toast]);
+
+  const handleDeleteMessage = useCallback((id: string) => {
+    setMessages((prev) => prev.filter((m) => m.id !== id));
+  }, [setMessages]);
+
+  const handleToggleGraphPaused = useCallback(() => {
+    setGraphPaused((p) => !p);
+  }, []);
+
+  const handleCloseTrace = useCallback(() => {
+    setTraceOpen(false);
+    setInspectedMessageId(null);
+  }, []);
 
   if (isLoading) {
     return (
       <div className="cm-chat-workspace">
-        {/* Header */}
         <div className="shrink-0 mb-3 flex items-center justify-between">
           <Skeleton className="h-8 w-32" />
           <Skeleton className="h-6 w-20" />
         </div>
-        {/* Main Grid */}
         <div className="cm-split">
           <div className="cm-split__main">
             <Skeleton className="h-full w-full rounded-lg" />
@@ -510,13 +852,13 @@ export default function AgentDetailPage() {
     const notFound = !error && !agent;
     return (
       <div className="cm-chat-workspace">
-        <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-fuchsia-400 -ml-2 mb-3" onClick={() => history.back()}>
+        <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-fuchsia-400 -ml-2 mb-3 w-fit" onClick={() => history.back()}>
           <ArrowLeft className="w-4 h-4 mr-2" />
           Back
         </Button>
 
         <div className={`flex-1 flex items-center justify-center border border-dashed rounded-lg ${isIndexing ? "border-cyan-500/30" : "border-red-500/30"}`}>
-          <div className="text-center">
+          <div className="text-center p-6">
             {isIndexing ? (
               <>
                 <Loader2 className="w-10 h-10 mx-auto text-cyan-400/70 mb-3 animate-spin" />
@@ -548,9 +890,24 @@ export default function AgentDetailPage() {
   const agentLabel = agent.metadata?.name
     || (agentWallet ? `${agentWallet.slice(0, 6)}...${agentWallet.slice(-4)}` : agent.id > 0 ? `Agent #${agent.id}` : "Agent");
 
+  const rawAvatarUrl = typeof (agent.metadata as { avatarUrl?: string | null } | undefined)?.avatarUrl === "string"
+    && /^(https?:\/\/|data:image\/|blob:)/i.test((agent.metadata as { avatarUrl?: string }).avatarUrl || "")
+    ? (agent.metadata as { avatarUrl: string }).avatarUrl
+    : null;
+  const avatarUrl = sizedAvatarUrl(rawAvatarUrl, "full");
+
+  const agentInitials = agentLabel
+    .split(" ")
+    .map((word) => word[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  const hasFlowData = isStreamingActive || activity.stepCount > 0 || Boolean(latestPlan) || Boolean(latestReceipt);
+
   return (
     <div className="cm-chat-workspace">
-      {/* Compact Header */}
+      {/* ── Compact Control Rail ── */}
       <div className="cm-control-rail cm-control-rail--compact cm-control-rail--inline">
         <Button
           variant="ghost"
@@ -558,23 +915,55 @@ export default function AgentDetailPage() {
           className="cm-shell-button cm-shell-button--ghost cm-shell-button--sm"
           onClick={() => history.back()}
         >
-          <ArrowLeft className="w-3.5 h-3.5 mr-1" />
+          <ArrowLeft className="w-3.5 h-3.5 sm:mr-1" />
           <span className="hidden sm:inline">Back</span>
         </Button>
 
-        <div className="cm-control-rail__main" />
-        <Hint label="Backpack">
-          <ShellButton
-            size="sm"
-            tone="secondary"
-            iconOnly
-            aria-label="Backpack"
-            onClick={openBackpack}
-          >
-            <Backpack size={14} />
-          </ShellButton>
-        </Hint>
+        <div className="cm-control-rail__main min-w-0">
+          <h1 className="cm-page-header__title min-w-0 max-w-full" data-route-heading>
+            <span className="text-fuchsia-500 mr-1.5 shrink-0">//</span>
+            <span className="truncate">{agentLabel}</span>
+          </h1>
+        </div>
+
         <div className="cm-control-rail__actions">
+          {selectedUserAddress && (
+            <Threads
+              threads={threads}
+              activeThreadId={threadId}
+              disabled={isStreamingActive}
+              loading={threadsLoading}
+              onSelectThread={(item) => void handleSelectThread(item)}
+              onNewThread={handleClearChat}
+            />
+          )}
+
+          <Pockets
+            value={pocket}
+            label="Agent view"
+            className="cm-pocket-bar--split"
+            onChange={setPocket}
+            options={[
+              { value: "chat", label: "Chat" },
+              { value: "agent", label: "Info" },
+            ]}
+          />
+
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="cm-shell-button cm-shell-button--secondary cm-shell-button--sm"
+            onClick={() => openTrace()}
+            aria-label="Open activity"
+          >
+            <GitBranch className="w-3.5 h-3.5 sm:mr-1" />
+            <span className="cm-agent-detail-install-label">
+              Activity{activity.stepCount > 0 ? ` (${activity.stepCount})` : ""}
+            </span>
+            {hasFlowData && <span className="cm-pocket-btn__dot" aria-hidden="true" />}
+          </Button>
+
           <Button
             asChild
             size="sm"
@@ -582,43 +971,51 @@ export default function AgentDetailPage() {
             className="cm-shell-button cm-shell-button--secondary cm-shell-button--sm"
           >
             <Link href={`/connect-local?agent_wallet=${encodeURIComponent(agentWallet || "")}`}>
-              <Download className="w-3 h-3 sm:mr-1" />
-              <span className="hidden sm:inline">Install locally</span>
+              <Download className="w-3.5 h-3.5 sm:mr-1" />
+              <span className="cm-agent-detail-install-label">Install</span>
             </Link>
           </Button>
-          {/* Mobile Side Panel Button — opens tabbed side panel */}
+
           <Button
             variant="ghost"
             size="sm"
-            className="cm-shell-button cm-shell-button--ghost cm-shell-button--sm cm-agent-detail-card-button"
-            onClick={() => setMobileSideOpen(true)}
-            aria-label="View side panel"
+            className="cm-shell-button cm-shell-button--ghost cm-shell-button--sm cm-split__collapse-btn"
+            onClick={() => setPaneCollapsed((prev) => !prev)}
+            aria-label={paneCollapsed ? "Show agent info" : "Hide agent info"}
+            title={paneCollapsed ? "Show agent info" : "Hide agent info"}
           >
-            {activeSideTab === "mission" ? <Activity className="w-4 h-4" /> : <IdCard className="w-4 h-4" />}
+            {paneCollapsed ? <PanelRightOpen className="w-3.5 h-3.5" /> : <PanelRightClose className="w-3.5 h-3.5" />}
           </Button>
         </div>
       </div>
 
-
-      {/* Main Layout: Chat on Left, Card on Right - fills remaining space */}
-      <div className="cm-split">
-        {/* Chat Section (2/3 width on desktop, full on mobile) */}
-        <div className="cm-split__main">
+      {/* ── Balanced 2-Zone Split: Full-height Chat + Info & Live Activity Rail ── */}
+      <div
+        className={`cm-split${paneCollapsed ? " cm-split--collapsed" : ""}`}
+        data-pocket={pocket === "chat" ? "main" : "side"}
+        data-collapsed={paneCollapsed ? "true" : undefined}
+      >
+        <div className="cm-split__main cm-agent-chat-cell">
           <MultimodalCanvas
             variant="agent"
+            showHeader={false}
             title={`Chat with ${agentLabel}`}
             messages={messages}
             inputValue={inputValue}
             onInputChange={setInputValue}
             onSend={handleSendMessage}
-            sending={sending}
-            status={sending ? "streaming" : "idle"}
+            sending={isStreamingActive}
+            status={isStreamingActive ? "streaming" : "idle"}
             activityState={activityState}
+            activePlan={latestPlan}
+            stepCount={activity.stepCount}
+            latestReceipt={latestReceipt}
+            latestReceipts={latestReceipts}
             error={chatError}
             sessionActive={sessionActive}
-            onStartSession={() => setShowSessionDialog(true)}
+            onStartSession={handleStartSession}
             attachedFiles={attachedFiles}
-            onFileSelect={() => fileInputRef.current?.click()}
+            onFileSelect={handleFileSelectClick}
             onKnowledgeUpload={openWorkspaceDialog}
             onRemoveFile={handleRemoveFile}
             fileInputRef={fileInputRef}
@@ -627,98 +1024,105 @@ export default function AgentDetailPage() {
             recordingSupported={recordingSupported}
             onStartRecording={startRecording}
             onStopRecording={stopRecording}
+            onStop={handleStopClick}
+            onInspectFlow={openTrace}
+            onConnectorDecided={handleConnectorDecided}
             scrollContainerRef={scrollContainerRef}
             messagesEndRef={messagesEndRef}
             showMessageActions
-            onCopyMessage={(content) => {
-              navigator.clipboard.writeText(content);
-              toast({ title: "Copied!", description: "Message copied to clipboard" });
-            }}
-            onRetryMessage={(content) => {
-              setInputValue(content);
-              toast({ title: "Retry", description: "Message loaded for re-sending" });
-            }}
-            onDeleteMessage={(id) => setMessages(prev => prev.filter(m => m.id !== id))}
+            onCopyMessage={handleCopyMessage}
+            onRetryMessage={handleRetryMessage}
+            onDeleteMessage={handleDeleteMessage}
             onPlanDecision={handlePlanDecision}
             onClearChat={handleClearChat}
-            onFocusMissionControl={() => { setActiveSideTab("mission"); setMobileSideOpen(true); }}
             height="h-full"
-            emptyStateText="Start a conversation with this agent."
-            emptyStateSubtext="Requires x402 payment session."
+            emptyStage={(
+              <div className="cm-chat-hero">
+                <div className="cm-chat-hero__portrait">
+                  {avatarUrl ? (
+                    <img src={avatarUrl} alt={agentLabel} loading="eager" fetchPriority="high" decoding="async" />
+                  ) : (
+                    <span>{agentInitials}</span>
+                  )}
+                </div>
+              </div>
+            )}
+            emptyStateText={agentLabel}
+            emptyStateSubtext={
+              agent.metadata?.description?.trim()
+                ? agent.metadata.description.trim()
+                : sessionActive
+                  ? `Balance: ${formatBudget(budgetRemaining)} · Type / for commands`
+                  : "Start a session to chat"
+            }
           />
         </div>
 
-        {/* Side Panel: Tabbed — AgentCard and Mission Control both always accessible */}
+        {/* Side Rail: Agent Details + Single Live Activity Visualizer */}
         <div className="cm-split__side">
-          <div className="cm-side-panel-tabs" data-tab={activeSideTab}>
-            <div className="cm-model-card__toolbar">
-              <button
-                type="button"
-                className={cn(
-                  "cm-model-card__toolbar-btn",
-                  activeSideTab === "agent" && "cm-model-card__toolbar-btn--active-cyan",
-                )}
-                onClick={() => setActiveSideTab("agent")}
-                aria-pressed={activeSideTab === "agent"}
-              >
-                <IdCard className="w-3.5 h-3.5" />
-                <span className="cm-model-card__toolbar-label">Agent</span>
-              </button>
-              <button
-                type="button"
-                className={cn(
-                  "cm-model-card__toolbar-btn",
-                  activeSideTab === "mission" && "cm-model-card__toolbar-btn--active-fuchsia",
-                )}
-                onClick={() => setActiveSideTab("mission")}
-                aria-pressed={activeSideTab === "mission"}
-              >
-                <Activity className="w-3.5 h-3.5" />
-                <span className="cm-model-card__toolbar-label">Mission</span>
-                {showMissionControl && activeSideTab !== "mission" && (
-                  <span className="cm-side-panel-tabs__badge" />
-                )}
-              </button>
-            </div>
-            <div className="cm-side-panel-tabs__body">
-              {activeSideTab === "agent" && (
-                <AgentCard agent={agent} onCopyEndpoint={copyEndpoint} />
-              )}
-              {activeSideTab === "mission" && (
-                showMissionControl ? (
-                  <MissionControlSidePanel
-                    activity={latestActivity}
-                    plan={latestPlan}
-                    messages={messages}
-                    phase={activityState?.phase}
-                    phaseLabel={activityState?.label}
-                    agentLabel={agentLabel}
-                    onPlanDecision={handlePlanDecision}
-                  />
-                ) : (
-                  <div className="cm-side-panel-tabs__empty">
-                    <Activity className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                    <p className="text-xs text-muted-foreground">No active missions. Start a conversation to see live activity.</p>
-                  </div>
-                )
-              )}
+          <div className="cm-agent-panel">
+            <AgentCard
+              agent={agent}
+              onCopyEndpoint={copyEndpoint}
+              className="cm-agent-card--match-chat cm-agent-hero-anchor"
+            />
+
+            <div className="cm-agent-panel__activity">
+              <div className="cm-agent-panel__activity-head">
+                <span className="cm-agent-panel__activity-title">Live Activity</span>
+                <div className="cm-agent-panel__activity-actions">
+                  <button
+                    type="button"
+                    className="cm-agent-panel__activity-icon-btn"
+                    onClick={handleToggleGraphPaused}
+                    aria-label={graphPaused ? "Play motion" : "Pause motion"}
+                    title={graphPaused ? "Play motion" : "Pause motion"}
+                  >
+                    {graphPaused ? <Play className="cm-agent-card__inline-svg" /> : <Pause className="cm-agent-card__inline-svg" />}
+                  </button>
+                  <button
+                    type="button"
+                    className="cm-agent-panel__activity-btn"
+                    onClick={() => openTrace()}
+                  >
+                    <GitBranch className="cm-agent-card__inline-svg" />
+                    <span>{activity.stepCount > 0 ? `Steps (${activity.stepCount})` : "View Activity"}</span>
+                  </button>
+                </div>
+              </div>
+              <Graph
+                agentName={agentLabel}
+                modelName={agent.metadata?.model || "Model"}
+                connectorCount={agent.metadata?.connectors?.length ?? 0}
+                activeChildren={activity.activeChildren}
+                activeTools={activity.activeTools}
+                phase={activity.phase}
+                priceLabel={agent.licensePriceFormatted}
+                paused={graphPaused || traceOpen}
+                onTogglePause={handleToggleGraphPaused}
+                className="cm-agent-panel__activity-graph"
+              />
             </div>
           </div>
         </div>
       </div>
 
+      {/* ── Surface 3: Full-Readability Flow & Delegation Sheet ── */}
+      <Trace
+        open={traceOpen}
+        onClose={handleCloseTrace}
+        activity={inspectedMessage?.activity ?? latestActivity}
+        plan={inspectedMessage?.proposal ?? latestPlan}
+        planVersions={planVersions}
+        receipt={inspectedMessage?.receipt ?? latestReceipt}
+        receipts={inspectedMessage?.receipts ?? latestReceipts}
+        usage={inspectedMessage?.usage ?? latestUsage}
+        focusedNodeId={focusedNodeId}
+        onPlanDecision={handleTracePlanDecision}
+      />
+
       {/* Session Budget Dialog */}
       <SessionBudgetDialog open={showSessionDialog} onOpenChange={setShowSessionDialog} showTrigger={false} />
-      {selectedUserAddress && agentWallet ? (
-        <BackpackDialog
-          open={backpackOpen}
-          onOpenChange={setBackpackOpen}
-          userAddress={selectedUserAddress}
-          agentWallet={agentWallet}
-          agentName={agentLabel}
-          showTrigger={false}
-        />
-      ) : null}
 
       <Dialog open={workspaceOpen} onOpenChange={setWorkspaceOpen}>
         <DialogContent>
@@ -745,7 +1149,7 @@ export default function AgentDetailPage() {
                   >
                     <div className="min-w-0">
                       <p className="truncate font-mono text-xs text-foreground">{file.name}</p>
-                      <p className="text-[10px] text-muted-foreground">
+                      <p className="text-xs text-muted-foreground">
                         {Math.max(1, Math.round(file.size / 1024))} KB
                       </p>
                     </div>
@@ -754,7 +1158,7 @@ export default function AgentDetailPage() {
                       variant="ghost"
                       size="sm"
                       onClick={() => removeWorkspaceFile(file)}
-                      className="h-7 px-2 text-[10px] text-muted-foreground hover:text-foreground shrink-0"
+                      className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground shrink-0"
                     >
                       <X className="w-3 h-3 mr-1" />
                       Remove
@@ -772,78 +1176,12 @@ export default function AgentDetailPage() {
             <Button type="button" variant="outline" onClick={() => setWorkspaceOpen(false)} disabled={workspaceUploading}>
               Cancel
             </Button>
-            <Button type="button" onClick={handleWorkspaceUpload} disabled={workspaceUploading || workspaceFiles.length === 0}>
+            <Button type="button" onClick={() => void handleWorkspaceUpload()} disabled={workspaceUploading || workspaceFiles.length === 0}>
               {workspaceUploading ? "Indexing..." : "Index workspace"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Mobile Side Panel Sheet — unified with tabs */}
-      <Sheet open={mobileSideOpen} onOpenChange={setMobileSideOpen}>
-        <SheetContent side="right" className="cm-sheet-panel cm-sheet-panel--inspect p-0">
-          <SheetHeader className="p-4 border-b border-sidebar-border shrink-0">
-            <SheetTitle className="font-display text-cyan-400 flex items-center gap-2">
-              {activeSideTab === "mission" ? <Activity className="w-4 h-4" /> : <IdCard className="w-4 h-4" />}
-              {activeSideTab === "mission" ? "Mission Control" : "Agent Details"}
-            </SheetTitle>
-          </SheetHeader>
-          <div className="cm-sheet-body cm-sheet-body--inspect">
-            <div className="cm-side-panel-tabs" data-tab={activeSideTab}>
-              <div className="cm-model-card__toolbar">
-                <button
-                  type="button"
-                  className={cn(
-                    "cm-model-card__toolbar-btn",
-                    activeSideTab === "agent" && "cm-model-card__toolbar-btn--active-cyan",
-                  )}
-                  onClick={() => setActiveSideTab("agent")}
-                  aria-pressed={activeSideTab === "agent"}
-                >
-                  <IdCard className="w-3.5 h-3.5" />
-                  <span className="cm-model-card__toolbar-label">Agent</span>
-                </button>
-                <button
-                  type="button"
-                  className={cn(
-                    "cm-model-card__toolbar-btn",
-                    activeSideTab === "mission" && "cm-model-card__toolbar-btn--active-fuchsia",
-                  )}
-                  onClick={() => setActiveSideTab("mission")}
-                  aria-pressed={activeSideTab === "mission"}
-                >
-                  <Activity className="w-3.5 h-3.5" />
-                  <span className="cm-model-card__toolbar-label">Mission</span>
-                </button>
-              </div>
-              <div className="cm-side-panel-tabs__body">
-                {activeSideTab === "agent" && (
-                  <AgentCard agent={agent} onCopyEndpoint={copyEndpoint} className="cm-agent-card--match-chat" />
-                )}
-                {activeSideTab === "mission" && (
-                  showMissionControl ? (
-                    <MissionControlSidePanel
-                      activity={latestActivity}
-                      plan={latestPlan}
-                      messages={messages}
-                      phase={activityState?.phase}
-                      phaseLabel={activityState?.label}
-                      agentLabel={agentLabel}
-                      onPlanDecision={handlePlanDecision}
-                      className="cm-mission-control--mobile"
-                    />
-                  ) : (
-                    <div className="cm-side-panel-tabs__empty">
-                      <Activity className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                      <p className="text-xs text-muted-foreground">No active missions. Start a conversation to see live activity.</p>
-                    </div>
-                  )
-                )}
-              </div>
-            </div>
-          </div>
-        </SheetContent>
-      </Sheet>
     </div>
   );
 }
