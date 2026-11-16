@@ -17,14 +17,16 @@ interface ImportMetaEnv {
   
   // Backend Services
   readonly VITE_CONNECTORS_URL?: string;
+  readonly VITE_CHANNELS_URL?: string;
 
-  // Storage and knowledge (pinning is proxied server-side; no JWT in bundle)
+  // NEAR Smart Contracts
+  readonly VITE_NEAR_FACTORY_ADDRESS?: string;
+  readonly VITE_NEAR_REPUTATION_ADDRESS?: string;
+  readonly VITE_NEAR_VALIDATION_ADDRESS?: string;
+  readonly VITE_NEAR_WORKFLOW_ADDRESS?: string;
+
+  // Storage and knowledge (pinning & embeddings are proxied server-side; zero secrets in bundle)
   readonly VITE_PINATA_GATEWAY?: string;
-  readonly VITE_FILECOIN_PRIVATE_KEY?: string;
-  readonly VITE_FILECOIN_RPC_URL?: string;
-  readonly VITE_FILECOIN_NETWORK?: string;
-  readonly VITE_MONGO_DB_API_KEY?: string;
-  readonly MONGO_DB_API_KEY?: string;
 }
 
 interface ImportMeta {

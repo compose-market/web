@@ -3,18 +3,18 @@
 
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 
-  <title>Compose.Market - AI Agent Marketplace</title>
+  <title>Compose.Market</title>
 
   <!-- Open Graph / Social Meta Tags -->
-  <meta property="og:title" content="Compose.Market - Manowar" />
-  <meta property="og:description" content="Web3 Native Agent Marketplace & Workflow Composer on Avalanche" />
+  <meta property="og:title" content="Compose.Market" />
+  <meta property="og:description" content="Build, Compose, and Monetize Autonomous Agents Across Chains." />
   <meta property="og:type" content="website" />
   <meta property="og:image" content="/branding/png/logo-512.png" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Compose.Market" />
-  <meta name="twitter:description" content="Build, Lease, and Monetize Autonomous Agent Workflows." />
+  <meta name="twitter:description" content="Build, Compose, and Monetize Autonomous Agents Across Chains." />
   <meta name="twitter:image" content="/branding/png/logo-512.png" />
 
   <!-- Favicons for all platforms -->
@@ -32,16 +32,190 @@
 
   <!-- Legacy fallback -->
   <link rel="shortcut icon" href="/favicon.png?v=2" />
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <!-- Wallet/API reconnect path: warm up connections used on every page load -->
-  <link rel="preconnect" href="https://api.compose.market">
-  <link rel="preconnect" href="https://embedded-wallet.thirdweb.com">
-  <link rel="preconnect" href="https://api.thirdweb.com">
-  <!-- Fonts: Orbitron (Display), Rajdhani (UI), Fira Code (Code) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <!-- Warm critical API, services, runtime, and edge catalog origins immediately -->
+  <link rel="preconnect" href="https://agents.compose.market" crossorigin />
+  <link rel="preconnect" href="https://models.compose.market" crossorigin />
+  <link rel="preconnect" href="https://connectors.compose.market" crossorigin />
+  <link rel="preconnect" href="https://api.compose.market" />
+  <link rel="preconnect" href="https://services.compose.market" crossorigin />
+  <link rel="preconnect" href="https://runtime.compose.market" crossorigin />
+
+  <!-- Fonts: non-render-blocking load (Orbitron, Rajdhani, Fira Code) -->
+  <link
+    rel="preload"
+    as="style"
+    href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300..700&family=Orbitron:wght@400..900&family=Rajdhani:wght@300..700&display=swap"
+  />
   <link
     href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300..700&family=Orbitron:wght@400..900&family=Rajdhani:wght@300..700&display=swap"
-    rel="stylesheet">
+    rel="stylesheet"
+    media="print"
+    onload="this.media='all'"
+  />
+  <noscript>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300..700&family=Orbitron:wght@400..900&family=Rajdhani:wght@300..700&display=swap"
+      rel="stylesheet"
+    />
+  </noscript>
+
+  <!-- Boot preloader: hydrates hard-reload-proof Cache Storage avatars and fires cold catalog/chains at t~5ms -->
+  <script>
+    (function () {
+      var boot = {
+        avatars: Object.create(null),
+        pending: Object.create(null),
+        catalog: null,
+        catalogResolved: null,
+        chains: null,
+        chainsResolved: null,
+        hydrateReady: null,
+        onAvatar: null
+      };
+      window.__CM_BOOT__ = boot;
+
+      var rawAgents = "%VITE_AGENTS_URL%";
+      var agentsBase = (rawAgents.indexOf("http") === 0 ? rawAgents : "https://agents.compose.market").replace(/\/+$/, "");
+      var rawApi = "%VITE_API_URL%";
+      var apiBase = (rawApi.indexOf("http") === 0 ? rawApi : "https://api.compose.market").replace(/\/+$/, "");
+      var agentsOrigin;
+      try { agentsOrigin = new URL(agentsBase).origin; } catch (_) { agentsOrigin = "https://agents.compose.market"; }
+
+      function toThumbUrl(raw) {
+        if (typeof raw !== "string" || raw.indexOf("http") !== 0) return null;
+        try {
+          var u = new URL(raw);
+          if (!u.pathname.endsWith("/avatar")) return null;
+          u.searchParams.delete("w");
+          u.searchParams.set("size", "thumb");
+          return u.toString();
+        } catch (_) {
+          return null;
+        }
+      }
+
+      function registerBatch(entries) {
+        for (var i = 0; i < entries.length; i++) {
+          var url = entries[i][0];
+          var blobUrl = entries[i][1];
+          delete boot.pending[url];
+          if (blobUrl) boot.avatars[url] = blobUrl;
+        }
+        if (typeof boot.onAvatarBatch === "function") {
+          boot.onAvatarBatch(entries);
+        } else if (typeof boot.onAvatar === "function") {
+          for (var j = 0; j < entries.length; j++) {
+            boot.onAvatar(entries[j][0], entries[j][1]);
+          }
+        }
+      }
+
+      function hydrateUrls(urls, fetchMisses) {
+        if (!urls.length || typeof caches === "undefined" || typeof URL === "undefined" || !URL.createObjectURL) return;
+        var first = urls.slice(0, 24);
+        var rest = urls.slice(24);
+        if (fetchMisses) {
+          for (var i = 0; i < first.length; i++) {
+            if (!boot.avatars[first[i]]) boot.pending[first[i]] = true;
+          }
+        }
+        boot.hydrateReady = caches.open("avatars").then(function (cache) {
+          function hydrateBatch(list, allowFetch) {
+            return Promise.all(list.map(function (url) {
+              if (boot.avatars[url]) { delete boot.pending[url]; return null; }
+              return cache.match(url).then(function (hit) {
+                if (hit && hit.ok) {
+                  return hit.blob().then(function (blob) {
+                    return [url, blob && blob.size > 0 ? URL.createObjectURL(blob) : null];
+                  });
+                }
+                if (!allowFetch) { delete boot.pending[url]; return null; }
+                boot.pending[url] = true;
+                return fetch(url, { mode: "cors", credentials: "omit" }).then(function (res) {
+                  if (!res.ok) return [url, null];
+                  var ct = res.headers.get("content-type") || "";
+                  if (ct && ct.indexOf("image/") !== 0) return [url, null];
+                  cache.put(url, res.clone()).catch(function () {});
+                  return res.blob().then(function (blob) {
+                    return [url, blob && blob.size > 0 ? URL.createObjectURL(blob) : null];
+                  });
+                }).catch(function () { return [url, null]; });
+              }).catch(function () { return [url, null]; });
+            })).then(function (resolved) {
+              var ready = resolved.filter(Boolean);
+              if (ready.length) registerBatch(ready);
+            });
+          }
+          return hydrateBatch(first, fetchMisses).then(function () {
+            if (rest.length) return hydrateBatch(rest, false);
+          });
+        }).catch(function () {
+          registerBatch(first.map(function (url) { return [url, null]; }));
+        });
+      }
+
+      function extractThumbUrls(items) {
+        var out = [];
+        var seen = Object.create(null);
+        for (var i = 0; i < items.length; i++) {
+          var item = items[i];
+          var url = item && toThumbUrl(item.avatarUrl);
+          if (url && !seen[url]) {
+            seen[url] = true;
+            out.push(url);
+          }
+        }
+        return out;
+      }
+
+      var hasCatalog = false;
+      try {
+        var cachedRaw = localStorage.getItem("agents:catalog:" + agentsOrigin);
+        if (cachedRaw) {
+          var parsed = JSON.parse(cachedRaw);
+          if (parsed && Array.isArray(parsed.items) && parsed.items.length > 0) {
+            hasCatalog = true;
+            hydrateUrls(extractThumbUrls(parsed.items), true);
+          }
+        }
+      } catch (_) {}
+
+      var path = location.pathname || "/";
+      var wantsCatalog = path === "/market" || path === "/" || path.indexOf("/agent/") === 0 || path === "/profile";
+      if (!hasCatalog && wantsCatalog) {
+        boot.catalog = fetch(agentsOrigin + "/index", {
+          headers: { Accept: "application/json" }
+        }).then(function (res) {
+          if (!res.ok) return null;
+          return res.json();
+        }).then(function (data) {
+          if (!data || !Array.isArray(data.agents) || !data.version) return null;
+          boot.catalogResolved = data;
+          hydrateUrls(extractThumbUrls(data.agents).slice(0, 20), true);
+          return data;
+        }).catch(function () { return null; });
+      }
+
+      var hasChains = false;
+      try {
+        hasChains = Boolean(localStorage.getItem("chain_registry"));
+      } catch (_) {}
+      if (!hasChains) {
+        boot.chains = fetch(apiBase + "/api/x402/facilitator/chains", {
+          headers: { Accept: "application/json" }
+        }).then(function (res) {
+          if (!res.ok) return null;
+          return res.json();
+        }).then(function (data) {
+          if (!data || !Array.isArray(data.chains) || !data.chains.length) return null;
+          boot.chainsResolved = data;
+          return data;
+        }).catch(function () { return null; });
+      }
+    })();
+  </script>
 </head>
 
 <body>
