@@ -89,3 +89,25 @@ function registerBlobUrl(url: string, blobUrl: string): void {
   blobUrls.set(url, blobUrl);
   notifyListeners(url);
 }
+
+adoptBootAvatars();
+
+export function readBootCatalog(): BootCatalogPayload | null {
+  if (typeof window === "undefined") return null;
+  return window.__CM_BOOT__?.catalogResolved ?? null;
+}
+
+export function readBootCatalogPromise(): Promise<BootCatalogPayload | null> | null {
+  if (typeof window === "undefined") return null;
+  return window.__CM_BOOT__?.catalog ?? null;
+}
+
+export function readBootChains(): FacilitatorChainsResponse | null {
+  if (typeof window === "undefined") return null;
+  return window.__CM_BOOT__?.chainsResolved ?? null;
+}
+
+export function readBootChainsPromise(): Promise<FacilitatorChainsResponse | null> | null {
+  if (typeof window === "undefined") return null;
+  return window.__CM_BOOT__?.chains ?? null;
+}
