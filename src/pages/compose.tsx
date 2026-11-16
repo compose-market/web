@@ -12,9 +12,7 @@
  */
 
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
-import { usePostHog } from "@posthog/react";
-import { mpTrack, mpError } from "@/lib/mixpanel";
-import { formatWeiUsd } from "@/lib/format";
+import { formatWeiUsd } from "@/lib/receipts";
 import { useLocation } from "wouter";
 import {
   ReactFlow,
@@ -23,6 +21,7 @@ import {
   MiniMap,
   ReactFlowProvider,
 } from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -30,11 +29,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 import {
   Play, Loader2, CheckCircle2,
   Plug, Settings, Bot,
   Sparkles, Upload, DollarSign, Clock, AlertCircle,
-  ArrowRightLeft, Globe, Maximize2, RefreshCw, Check
+  ArrowRightLeft, Globe, Maximize2, Minimize2, RefreshCw, Check
 } from "lucide-react";
 import {
   Tooltip,
@@ -54,13 +54,13 @@ import {
 } from "@/lib/contracts";
 import {
   uploadWorkflowBanner, uploadWorkflowMetadata, getIpfsUri,
-  fileToDataUrl, isPinataConfigured, fetchFromIpfs,
+  fileToDataUrl, fetchFromIpfs,
   type WorkflowMetadata, type AgentCard
 } from "@/lib/pinata";
 import { CHAIN_CONFIG, getUsdcContractForChain, isEvmNetwork, evmChainId } from "@/lib/chains";
 import { useChain } from "@/contexts/Network";
 import { NetworkSelector } from "@/components/network-selector";
-import { sdk } from "@/lib/sdk";
+import { RUNTIME_BASE_URL, sdk } from "@/lib/sdk";
 import { useAgenticModels } from "@/hooks/use-coordinator";
 import { useSession } from "@/hooks/use-session.tsx";
 import {
@@ -70,7 +70,7 @@ import {
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+} from "@/components/ui/alerts";
 import {
   Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger,
 } from "@/components/ui/sheet";
@@ -94,11 +94,9 @@ import {
 
 // Extracted components
 import {
-  StepNode, AgentNode, TriggerNode, HookNode,
-  type StepNodeData, type AgentNodeData, type TriggerNodeData,
+  StepNode, AgentNode,
+  type StepNodeData, type AgentNodeData,
 } from "@/components/compose/nodes";
-import { ConnectorPicker, AgentsPicker } from "@/components/compose/pickers";
-import { FullscreenOverlay } from "@/components/compose/overlay";
 import { FloatingToolbox } from "@/components/compose/toolbox";
 
 // =============================================================================
@@ -108,8 +106,6 @@ import { FloatingToolbox } from "@/components/compose/toolbox";
 const nodeTypes = {
   stepNode: StepNode,
   agentNode: AgentNode,
-  triggerNode: TriggerNode,
-  hookNode: HookNode,
 };
 
 // =============================================================================
@@ -129,7 +125,6 @@ function MintWorkflowDialog({
   open, onOpenChange, workflowName, workflowDescription, agentIds,
   agentPrices = new Map()
 }: MintWorkflowDialogProps) {
-  const posthog = usePostHog();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const wallet = useActiveWallet();
@@ -149,7 +144,6 @@ function MintWorkflowDialog({
 
   const [title, setTitle] = useState(workflowName);
   const [description, setDescription] = useState(workflowDescription);
-  const [x402Price, setX402Price] = useState("0.01");
   const [units, setUnits] = useState("");
   const [leaseEnabled, setLeaseEnabled] = useState(false);
   const [leaseDuration, setLeaseDuration] = useState("30");
@@ -263,8 +257,8 @@ function MintWorkflowDialog({
       toast({ title: "Wallet not connected", variant: "destructive" });
       return;
     }
-    if (!isPinataConfigured()) {
-      toast({ title: "IPFS not configured", variant: "destructive" });
+    if (!selectedNetwork) {
+      toast({ title: "Select a deployment network first", variant: "destructive" });
       return;
     }
     setShowConfirmDialog(true);
@@ -272,6 +266,10 @@ function MintWorkflowDialog({
 
   const handleConfirmMint = async () => {
     setShowConfirmDialog(false);
+    if (!selectedNetwork) {
+      toast({ title: "Select a deployment network first", variant: "destructive" });
+      return;
+    }
     try {
       setIsMinting(true);
       let bannerImageUri = "";
@@ -430,31 +428,9 @@ function MintWorkflowDialog({
         network: selectedNetwork,
       });
 
-      posthog?.capture("workflow_published", {
-        workflow_title: title,
-        workflow_wallet: walletAddress,
-        network: selectedNetwork,
-        ...(selectedChainId ? { chain_id: selectedChainId } : {}),
-        agent_count: agentIds.length,
-        tx_hash: txHash,
-        path: selectedChainId ? "thirdweb" : "swig",
-      });
-
-      mpTrack("Conversion Event", { "Conversion Type": "workflow_published" });
-      mpTrack("Purchase", {
-        transaction_id: txHash,
-        revenue: Number(totalAgentPriceFormatted),
-        currency: "USDC",
-      });
-
       onOpenChange(false);
-      setLocation("/my-assets");
+      setLocation("/profile");
     } catch (error) {
-      posthog?.captureException(error instanceof Error ? error : new Error(String(error)), {
-        $exception_message: "workflow_publish_failed",
-        chain_id: selectedChainId,
-      });
-      mpError("workflow_publish", error instanceof Error ? error.message : String(error));
       toast({
         title: "Minting Failed",
         description: error instanceof Error ? error.message : "Unknown error",
@@ -468,7 +444,7 @@ function MintWorkflowDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="cm-dialog-panel max-w-[95vw] sm:max-w-lg md:max-w-2xl bg-card border-fuchsia-500/30">
+        <DialogContent className="cm-dialog-panel max-w-2xl bg-card border-fuchsia-500/30">
           <DialogHeader>
             <DialogTitle className="font-display text-lg sm:text-xl flex items-center gap-2">
               <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-fuchsia-400" />
@@ -481,7 +457,7 @@ function MintWorkflowDialog({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-4">
             <div className="space-y-4">
               <div>
-                <Label className="text-[10px] sm:text-xs font-mono text-muted-foreground mb-2 block">BANNER IMAGE</Label>
+                <Label className="text-xs font-mono text-muted-foreground mb-2 block">BANNER IMAGE</Label>
                 <input ref={bannerInputRef} type="file" accept="image/*" onChange={handleBannerSelect} className="hidden" />
                 <div className="relative w-full">
                   <button
@@ -553,11 +529,11 @@ function MintWorkflowDialog({
                 )}
               </div>
               <div className="space-y-1">
-                <Label className="text-[10px] sm:text-xs font-mono text-muted-foreground">TITLE</Label>
+                <Label className="text-xs font-mono text-muted-foreground">TITLE</Label>
                 <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="My Workflow" className="bg-background/50 font-mono border-sidebar-border h-9" />
               </div>
               <div className="space-y-1">
-                <Label className="text-[10px] sm:text-xs font-mono text-muted-foreground">DESCRIPTION</Label>
+                <Label className="text-xs font-mono text-muted-foreground">DESCRIPTION</Label>
                 <Textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What does this workflow do?" className="bg-background/50 font-mono border-sidebar-border resize-none h-16" rows={2} />
               </div>
             </div>
@@ -572,9 +548,11 @@ function MintWorkflowDialog({
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
                   <Label className="text-xs font-mono text-muted-foreground flex items-center gap-1">
-                    <DollarSign className="w-3 h-3" /> X402 PRICE (USDC)
+                    <DollarSign className="w-3 h-3" /> AGENT COST (USDC)
                   </Label>
-                  <Input type="number" step="0.001" value={x402Price} onChange={(e) => setX402Price(e.target.value)} className="bg-background/50 font-mono border-sidebar-border" />
+                  <div className="flex items-center min-h-9 px-3 rounded-sm border border-sidebar-border bg-background/40 font-mono text-sm text-green-400">
+                    ${totalAgentPriceFormatted} USDC
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label className="text-xs font-mono text-muted-foreground">SUPPLY CAP</Label>
@@ -593,7 +571,7 @@ function MintWorkflowDialog({
                       <SelectItem key={model.modelId} value={model.modelId}>
                         <div className="flex items-center gap-2">
                           <span>{model.name || model.modelId}</span>
-                          <span className="text-[10px] text-muted-foreground">({model.family || model.provider})</span>
+                          <span className="text-xs text-muted-foreground">({model.family || model.provider})</span>
                         </div>
                       </SelectItem>
                     ))}
@@ -605,7 +583,7 @@ function MintWorkflowDialog({
                   <Label className="text-sm font-mono flex items-center gap-1">
                     <Clock className="w-3 h-3" /> Enable Leasing
                   </Label>
-                  <p className="text-[10px] text-muted-foreground">Allow others to lease this workflow</p>
+                  <p className="text-xs text-muted-foreground">Allow others to lease this workflow</p>
                 </div>
                 <Switch checked={leaseEnabled} onCheckedChange={setLeaseEnabled} />
               </div>
@@ -765,7 +743,15 @@ function Flow() {
   const [showRFADialog, setShowRFADialog] = useState(false);
   const [pendingWarpAgent, setPendingWarpAgent] = useState<Agent | null>(null);
   const [workflowResult, setWorkflowResult] = useState<WorkflowExecutionResult | null>(null);
-  const [pendingWorkflowId] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsFullscreen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isFullscreen]);
 
   // Use the extracted workflow hook
   const {
@@ -784,29 +770,6 @@ function Flow() {
       setShowWarpDialog(true);
     },
   });
-
-  // Add trigger handler
-  const handleAddTrigger = useCallback((trigger: Partial<import("@/lib/triggers").TriggerDefinition>) => {
-    const id = `trigger_${Date.now()}`;
-    const newNode: WorkflowNode = {
-      id,
-      type: "triggerNode",
-      position: { x: 100, y: nodes.length * 120 + 100 },
-      data: {
-        trigger: {
-          id,
-          name: trigger.name || "Trigger",
-          type: (trigger.type || "cron") as TriggerNodeData["trigger"]["type"],
-          cronExpression: trigger.cronExpression,
-          cronReadable: trigger.cronReadable,
-          enabled: trigger.enabled ?? true,
-        },
-        status: "pending",
-      },
-    };
-    setNodes((nds) => [...nds, newNode]);
-    toast({ title: "Trigger Added", description: trigger.cronReadable || trigger.name });
-  }, [nodes.length, setNodes, toast]);
 
   const { isRunning } = useWorkflowExecution();
 
@@ -849,7 +812,7 @@ function Flow() {
   const handleWarpAgent = useCallback(() => {
     if (pendingWarpAgent) {
       sessionStorage.setItem("warpAgent", JSON.stringify(pendingWarpAgent));
-      setLocation("/create-agent?warp=true");
+      setLocation("/create?warp=true");
     }
     setShowWarpDialog(false);
     setPendingWarpAgent(null);
@@ -917,7 +880,7 @@ function Flow() {
 
       const headers: Record<string, string> = { "Content-Type": "application/json" };
 
-      const response = await sdk.fetch(`/workflow/execute`, {
+      const response = await sdk.fetch(`${RUNTIME_BASE_URL}/workflow/execute`, {
         method: "POST", headers, body: JSON.stringify(workflowPayload),
       });
 
@@ -953,70 +916,102 @@ function Flow() {
   }, [currentWorkflow, inputJson, nodes, edges, setNodes, toast, wallet, sessionActive, budgetRemaining, keyToken, ensureKeyToken]);
 
   return (
-    <div className="cm-compose-workspace">
+    <div className={cn("cm-compose-workspace", isFullscreen && "fixed inset-0 z-50 bg-background p-3")}>
+      <div className="cm-control-rail shrink-0">
+        <div className="flex items-center gap-2.5 min-w-0 overflow-hidden">
+          <h1 className="cm-page-header__title shrink-0">
+            <span className="text-fuchsia-500 mr-2">//</span>
+            COMPOSE
+          </h1>
+          <span className="hidden md:inline font-mono text-xs text-muted-foreground truncate max-w-52">
+            {workflowName || "Untitled Workflow"}
+          </span>
+          <Badge variant="outline" className="hidden sm:inline-flex font-mono border-cyan-500/30 text-cyan-400 text-xs shrink-0">
+            {nodes.length} step{nodes.length !== 1 ? "s" : ""}
+          </Badge>
+        </div>
+
+        <div className="flex items-center shrink-0 gap-1.5 sm:gap-2">
+          <Button
+            onClick={() => setShowRunDialog(true)}
+            disabled={isRunning || nodes.length === 0}
+            aria-label={isRunning ? "Running workflow" : "Run workflow"}
+            className="bg-green-500 text-white hover:bg-green-600 font-bold font-mono text-xs h-8 sm:h-9 px-2.5 sm:px-3.5"
+          >
+            {isRunning ? <Loader2 className="w-3.5 h-3.5 xs:mr-1.5 animate-spin" /> : <Play className="w-3.5 h-3.5 xs:mr-1.5" />}
+            <span className="hidden xs:inline">{isRunning ? "RUNNING" : "RUN"}</span>
+          </Button>
+          <Button
+            onClick={() => setShowRFADialog(true)}
+            variant="outline"
+            className="border-fuchsia-500/30 hover:border-fuchsia-500 hover:bg-fuchsia-500/10 text-xs h-8 sm:h-9 px-2.5 sm:px-3"
+          >
+            <Bot className="w-3.5 h-3.5 sm:mr-1.5" />
+            <span className="hidden sm:inline">REQUEST</span>
+          </Button>
+          <Button
+            onClick={() => setShowMintDialog(true)}
+            disabled={nodes.length === 0}
+            className="bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white hover:from-cyan-400 hover:to-fuchsia-400 font-bold font-mono disabled:opacity-50 text-xs h-8 sm:h-9 px-2.5 sm:px-3.5"
+          >
+            <Sparkles className="w-3.5 h-3.5 sm:mr-1.5" />
+            <span className="hidden sm:inline">MINT</span>
+          </Button>
+          <Sheet open={showSettingsSheet} onOpenChange={setShowSettingsSheet}>
+            <SheetTrigger asChild>
+              <Button
+                variant="outline"
+                aria-label="Workflow settings"
+                className="border-sidebar-border h-8 sm:h-9 w-8 sm:w-9"
+              >
+                <Settings className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              </Button>
+            </SheetTrigger>
+            <SheetContent className="bg-card border-sidebar-border z-[60]">
+              <SheetHeader>
+                <SheetTitle className="font-display text-cyan-400">Workflow Settings</SheetTitle>
+                <SheetDescription>Configure workflow metadata and input</SheetDescription>
+              </SheetHeader>
+              <div className="space-y-4 mt-6">
+                <div className="space-y-2">
+                  <Label className="font-mono text-xs">WORKFLOW NAME</Label>
+                  <Input value={workflowName} onChange={(e) => setWorkflowName(e.target.value)} placeholder="My Workflow" className="bg-background/50 font-mono border-sidebar-border" />
+                </div>
+                <div className="space-y-2">
+                  <Label className="font-mono text-xs">DESCRIPTION</Label>
+                  <Textarea value={workflowDescription} onChange={(e) => setWorkflowDescription(e.target.value)} placeholder="What does this workflow do?" className="bg-background/50 font-mono border-sidebar-border resize-none" rows={3} />
+                </div>
+                <Separator />
+                <div className="space-y-2">
+                  <Label className="font-mono text-xs">INPUT (JSON)</Label>
+                  <Textarea value={inputJson} onChange={(e) => setInputJson(e.target.value)} placeholder='{"key": "value"}' className="bg-background/50 font-mono border-sidebar-border resize-none text-xs" rows={5} />
+                  <p className="text-xs text-muted-foreground">Access in steps as {"{{input.key}}"}</p>
+                </div>
+              </div>
+            </SheetContent>
+          </Sheet>
+          <Button
+            onClick={() => setIsFullscreen((prev) => !prev)}
+            variant="outline"
+            aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+            className="border-sidebar-border hover:border-cyan-500 h-8 sm:h-9 w-8 sm:w-9"
+          >
+            {isFullscreen ? (
+              <Minimize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            ) : (
+              <Maximize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            )}
+          </Button>
+        </div>
+      </div>
+
       {/* Canvas Area */}
-      <div className="flex-1 min-h-0 lg:h-full flex flex-col">
-        <div className="cm-canvas flex-1 relative rounded-t-sm border border-cyan-500/20 overflow-hidden shadow-2xl bg-black/40">
-          {/* Floating Stepper Toolbox */}
+      <div className="flex-1 min-h-0 flex flex-col">
+        <div className="cm-canvas flex-1 relative rounded-sm border border-cyan-500/20 overflow-hidden shadow-2xl bg-black/40">
           <FloatingToolbox
             onAddStep={handleAddStep}
             onAddAgentStep={handleAddAgentStep}
-            onRun={() => setShowRunDialog(true)}
-            onRequest={() => setShowRFADialog(true)}
-            onMint={() => setShowMintDialog(true)}
-            onSettings={() => setShowSettingsSheet(true)}
-            isRunning={isRunning}
-            nodeCount={nodes.length}
           />
-          {/* Toolbar */}
-          <div className="absolute top-2 right-2 lg:top-4 lg:right-4 z-10 flex flex-wrap gap-1.5 lg:gap-2">
-            <Button onClick={() => setShowRunDialog(true)} disabled={isRunning || nodes.length === 0} className="bg-green-500 text-white hover:bg-green-600 font-bold font-mono shadow-lg text-xs lg:text-sm h-8 lg:h-9 px-2.5 lg:px-4">
-              {isRunning ? <Loader2 className="w-3.5 h-3.5 lg:w-4 lg:h-4 mr-1.5 animate-spin" /> : <Play className="w-3.5 h-3.5 lg:w-4 lg:h-4 mr-1.5" />}
-              <span className="hidden sm:inline">{isRunning ? "RUNNING..." : "RUN"}</span>
-              <span className="sm:hidden">{isRunning ? "..." : "RUN"}</span>
-            </Button>
-            <Button onClick={() => setShowRFADialog(true)} variant="outline" className="border-fuchsia-500/30 hover:border-fuchsia-500 hover:bg-fuchsia-500/10 text-xs lg:text-sm h-8 lg:h-9 px-2.5 lg:px-4">
-              <Bot className="w-3.5 h-3.5 lg:w-4 lg:h-4 mr-1.5" /><span className="hidden sm:inline">REQUEST</span>
-            </Button>
-            <Button onClick={() => setIsFullscreen(true)} variant="outline" className="border-sidebar-border hover:border-cyan-500 h-8 lg:h-9 w-8 lg:w-9">
-              <Maximize2 className="w-3.5 h-3.5 lg:w-4 lg:h-4" />
-            </Button>
-            <Sheet open={showSettingsSheet} onOpenChange={setShowSettingsSheet}>
-              <SheetTrigger asChild>
-                <Button variant="outline" className="border-sidebar-border h-8 lg:h-9 w-8 lg:w-9">
-                  <Settings className="w-3.5 h-3.5 lg:w-4 lg:h-4" />
-                </Button>
-              </SheetTrigger>
-              <SheetContent className="bg-card border-sidebar-border z-[60]">
-                <SheetHeader>
-                  <SheetTitle className="font-display text-cyan-400">Workflow Settings</SheetTitle>
-                  <SheetDescription>Configure workflow metadata and input</SheetDescription>
-                </SheetHeader>
-                <div className="space-y-4 mt-6">
-                  <div className="space-y-2">
-                    <Label className="font-mono text-xs">WORKFLOW NAME</Label>
-                    <Input value={workflowName} onChange={(e) => setWorkflowName(e.target.value)} placeholder="My Workflow" className="bg-background/50 font-mono border-sidebar-border" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="font-mono text-xs">DESCRIPTION</Label>
-                    <Textarea value={workflowDescription} onChange={(e) => setWorkflowDescription(e.target.value)} placeholder="What does this workflow do?" className="bg-background/50 font-mono border-sidebar-border resize-none" rows={3} />
-                  </div>
-                  <Separator />
-                  <div className="space-y-2">
-                    <Label className="font-mono text-xs">INPUT (JSON)</Label>
-                    <Textarea value={inputJson} onChange={(e) => setInputJson(e.target.value)} placeholder='{"key": "value"}' className="bg-background/50 font-mono border-sidebar-border resize-none text-xs" rows={5} />
-                    <p className="text-[10px] text-muted-foreground">Access in steps as {"{{input.key}}"}</p>
-                  </div>
-                </div>
-              </SheetContent>
-            </Sheet>
-          </div>
-
-          <div className="absolute top-2 left-2 lg:top-4 lg:left-4 z-10">
-            <Badge variant="outline" className="font-mono border-cyan-500/30 text-cyan-400 text-[10px] lg:text-xs">
-              {nodes.length} step{nodes.length !== 1 ? "s" : ""}
-            </Badge>
-          </div>
 
           <ReactFlowProvider>
             <div className="h-full w-full" ref={reactFlowWrapper}>
@@ -1041,12 +1036,12 @@ function Flow() {
                 defaultEdgeOptions={{
                   type: "smoothstep",
                   animated: true,
-                  style: { stroke: 'hsl(188 95% 43%)', strokeWidth: 2 },
+                  style: { stroke: "hsl(188 95% 43%)", strokeWidth: 2 },
                 }}
               >
                 <Background color="hsl(188 95% 43%)" gap={20} size={1} className="opacity-10" />
                 <Controls className="bg-card border-sidebar-border fill-foreground" />
-                <MiniMap className="bg-card border-sidebar-border" maskColor="hsl(222 47% 3% / 0.8)" nodeColor="hsl(188 95% 43%)" />
+                <MiniMap className="hidden sm:block bg-card border-sidebar-border" maskColor="hsl(222 47% 3% / 0.8)" nodeColor="hsl(188 95% 43%)" />
               </ReactFlow>
             </div>
           </ReactFlowProvider>
@@ -1062,67 +1057,13 @@ function Flow() {
                 </div>
                 <div className="space-y-1">
                   <p className="text-foreground/80 font-display text-base lg:text-lg">Start Building</p>
-                  <p className="text-muted-foreground font-mono text-[10px] lg:text-xs max-w-[200px] mx-auto">Select connectors or agents from the panel to add workflow steps</p>
+                  <p className="text-muted-foreground font-mono text-xs max-w-52 mx-auto">Select plugins, agents, or triggers in Add Step to compose a workflow</p>
                 </div>
               </div>
             </div>
           )}
         </div>
-
-        {/* Bottom Action Bar */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-4 px-3 lg:px-4 py-2.5 lg:py-3 bg-card/60 border border-t-0 border-cyan-500/20 rounded-b-sm backdrop-blur-sm">
-          <div className="flex items-center gap-2 text-xs sm:text-sm font-mono text-muted-foreground min-w-0">
-            <span className="text-foreground/80 truncate max-w-[120px] sm:max-w-[150px]">{workflowName || "Untitled Workflow"}</span>
-            {workflowDescription && <span className="text-[10px] opacity-60 truncate max-w-[150px] hidden sm:block">{workflowDescription}</span>}
-          </div>
-          <Button onClick={() => setShowMintDialog(true)} disabled={nodes.length === 0} className="bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white hover:from-cyan-400 hover:to-fuchsia-400 font-bold font-mono shadow-lg disabled:opacity-50 w-full sm:w-auto text-xs sm:text-sm h-9 sm:h-10">
-            <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />MINT AS NFT
-          </Button>
-        </div>
       </div>
-
-      {/* Fullscreen Canvas Overlay */}
-      <FullscreenOverlay
-        isOpen={isFullscreen}
-        onClose={() => setIsFullscreen(false)}
-        onAddStep={handleAddStep}
-        onAddAgentStep={handleAddAgentStep}
-        onAddTrigger={handleAddTrigger}
-        onRun={() => setShowRunDialog(true)}
-        onRequest={() => setShowRFADialog(true)}
-        onMint={() => setShowMintDialog(true)}
-        onSettings={() => setShowSettingsSheet(true)}
-        isRunning={isRunning}
-        nodeCount={nodes.length}
-      >
-        <ReactFlowProvider>
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            nodeTypes={nodeTypes}
-            fitView
-            proOptions={{ hideAttribution: true }}
-            className="bg-background"
-            connectionRadius={50}
-            edgesFocusable
-            elementsSelectable
-            selectNodesOnDrag={false}
-            deleteKeyCode={["Backspace", "Delete"]}
-            defaultEdgeOptions={{
-              type: "smoothstep",
-              animated: true,
-              style: { stroke: 'hsl(188 95% 43%)', strokeWidth: 2 },
-            }}
-          >
-            <Background color="hsl(188 95% 43%)" gap={20} size={1} className="opacity-10" />
-            <Controls className="bg-card border-sidebar-border fill-foreground" />
-            <MiniMap className="bg-card border-sidebar-border" maskColor="hsl(222 47% 3% / 0.8)" nodeColor="hsl(188 95% 43%)" />
-          </ReactFlow>
-        </ReactFlowProvider>
-      </FullscreenOverlay>
 
       {/* Dialogs */}
       <MintWorkflowDialog open={showMintDialog} onOpenChange={setShowMintDialog} workflowName={workflowName} workflowDescription={workflowDescription} agentIds={workflowAgentIds} agentPrices={agentPrices} />
@@ -1137,7 +1078,7 @@ function Flow() {
               <ArrowRightLeft className="w-5 h-5 text-fuchsia-400" /> Warp Required
             </AlertDialogTitle>
             <AlertDialogDescription className="text-muted-foreground">
-              This agent needs to be warped into the Manowar ecosystem before it can be used in workflows.
+              This agent needs to be warped onto Compose.Market before it can be used in workflows.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {pendingWarpAgent && (
@@ -1154,8 +1095,8 @@ function Flow() {
               <div className="text-xs text-muted-foreground space-y-2">
                 <p>Warping brings external agents on-chain with:</p>
                 <ul className="list-disc list-inside space-y-1 ml-2">
-                  <li>ERC8004 identity</li>
-                  <li>x402 payment integration</li>
+                  <li>Verifiable on-chain ownership</li>
+                  <li>Automatic per-call settlement</li>
                   <li>80% royalties to you (the warper)</li>
                 </ul>
               </div>
@@ -1174,7 +1115,7 @@ function Flow() {
       <RFAComponent
         open={showRFADialog}
         onOpenChange={setShowRFADialog}
-        workflowId={pendingWorkflowId || 0}
+        workflowId={0}
         workflowTitle={workflowName || "New Workflow"}
         onSuccess={() => { toast({ title: "Agent Request Published", description: "Bounty hunters can now submit agents for your request." }); }}
       />
