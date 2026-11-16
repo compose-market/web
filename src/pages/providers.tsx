@@ -3,7 +3,6 @@ import { Link } from "wouter";
 import {
   ExternalLink,
   Shield,
-  Search,
   Filter,
   CheckCircle2,
   Lock,
@@ -15,7 +14,7 @@ import {
   ArrowLeft,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
+import { SearchFold, Switcher } from "@/components/control";
 
 export interface ProviderItem {
   id: string;
@@ -308,16 +307,17 @@ const PROVIDERS: ProviderItem[] = [
 ];
 
 const CATEGORIES = [
-  { id: "all", label: "All Providers", icon: Sparkles },
+  { id: "all", label: "All", icon: Sparkles },
   { id: "llm", label: "Labs", icon: Cpu },
   { id: "inference", label: "Inference", icon: Filter },
-  { id: "multimodal", label: "Speech & Vision", icon: Mic },
-  { id: "infra", label: "Data & Storage", icon: Database },
-  { id: "tools", label: "Tools & Workflows", icon: Workflow },
+  { id: "multimodal", label: "Multimodal", icon: Mic },
+  { id: "infra", label: "Storage", icon: Database },
+  { id: "tools", label: "Tools", icon: Workflow },
 ];
 
 export default function ProvidersPage() {
   const [searchTerm, setSearchTerm] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState("all");
 
   const filteredProviders = useMemo(() => {
@@ -333,191 +333,155 @@ export default function ProvidersPage() {
     });
   }, [searchTerm, selectedCategory]);
 
+  const categoryOptions = useMemo(() => CATEGORIES.map((cat) => ({
+    value: cat.id,
+    label: cat.id === "all" ? "All" : cat.label,
+    icon: cat.icon,
+    count: String(cat.id === "all" ? PROVIDERS.length : PROVIDERS.filter((p) => p.category === cat.id).length),
+  })), []);
+
   return (
-    <div className="h-full flex flex-col min-h-0 overflow-hidden font-sans space-y-4 max-w-7xl mx-auto px-4 md:px-8 pt-4 pb-2">
-      {/* Top Header & Filter Controls (Fixed in Viewport) */}
-      <div className="shrink-0 space-y-3 pb-3 border-b border-cyan-400/15">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2 mb-1.5">
-              <Link
-                href="/keys"
-                className="inline-flex items-center gap-1 text-[11px] font-mono text-cyan-400 hover:text-cyan-300 transition-colors mr-2"
+    <div className="cm-market-workspace">
+      <div className="cm-control-rail cm-market-control-rail">
+        <div className="cm-market-control-rail__brand">
+          <h1 className="cm-page-header__title cm-market-control-rail__title">
+            <span className="text-fuchsia-500 mr-2">//</span>
+            PROVIDERS
+          </h1>
+        </div>
+        <Switcher
+          value={selectedCategory}
+          options={categoryOptions}
+          label="Provider category"
+          onChange={setSelectedCategory}
+          className="cm-market-control-rail__tabs"
+        />
+        <div className="cm-market-control-rail__actions">
+          <SearchFold
+            open={searchOpen}
+            value={searchTerm}
+            label="Search providers"
+            placeholder="Search provider, model, region..."
+            onOpenChange={setSearchOpen}
+            onChange={setSearchTerm}
+          />
+          <Link
+            href="/dashboard"
+            className="cm-control-icon-button"
+            aria-label="Back to Dashboard"
+            title="Back to Dashboard"
+          >
+            <ArrowLeft className="cm-control-icon-button__icon" />
+          </Link>
+        </div>
+      </div>
+
+      {/* Compact Governance Badges */}
+      <div className="shrink-0 flex flex-wrap items-center gap-2">
+        <Badge className="bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 font-mono text-xs gap-1.5">
+          <Shield className="w-3.5 h-3.5 text-cyan-400" />
+          Relay Only · Zero Payload Storage
+        </Badge>
+        <Badge className="bg-fuchsia-500/10 text-fuchsia-300 border border-fuchsia-500/30 font-mono text-xs gap-1.5">
+          <CheckCircle2 className="w-3.5 h-3.5 text-fuchsia-400" />
+          Zero Model Training
+        </Badge>
+        <Badge className="bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 font-mono text-xs gap-1.5 hidden sm:inline-flex">
+          <Lock className="w-3.5 h-3.5 text-cyan-400" />
+          GDPR Art. 28 Sub-Processor DPAs
+        </Badge>
+      </div>
+
+      {/* Snap-Scrolling Provider Cards Stage */}
+      <div className="cm-providers-stage">
+          <div className="cm-providers-grid">
+            {filteredProviders.map((provider) => (
+              <div
+                key={provider.id}
+                className="cm-providers-card cm-shell-panel p-3 hover:border-cyan-400/40 transition-colors flex flex-col justify-between"
               >
-                <ArrowLeft size={13} /> Dashboard
-              </Link>
-              <Badge className="bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 font-mono text-[9px] uppercase tracking-wider">
-                GDPR Art. 28 • Sub-Processors
-              </Badge>
-              <Badge className="bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/30 font-mono text-[9px] uppercase tracking-wider hidden sm:inline-flex">
-                650+ Models • 30+ Providers
-              </Badge>
-            </div>
-            <h1 className="text-xl md:text-2xl font-display font-bold uppercase tracking-wider text-foreground">
-              Third-Party Model Providers & Sub-Processors
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5 max-w-3xl">
-              Compose.Market acts strictly as a technical conduit and aggregator.
-              Below is the comprehensive directory of third-party laboratories, inference engines, and infrastructure providers.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2 text-xs font-mono text-cyan-400 bg-cyan-950/30 border border-cyan-500/20 px-3 py-1.5 rounded-lg shrink-0 self-start md:self-auto">
-            <Lock size={13} className="text-cyan-400" />
-            <span>Zero Training on Your Prompts</span>
-          </div>
-        </div>
-
-        {/* Compact Compliance Highlights */}
-        <div className="rounded-lg border border-cyan-500/20 bg-cyan-950/15 p-2.5 backdrop-blur-md grid grid-cols-1 md:grid-cols-3 gap-2.5 text-xs">
-          <div className="flex items-center gap-2">
-            <Shield className="w-4 h-4 text-cyan-400 shrink-0" />
-            <span className="text-[11px] text-muted-foreground">
-              <strong className="text-cyan-300 font-display uppercase tracking-wider">Relay Only:</strong> Direct API pass-through without payload storage.
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-fuchsia-400 shrink-0" />
-            <span className="text-[11px] text-muted-foreground">
-              <strong className="text-fuchsia-300 font-display uppercase tracking-wider">No Training:</strong> Contractually prohibited from model training.
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Lock className="w-4 h-4 text-cyan-400 shrink-0" />
-            <span className="text-[11px] text-muted-foreground">
-              <strong className="text-cyan-300 font-display uppercase tracking-wider">Direct Governance:</strong> Sub-processor ToS and DPAs apply.
-            </span>
-          </div>
-        </div>
-
-        {/* Search & Filter Controls */}
-        <div className="flex flex-col sm:flex-row gap-3 items-center justify-between pt-1">
-          <div className="flex flex-wrap gap-1.5 w-full sm:w-auto">
-            {CATEGORIES.map((cat) => {
-              const Icon = cat.icon;
-              const active = selectedCategory === cat.id;
-              return (
-                <button
-                  key={cat.id}
-                  type="button"
-                  onClick={() => setSelectedCategory(cat.id)}
-                  className={`
-                    flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-mono transition-all cursor-pointer
-                    ${active
-                      ? "bg-cyan-500/20 border border-cyan-400 text-cyan-300 shadow-[0_0_10px_rgba(34,211,238,0.2)]"
-                      : "bg-muted/40 border border-white/5 text-muted-foreground hover:text-foreground hover:bg-muted/60"
-                    }
-                  `}
-                >
-                  <Icon size={12} />
-                  <span>{cat.label}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="relative w-full sm:w-64">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-            <Input
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search provider, model, region..."
-              className="pl-8 h-8 bg-black/40 border-cyan-500/20 text-xs font-mono focus-visible:ring-cyan-500"
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Internal Scrollable Provider Cards Container */}
-      <div className="flex-1 min-h-0 overflow-y-auto pr-2 pb-8 scrollbar-thin scrollbar-thumb-cyan-500/30 scrollbar-track-transparent">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
-          {filteredProviders.map((provider) => (
-            <div
-              key={provider.id}
-              className="rounded-xl border border-cyan-500/20 bg-black/40 p-4 hover:border-cyan-400/40 hover:shadow-[0_0_15px_-3px_rgba(6,182,212,0.15)] transition-all flex flex-col justify-between"
-            >
-              <div className="space-y-2.5">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <span className="text-[9px] font-mono uppercase tracking-wider text-cyan-400/80">
-                      {provider.categoryLabel}
-                    </span>
-                    <h3 className="text-base font-display font-bold tracking-wide text-foreground">
-                      {provider.name}
-                    </h3>
+                <div className="space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <span className="text-xs font-mono uppercase tracking-wider text-cyan-400/80">
+                        {provider.categoryLabel}
+                      </span>
+                      <h2 className="text-sm font-display font-bold tracking-wide text-foreground">
+                        {provider.name}
+                      </h2>
+                    </div>
+                    <Badge
+                      variant="outline"
+                      className="font-mono text-xs bg-cyan-500/5 text-cyan-300 border-cyan-500/20 shrink-0"
+                    >
+                      {provider.modelsCount}
+                    </Badge>
                   </div>
-                  <Badge
-                    variant="outline"
-                    className="font-mono text-[9px] bg-cyan-500/5 text-cyan-300 border-cyan-500/20"
-                  >
-                    {provider.modelsCount}
-                  </Badge>
+
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    {provider.description}
+                  </p>
+
+                  <div className="pt-1 space-y-1">
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-mono">
+                      <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0" />
+                      <span>Policy:</span>
+                      <span className="text-cyan-300 font-medium">{provider.trainingPolicy}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-mono">
+                      <span className="w-1.5 h-1.5 rounded-full bg-fuchsia-400 shrink-0" />
+                      <span>Jurisdiction:</span>
+                      <span className="text-foreground/90">{provider.jurisdiction}</span>
+                    </div>
+                  </div>
                 </div>
 
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  {provider.description}
-                </p>
-
-                <div className="pt-1 space-y-1">
-                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground font-mono">
-                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0" />
-                    <span>Policy: </span>
-                    <span className="text-cyan-300 font-medium">{provider.trainingPolicy}</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground font-mono">
-                    <span className="w-1.5 h-1.5 rounded-full bg-fuchsia-400 shrink-0" />
-                    <span>Jurisdiction: </span>
-                    <span className="text-foreground/90">{provider.jurisdiction}</span>
+                <div className="pt-3 mt-3 border-t border-white/5 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <a
+                      href={provider.tosUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs font-mono text-cyan-400 hover:text-cyan-300 underline underline-offset-2"
+                    >
+                      Terms <ExternalLink size={12} />
+                    </a>
+                    <span className="text-muted-foreground text-xs">•</span>
+                    <a
+                      href={provider.privacyUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs font-mono text-cyan-400 hover:text-cyan-300 underline underline-offset-2"
+                    >
+                      Privacy <ExternalLink size={12} />
+                    </a>
+                    {provider.dpaUrl ? (
+                      <>
+                        <span className="text-muted-foreground text-xs">•</span>
+                        <a
+                          href={provider.dpaUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-xs font-mono text-fuchsia-400 hover:text-fuchsia-300 underline underline-offset-2"
+                        >
+                          DPA <ExternalLink size={12} />
+                        </a>
+                      </>
+                    ) : null}
                   </div>
                 </div>
               </div>
-
-              <div className="pt-3 mt-3 border-t border-white/5 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <a
-                    href={provider.tosUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-[10px] font-mono text-cyan-400 hover:text-cyan-300 underline underline-offset-2"
-                  >
-                    Terms <ExternalLink size={10} />
-                  </a>
-                  <span className="text-muted-foreground text-xs">•</span>
-                  <a
-                    href={provider.privacyUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-[10px] font-mono text-cyan-400 hover:text-cyan-300 underline underline-offset-2"
-                  >
-                    Privacy <ExternalLink size={10} />
-                  </a>
-                  {provider.dpaUrl && (
-                    <>
-                      <span className="text-muted-foreground text-xs">•</span>
-                      <a
-                        href={provider.dpaUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-[10px] font-mono text-fuchsia-400 hover:text-fuchsia-300 underline underline-offset-2"
-                      >
-                        DPA <ExternalLink size={10} />
-                      </a>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {filteredProviders.length === 0 && (
-          <div className="text-center py-12 border border-dashed border-white/10 rounded-xl">
-            <p className="text-xs font-mono text-muted-foreground">
-              No providers found matching "{searchTerm}".
-            </p>
+            ))}
           </div>
-        )}
-      </div>
+
+          {filteredProviders.length === 0 ? (
+            <div className="text-center py-12 border border-dashed border-white/10 rounded-xl">
+              <p className="text-xs font-mono text-muted-foreground">
+                No providers found matching &ldquo;{searchTerm}&rdquo;.
+              </p>
+            </div>
+          ) : null}
+        </div>
     </div>
   );
 }
