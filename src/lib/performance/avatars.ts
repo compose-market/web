@@ -111,3 +111,36 @@ export function readBootChainsPromise(): Promise<FacilitatorChainsResponse | nul
   if (typeof window === "undefined") return null;
   return window.__CM_BOOT__?.chains ?? null;
 }
+
+export function resolveAvatarSrc(url: string | null): string | null {
+  if (!url) return null;
+  adoptBootAvatars();
+  const cached = blobUrls.get(url);
+  if (cached) return cached;
+  if (typeof window !== "undefined" && window.__CM_BOOT__?.pending?.[url]) {
+    return null;
+  }
+  return url;
+}
+
+function subscribeAvatar(url: string | null, listener: () => void): () => void {
+  if (!url) return () => undefined;
+  let set = listeners.get(url);
+  if (!set) {
+    set = new Set();
+    listeners.set(url, set);
+  }
+  set.add(listener);
+  return () => {
+    set?.delete(listener);
+    if (set?.size === 0) listeners.delete(url);
+  };
+}
+
+export function useAvatarSrc(url: string | null): string | null {
+  return useSyncExternalStore(
+    (notify) => subscribeAvatar(url, notify),
+    () => resolveAvatarSrc(url),
+    () => url,
+  );
+}
