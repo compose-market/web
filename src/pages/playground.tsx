@@ -1,18 +1,13 @@
 /**
- * Playground — Unified Multi-Model Chat Dashboard
+ * Playground — Unified Multi-Model Inference Studio
  *
- * Zero-scroll, single-screen layout with:
- * - CapabilityChips for type/provider filtering
- * - ModelBadge for active model display
- * - CommandBar (⌘K) for model selection
- * - MultimodalCanvas for chat
- * - ModelCard for settings
- *
- * Shared hooks: useChat, useModels, useSession
+ * Balanced 2-zone responsive layout with:
+ * - Quiet central chat hero + prominent model description & controls in ModelCard
+ * - CapabilityChips, ModelSelector (⌘K), MultimodalCanvas (Surface 1 + Pulse Surface 2)
+ * - On-demand Activity & Receipt Sheet (Surface 3)
+ * - Zero nested Tabs, zero 0px chat collapse, real SSE error surfacing & Stop control
  */
 import { Suspense, lazy, useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { usePostHog } from "@posthog/react";
-import { mpTrack } from "@/lib/mixpanel";
 import { useActiveWallet, useActiveAccount } from "thirdweb/react";
 import { useSession } from "@/hooks/use-session.tsx";
 import { SessionBudgetDialog } from "@/components/session";
@@ -20,33 +15,28 @@ import { sdk } from "@/lib/sdk";
 import { toMessage, type ResponseMessage } from "@/hooks/use-chat";
 import { useChain } from "@/contexts/Network";
 import { Button } from "@/components/ui/button";
-import { Tabs } from "@/components/ui/tabs";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import {
   Bot,
-  Settings2,
   RefreshCw,
   Plug,
-  ChevronLeft,
-  ChevronRight,
+  PanelRightClose,
+  PanelRightOpen,
   FileText,
   Image as ImageIcon,
   Mic,
   Video,
 } from "lucide-react";
 import { MultimodalCanvas } from "@/components/chat";
+import { Trace } from "@/components/trace";
 import { ModelCard, type ModelParamsSchema } from "@/components/models/card";
+import type { ConnectorCardTab } from "@/components/connectors/card";
+import type { ConnectorPocket } from "@/components/connectors/tester";
 import { ModelSelector } from "@/components/models/selector";
 import { CapabilityChips } from "@/components/models/capabilities";
 import { useChat } from "@/hooks/use-chat";
+import { useTurnReceipts } from "@/hooks/use-receipts";
 import { useModelDetails, useModelParams, useModels } from "@/hooks/use-model";
-import { CostReceiptIndicator } from "@/components/receipt-indicator";
-import { Switcher, type Option } from "@/components/control";
+import { Pockets, Switcher, type Option } from "@/components/control";
 import { useToast } from "@/hooks/use-toast";
 import { seedModelCards, useStream, type StreamCallOptions } from "@/hooks/use-stream";
 import { useRegistryMeta } from "@/hooks/use-registry";
@@ -54,7 +44,7 @@ import { useSelectedUserAddress } from "@/hooks/use-address";
 import {
   buildFamilyCategories,
   buildTypeCategories,
-  formatModelTypeLabel,
+  getFamilyLogoUrl,
   getModelTypeValues,
   getModelValueList,
   modelRequiresImageAttachment,
@@ -62,21 +52,12 @@ import {
 } from "@/lib/models";
 
 const PANE_COLLAPSED_KEY = "playground_pane_collapsed";
-
-// ── Default model before user selection.
-// If it doesn't exist (e.g., deprecated) in the catalog anymore,
-// the auto-select effect will fall back to the latest frontier model.
 const DEFAULT_MODEL = "gemini-3.8-flash";
 
 type PlaygroundTab = "model" | "connectors";
 
-const tabs: Option<PlaygroundTab>[] = [
-  { value: "model", label: "Models", icon: Bot },
-  { value: "connectors", label: "Connectors", icon: Plug },
-];
-
 const LazyConnectorTester = lazy(() =>
-  import("@/components/connectors/tester").then((module) => ({ default: module.ConnectorTester }))
+  import("@/components/connectors/tester").then((module) => ({ default: module.ConnectorTester })),
 );
 
 function getDefaultParamValues(schema: ModelParamsSchema | null): Record<string, unknown> {
@@ -111,12 +92,7 @@ function modelOutputType(model: CatalogModel): "text" | "image" | "audio" | "vid
   return "text";
 }
 
-// =============================================================================
-// Main Component
-// =============================================================================
-
 export default function PlaygroundPage() {
-  const posthog = usePostHog();
   const wallet = useActiveWallet();
   const account = useActiveAccount();
   const { userAddress, isResolving: userAddressResolving } = useSelectedUserAddress();
@@ -124,8 +100,7 @@ export default function PlaygroundPage() {
   const { paymentNetwork } = useChain();
   const { toast } = useToast();
 
-  // Tab state
-  const [activeTab, setActiveTab] = useState<"model" | "connectors">(() => {
+  const [activeTab, setActiveTab] = useState<PlaygroundTab>(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get("tab") === "connectors" ? "connectors" : "model";
   });
@@ -134,6 +109,7 @@ export default function PlaygroundPage() {
     const params = new URLSearchParams(window.location.search);
     const source = params.get("source");
     if (source === "onchain") return "onchain";
+    if (source === "account" || source === "accounts") return "account";
     if (source === "mcp") return "mcp";
     return "mcp";
   }, []);
@@ -143,12 +119,10 @@ export default function PlaygroundPage() {
     return params.get("connector") || "";
   }, []);
 
-  // ============ Filter State ============
   const [selectedType, setSelectedType] = useState("all");
   const [selectedFamily, setSelectedFamily] = useState("all");
   const { data: registryMeta } = useRegistryMeta({ enabled: activeTab === "connectors" });
 
-  // ============ Models (single source — filters cascade to all consumers) ============
   const {
     models,
     filteredModels,
@@ -159,62 +133,53 @@ export default function PlaygroundPage() {
     type: selectedType === "all" ? undefined : selectedType,
     family: selectedFamily === "all" ? undefined : selectedFamily,
   });
-  const refreshedModelsOnMount = useRef(false);
-  useEffect(() => {
-    if (refreshedModelsOnMount.current) return;
-    refreshedModelsOnMount.current = true;
-    void forceRefreshModels();
-  }, [forceRefreshModels]);
 
-  const playgroundTabs = useMemo<Option<"model" | "connectors">[]>(() => [
+  const playgroundTabs = useMemo<Option<PlaygroundTab>[]>(() => [
     { value: "model", label: "Models", icon: Bot, count: models.length > 0 ? String(models.length) : undefined },
     { value: "connectors", label: "Connectors", icon: Plug, count: registryMeta?.totalServers ? String(registryMeta.totalServers) : undefined },
   ], [models.length, registryMeta?.totalServers]);
 
-  // ── Interconnected filters: each category list reflects the OTHER filter's selection ──
-  // Type categories built from models filtered ONLY by family (so type-counts update when family changes)
   const typeCategories = useMemo(() => {
     if (selectedFamily === "all") return buildTypeCategories(models);
     return buildTypeCategories(models.filter((m) => (m.family || m.provider) === selectedFamily));
   }, [models, selectedFamily]);
 
-  // Family categories built from models filtered ONLY by type (so family-counts update when type changes)
   const familyCategories = useMemo(() => {
     if (selectedType === "all") return buildFamilyCategories(models);
     return buildFamilyCategories(models.filter((m) => getModelTypeValues(m).includes(selectedType)));
   }, [models, selectedType]);
 
-  // ── Filter interconnection guards: auto-reset invalid selections ──
   useEffect(() => {
     if (selectedType !== "all" && typeCategories.length > 0) {
-      const stillValid = typeCategories.some((c) => c.id === selectedType);
-      if (!stillValid) setSelectedType("all");
+      if (!typeCategories.some((c) => c.id === selectedType)) setSelectedType("all");
     }
   }, [typeCategories, selectedType]);
 
   useEffect(() => {
     if (selectedFamily !== "all" && familyCategories.length > 0) {
-      const stillValid = familyCategories.some((c) => c.id === selectedFamily);
-      if (!stillValid) setSelectedFamily("all");
+      if (!familyCategories.some((c) => c.id === selectedFamily)) setSelectedFamily("all");
     }
   }, [familyCategories, selectedFamily]);
 
-  // ============ Model Selection ============
   const [selectedModel, setSelectedModel] = useState<string>(() => {
-    // Deep-link support: /playground?model=<public-catalog-id> pre-selects a model.
     const requested = new URLSearchParams(window.location.search).get("model");
     return requested && requested.trim().length > 0 ? requested.trim() : DEFAULT_MODEL;
   });
   const [commandBarOpen, setCommandBarOpen] = useState(false);
+  const [connectorCommandBarOpen, setConnectorCommandBarOpen] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState("");
   const [showSessionDialog, setShowSessionDialog] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [inferenceError, setInferenceError] = useState<string | null>(null);
+  const [traceOpen, setTraceOpen] = useState(false);
+  const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
+  const [inspectedMessageId, setInspectedMessageId] = useState<string | null>(null);
 
-  // Mobile pane sheet
-  const [mobilePaneOpen, setMobilePaneOpen] = useState(false);
+  const [pocket, setPocket] = useState<"chat" | "spec" | "tune">("chat");
+  const [modelTab, setModelTab] = useState<"details" | "custom" | "benchmarks">("details");
+  const [connectorPocket, setConnectorPocket] = useState<ConnectorPocket>("runner");
+  const [connectorTab, setConnectorTab] = useState<ConnectorCardTab>("overview");
 
-  // Desktop pane collapse (persisted)
   const [paneCollapsed, setPaneCollapsed] = useState(() => {
     if (typeof window !== "undefined") {
       return localStorage.getItem(PANE_COLLAPSED_KEY) === "true";
@@ -226,52 +191,79 @@ export default function PlaygroundPage() {
     localStorage.setItem(PANE_COLLAPSED_KEY, String(paneCollapsed));
   }, [paneCollapsed]);
 
-  // Model Parameters State
   const [paramValues, setParamValues] = useState<Record<string, unknown>>({});
 
-  // Chat state
   const conversationId = useRef(`playground-${Date.now()}`).current;
   const chat = useChat({
     conversationId,
     onError: (err) => setInferenceError(err),
   });
-  const { messages, scrollContainerRef, messagesEndRef,
-    activityState, clearMessages,
-    attachedFiles, fileInputRef, handleFileSelect, handleRemoveFile, uploadedCids, cleanupFiles, clearFiles,
-    isRecording, recordingSupported, startRecording, stopRecording,
+  const {
+    messages,
+    setMessages,
+    scrollContainerRef,
+    messagesEndRef,
+    activityState,
+    latestActivity,
+    latestReceipt,
+    latestReceipts,
+    latestUsage,
+    reconcileAssistantReceipts,
+    clearMessages,
+    attachedFiles,
+    fileInputRef,
+    handleFileSelect,
+    handleRemoveFile,
+    uploadedCids,
+    cleanupFiles,
+    clearFiles,
+    isRecording,
+    recordingSupported,
+    startRecording,
+    stopRecording,
   } = chat;
+
   const streamer = useStream(chat, {
     onError: (err) => setInferenceError(err.message),
     onDone: () => setStreaming(false),
   });
   useEffect(() => () => streamer.cancelResponses(), [streamer]);
 
+  useTurnReceipts({
+    messages,
+    userAddress,
+    network: paymentNetwork,
+    mode: "playground",
+    isStreaming: streaming,
+    onReconcile: reconcileAssistantReceipts,
+  });
+
   const [inputValue, setInputValue] = useState("");
 
-  // ============ ⌘K Global Shortcut ============
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        setCommandBarOpen((prev) => !prev);
+        if (activeTab === "connectors") {
+          setConnectorCommandBarOpen((prev) => !prev);
+        } else {
+          setCommandBarOpen((prev) => !prev);
+        }
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, []);
+  }, [activeTab]);
 
-  // Auto-select the active modality's current frontier model; fall back to the
-  // first catalog match when the frontier overlay is temporarily unavailable.
   useEffect(() => {
     if (filteredModels.length === 0 || filteredModels.some((m) => m.modelId === selectedModel)) return;
     const frontierKeys = new Set(frontiers.map((model) => `${model.provider.toLowerCase()}:${model.modelId.toLowerCase()}`));
     const frontierModel = filteredModels.find((model) =>
-      frontierKeys.has(`${model.provider.toLowerCase()}:${model.modelId.toLowerCase()}`)
+      frontierKeys.has(`${model.provider.toLowerCase()}:${model.modelId.toLowerCase()}`),
     );
     setSelectedModel((frontierModel ?? filteredModels[0]).modelId);
   }, [filteredModels, frontiers, selectedModel]);
 
-  // Keep deep links truthful after user-driven model changes.
   useEffect(() => {
     if (!selectedModel) return;
     const url = new URL(window.location.href);
@@ -280,7 +272,6 @@ export default function PlaygroundPage() {
     window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
   }, [selectedModel]);
 
-  // Track conversation context boundary on model switch
   const [conversationStartIndex, setConversationStartIndex] = useState(0);
   const prevModelRef = useRef<string | null>(null);
   const messagesLengthRef = useRef(0);
@@ -296,15 +287,11 @@ export default function PlaygroundPage() {
     prevModelRef.current = selectedModel;
   }, [selectedModel]);
 
-  // Selected model info
   const selectedModelIndex = useMemo(
     () => models.find((m) => m.modelId === selectedModel) || null,
     [models, selectedModel],
   );
   const { data: selectedModelDetails } = useModelDetails(selectedModel);
-  // Display prefers the canonical worker catalog row (name, family, pricing,
-  // frontier flags); the API card only enriches fields the worker index does
-  // not carry (description, capabilities, params).
   const selectedModelInfo = useMemo(() => {
     if (selectedModelDetails && selectedModelIndex) {
       return {
@@ -315,11 +302,13 @@ export default function PlaygroundPage() {
     }
     return selectedModelDetails ?? selectedModelIndex;
   }, [selectedModelDetails, selectedModelIndex]);
+
   useEffect(() => {
     if (selectedModelDetails && selectedModelInfo) {
       seedModelCards([selectedModelInfo], { overwrite: true });
     }
   }, [selectedModelDetails, selectedModelInfo]);
+
   const { data: rawModelParams } = useModelParams<ModelParamsSchema>(selectedModel);
   const modelParams = useMemo(() => (
     rawModelParams && Object.keys(rawModelParams.params).length > 0 ? rawModelParams : null
@@ -329,7 +318,6 @@ export default function PlaygroundPage() {
     setParamValues(getDefaultParamValues(modelParams));
   }, [modelParams, selectedModel]);
 
-  // Refs for hot values used in handleSendMessage (avoids callback churn)
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
   const inputValueRef = useRef(inputValue);
@@ -360,10 +348,11 @@ export default function PlaygroundPage() {
     const currentParamValues = paramValuesRef.current;
     const currentConversationStartIndex = conversationStartIndexRef.current;
 
-    if (currentAttachedFiles.some(f => f.uploading)) return;
-    if ((!currentInputValue.trim() && currentAttachedFiles.length === 0) || currentStreaming || !currentSelectedModel || !selectedModelDetails || !currentSelectedModelInfo) return;
+    if (currentAttachedFiles.some((f) => f.uploading)) return;
+    if ((!currentInputValue.trim() && currentAttachedFiles.length === 0) || currentStreaming || !currentSelectedModel || !currentSelectedModelInfo) return;
+    const effectiveModelForGate = selectedModelDetails ?? currentSelectedModelInfo;
     if (
-      modelRequiresImageAttachment(selectedModelDetails)
+      modelRequiresImageAttachment(effectiveModelForGate)
       && !currentAttachedFiles.some((file) => file.type === "image" && Boolean(file.url))
     ) return false;
 
@@ -371,7 +360,7 @@ export default function PlaygroundPage() {
       toast({
         title: "Session Required",
         description: "Please create a session to continue. Sessions enable faster responses.",
-        variant: "destructive"
+        variant: "destructive",
       });
       setShowSessionDialog(true);
       return;
@@ -388,18 +377,6 @@ export default function PlaygroundPage() {
       audioUrl: attached?.type === "audio" ? attached.url : undefined,
       videoUrl: attached?.type === "video" ? attached.url : undefined,
     };
-
-    posthog?.capture("playground_message_sent", {
-      model_id: currentSelectedModel,
-      has_attachment: currentAttachedFiles.length > 0,
-      attachment_type: currentAttachedFiles[0]?.type ?? null,
-      network: paymentNetwork,
-    });
-
-    mpTrack("Launch AI");
-    mpTrack("AI Prompt Sent and Prompt Text", {
-      "Prompt Text": currentInputValue.trim().slice(0, 500),
-    });
 
     chat.addUserMessage(currentInputValue.trim(), {
       type: attached?.type ?? "text",
@@ -419,8 +396,6 @@ export default function PlaygroundPage() {
       if (!wallet || !account) throw new Error("Connect wallet to use inference");
       if (!userAddress || userAddressResolving) throw new Error("Selected network account is still resolving");
 
-      // Make sure the SDK has the freshly-minted Compose Key JWT cached
-      // in-memory before any billable call fires.
       const activeKeyToken = await resolveActiveKeyToken();
       if (sessionActive && budgetRemaining > 0 && !activeKeyToken) {
         throw new Error("Compose session key unavailable. Re-open your session and try again.");
@@ -437,7 +412,7 @@ export default function PlaygroundPage() {
       const callOptions: StreamCallOptions = {
         ...(activeKeyToken ? { key: activeKeyToken } : {}),
         userAddress,
-        network: paymentNetwork,
+        ...(paymentNetwork ? { network: paymentNetwork } : {}),
       };
       await streamer.runResponses({
         params: {
@@ -450,15 +425,26 @@ export default function PlaygroundPage() {
         options: callOptions,
       });
     } catch (err) {
-      const errorMsg = "This request could not be completed.";
-      console.error("[playground] inference failed:", err);
-      setInferenceError(errorMsg);
-      chat.setActivityPhase("error", errorMsg);
-      chat.failAssistant(assistantId, errorMsg);
+      if (!(err instanceof DOMException && err.name === "AbortError")) {
+        const errorMsg = err instanceof Error && err.message.trim()
+          ? err.message
+          : "This request could not be completed.";
+        console.error("[playground] inference failed:", err);
+        setInferenceError(errorMsg);
+        chat.setActivityPhase("error", errorMsg);
+        chat.failAssistant(assistantId, errorMsg);
+      }
     } finally {
       setStreaming(false);
     }
-  }, [wallet, account, budgetRemaining, clearFiles, sessionActive, keyToken, resolveActiveKeyToken, paymentNetwork, toast, posthog, chat, streamer, userAddress, userAddressResolving, selectedModelDetails]);
+  }, [wallet, account, budgetRemaining, clearFiles, sessionActive, keyToken, resolveActiveKeyToken, paymentNetwork, toast, chat, streamer, userAddress, userAddressResolving, selectedModelDetails]);
+
+  const handleStop = useCallback(() => {
+    streamer.cancelResponses();
+    chat.clearActivityState();
+    setStreaming(false);
+  }, [chat, streamer]);
+
   const handleClearChat = useCallback(() => {
     streamer.cancelResponses();
     clearMessages();
@@ -468,48 +454,123 @@ export default function PlaygroundPage() {
     if (uploadedCids.length > 0) cleanupFiles();
   }, [uploadedCids, cleanupFiles, clearFiles, clearMessages, streamer]);
 
-  // ==========================================================================
-  // Render
-  // ==========================================================================
+  const inputModalities = useMemo(
+    () => (selectedModelInfo ? [...new Set(getModelValueList(selectedModelInfo.input))] : ["text"]),
+    [selectedModelInfo],
+  );
+  const familyLogo = selectedModelInfo?.family ? getFamilyLogoUrl(selectedModelInfo.family) : null;
+
+  const canvasStatus = streaming
+    ? activityState.phase === "streaming" || activityState.phase === "thinking" || activityState.phase === "tool"
+      ? "streaming"
+      : "waiting"
+    : "idle";
+
+  const openTrace = useCallback((nodeId?: string, messageId?: string) => {
+    setFocusedNodeId(nodeId ?? null);
+    setInspectedMessageId(messageId ?? null);
+    setTraceOpen(true);
+  }, []);
+
+  const handleCloseTrace = useCallback(() => {
+    setTraceOpen(false);
+    setInspectedMessageId(null);
+  }, []);
+
+  const handleFileSelectClick = useCallback(() => {
+    fileInputRef.current?.click();
+  }, [fileInputRef]);
+
+  const handleCopyMessage = useCallback((content: string) => {
+    void navigator.clipboard.writeText(content);
+    toast({ title: "Copied!", description: "Response copied to clipboard" });
+  }, [toast]);
+
+  const handleRetryMessage = useCallback((content: string) => {
+    setInputValue(content);
+  }, []);
+
+  const handleDeleteMessage = useCallback((id: string) => {
+    setMessages((prev) => prev.filter((m) => m.id !== id));
+  }, [setMessages]);
+
+  const inspectedMessage = useMemo(
+    () => (inspectedMessageId ? messages.find((m) => m.id === inspectedMessageId) ?? null : null),
+    [inspectedMessageId, messages],
+  );
 
   return (
     <div className="cm-playground">
-      {/* ── Top-Level Toolbar: Page info only ─────────────────── */}
+      {/* ── Top-Level Toolbar ── */}
       <div className="cm-playground__toolbar">
-        <h1 className="cm-page-header__title cm-playground__toolbar-title">
+        <h1 className="cm-page-header__title cm-playground__toolbar-title" data-route-heading>
           <span className="text-fuchsia-500 mr-2">//</span>
           PLAYGROUND
         </h1>
 
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as PlaygroundTab)}>
+        <div className="flex items-center gap-2 min-w-0">
           <Switcher
             value={activeTab}
             options={playgroundTabs}
             label="Playground section"
             onChange={setActiveTab}
           />
-        </Tabs>
 
-        <div className="cm-playground__toolbar-right flex items-center gap-2">
-          {activeTab === "model" && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setMobilePaneOpen(true)}
-              className="cm-shell-button cm-shell-button--ghost cm-shell-button--icon lg:hidden"
-            >
-              <Settings2 className="h-4 w-4" />
-            </Button>
+          {activeTab === "model" ? (
+            <Pockets
+              value={pocket}
+              label="Playground view"
+              className="cm-pocket-bar--split"
+              onChange={(next) => {
+                setPocket(next);
+                if (next === "spec") setModelTab("details");
+                if (next === "tune") setModelTab("custom");
+              }}
+              options={[
+                { value: "chat", label: "Chat" },
+                { value: "spec", label: "Details" },
+                { value: "tune", label: "Custom" },
+              ]}
+            />
+          ) : (
+            <Pockets
+              value={connectorPocket}
+              label="Connector view"
+              className="cm-pocket-bar--split"
+              onChange={(next) => {
+                setConnectorPocket(next);
+                if (next === "overview") setConnectorTab("overview");
+                if (next === "params") setConnectorTab("params");
+              }}
+              options={[
+                { value: "runner", label: "Run" },
+                { value: "overview", label: "Info" },
+                { value: "params", label: "Params" },
+              ]}
+            />
           )}
+
+          <Button
+            variant="ghost"
+            size="sm"
+            className="cm-shell-button cm-shell-button--ghost cm-shell-button--sm cm-split__collapse-btn"
+            onClick={() => setPaneCollapsed((prev) => !prev)}
+            aria-label={paneCollapsed ? "Show inspector" : "Hide inspector"}
+            title={paneCollapsed ? "Show inspector" : "Hide inspector"}
+          >
+            {paneCollapsed ? <PanelRightOpen className="w-3.5 h-3.5" /> : <PanelRightClose className="w-3.5 h-3.5" />}
+          </Button>
         </div>
       </div>
 
-      {/* ── Chat + ModelCard — equi-heighted sibling grid ─────── */}
+      {/* ── Models Workspace: Balanced 2-Zone Split ── */}
       {activeTab === "model" && (
-        <div className={`cm-split${paneCollapsed ? " cm-split--collapsed" : ""}`}>
-          {/* Chat cell — contains its own filter toolbar + caps + canvas */}
+        <div
+          className={`cm-split${paneCollapsed ? " cm-split--collapsed" : ""}`}
+          data-pocket={pocket === "chat" ? "main" : "side"}
+          data-collapsed={paneCollapsed ? "true" : undefined}
+        >
           <div className="cm-split__main cm-playground__chat-cell">
-            {/* ── Chat-internal toolbar: badge, filters, count ── */}
             <div className="cm-playground__chat-toolbar">
               <ModelSelector
                 value={selectedModel}
@@ -543,27 +604,21 @@ export default function PlaygroundPage() {
               </div>
             </div>
 
-            {/* ── Chat-internal input row ── */}
-            {selectedModelInfo && (() => {
-              const inputs = getModelValueList(selectedModelInfo.input);
-              const uniqueInputs = [...new Set(inputs)];
-              return uniqueInputs.length > 0 ? (
-                <div className="cm-playground__caps-row">
-                  <span className="cm-playground__caps-label">Input</span>
-                  {uniqueInputs.map((input) => {
-                    const formatted = input.charAt(0).toUpperCase() + input.slice(1);
-                    return (
-                      <span key={input} className="cm-playground__cap-tag flex items-center gap-1">
-                        {getInputIcon(input)}
-                        {formatted}
-                      </span>
-                    );
-                  })}
-                </div>
-              ) : null;
-            })()}
+            {selectedModelInfo && inputModalities.length > 0 ? (
+              <div className="cm-playground__caps-row">
+                <span className="cm-playground__caps-label">Input</span>
+                {inputModalities.map((input) => {
+                  const formatted = input.charAt(0).toUpperCase() + input.slice(1);
+                  return (
+                    <span key={input} className="cm-playground__cap-tag flex items-center gap-1">
+                      {getInputIcon(input)}
+                      {formatted}
+                    </span>
+                  );
+                })}
+              </div>
+            ) : null}
 
-            {/* ── The actual chat canvas ── */}
             <MultimodalCanvas
               variant="playground"
               showHeader={false}
@@ -572,13 +627,17 @@ export default function PlaygroundPage() {
               onInputChange={setInputValue}
               onSend={handleSendMessage}
               sending={streaming}
+              status={canvasStatus}
               activityState={activityState}
+              stepCount={activityState.tools.length}
+              latestReceipt={latestReceipt}
+              latestReceipts={latestReceipts}
               error={inferenceError}
               sessionActive={sessionActive}
               attachedFiles={attachedFiles}
-              imageRequired={Boolean(selectedModelDetails && modelRequiresImageAttachment(selectedModelDetails))}
-              submitDisabled={!selectedModelDetails}
-              onFileSelect={() => fileInputRef.current?.click()}
+              imageRequired={Boolean(selectedModelInfo && modelRequiresImageAttachment(selectedModelDetails ?? selectedModelInfo))}
+              submitDisabled={!selectedModelInfo}
+              onFileSelect={handleFileSelectClick}
               onRemoveFile={handleRemoveFile}
               fileInputRef={fileInputRef}
               onFileInputChange={handleFileSelect}
@@ -586,6 +645,11 @@ export default function PlaygroundPage() {
               recordingSupported={recordingSupported}
               onStartRecording={startRecording}
               onStopRecording={stopRecording}
+              onStop={handleStop}
+              onInspectFlow={openTrace}
+              onCopyMessage={handleCopyMessage}
+              onRetryMessage={handleRetryMessage}
+              onDeleteMessage={handleDeleteMessage}
               onClearChat={handleClearChat}
               scrollContainerRef={scrollContainerRef}
               messagesEndRef={messagesEndRef}
@@ -597,92 +661,36 @@ export default function PlaygroundPage() {
                     ? "Describe the uploaded file..."
                     : "Send a request..."
               }
-              emptyStateIcon={<Bot className="mx-auto mb-4 h-12 w-12 text-cyan-300/50" />}
+              emptyStage={(
+                <div className="cm-chat-hero">
+                  <div className="cm-chat-hero__emblem">
+                    {familyLogo ? (
+                      <img src={familyLogo} alt={selectedModelInfo?.family || ""} className="cm-family-icon" />
+                    ) : (
+                      <Bot className="cm-chat-hero__icon" />
+                    )}
+                  </div>
+                </div>
+              )}
               emptyStateText={
                 selectedModelInfo
-                  ? `Start with ${selectedModelInfo.name || selectedModelInfo.modelId}`
-                  : "Select a model to begin"
+                  ? selectedModelInfo.name || selectedModelInfo.modelId
+                  : "Select a model"
               }
-              emptyStateSubtext={
-                sessionActive
-                  ? `Budget remaining: ${formatBudget(budgetRemaining)}`
-                  : "Start a session to begin"
-              }
+              emptyStateSubtext={(() => {
+                const desc = selectedModelInfo?.description?.trim() || "";
+                const label = (selectedModelInfo?.name || selectedModelInfo?.modelId || "").trim().toLowerCase();
+                if (desc && desc.toLowerCase() !== label && desc.toLowerCase() !== (selectedModelInfo?.modelId || "").trim().toLowerCase()) {
+                  return desc;
+                }
+                return sessionActive
+                  ? `Balance: ${formatBudget(budgetRemaining)}`
+                  : "Start a session to chat";
+              })()}
             />
           </div>
 
-          {/* ModelCard — independent equi-heighted sibling cell */}
-          {!paneCollapsed && (
-            <div className="cm-split__side cm-playground__pane-cell">
-              <button
-                onClick={() => setPaneCollapsed(true)}
-                className="cm-playground__pane-toggle"
-                aria-label="Collapse settings pane"
-              >
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
-              <ModelCard
-                selectedModel={selectedModel}
-                modelInfo={selectedModelInfo || null}
-                systemPrompt={systemPrompt}
-                onSystemPromptChange={setSystemPrompt}
-                modelParams={modelParams}
-                paramValues={paramValues}
-                onParamValuesChange={setParamValues}
-              />
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Expand button when ModelCard collapsed */}
-      {activeTab === "model" && paneCollapsed && (
-        <button
-          onClick={() => setPaneCollapsed(false)}
-          className="cm-playground__pane-expand"
-          aria-label="Expand settings pane"
-        >
-          <ChevronLeft className="w-4 h-4" />
-        </button>
-      )}
-
-      {/* ── Connectors Tab ──────────────────────────────────────────── */}
-      {activeTab === "connectors" && (
-        <div className="flex-1 min-h-0">
-          <Suspense
-            fallback={
-              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                Loading connector tester...
-              </div>
-            }
-          >
-            <LazyConnectorTester
-              initialSource={initialConnectorSource}
-              initialConnector={initialConnector}
-            />
-          </Suspense>
-        </div>
-      )}
-
-      {/* ── Command Bar (⌘K) ─────────────────────────────────────── */}
-
-      {/* ── Session Dialog ────────────────────────────────────────── */}
-      <SessionBudgetDialog
-        open={showSessionDialog}
-        onOpenChange={setShowSessionDialog}
-        showTrigger={false}
-      />
-
-      {/* ── Mobile ModelCard Sheet ───────────────────────────────── */}
-      <Sheet open={mobilePaneOpen} onOpenChange={setMobilePaneOpen}>
-        <SheetContent side="right" className="cm-shell-panel cm-sheet-panel cm-sheet-panel--inspect p-0">
-          <SheetHeader className="border-b border-primary/15 p-4">
-            <SheetTitle className="font-display text-cyan-300 flex items-center gap-2 text-base">
-              <Settings2 className="h-5 w-5" />
-              Model Settings
-            </SheetTitle>
-          </SheetHeader>
-          <div className="cm-sheet-body cm-sheet-body--inspect">
+          <div className="cm-split__side cm-playground__pane-cell">
             <ModelCard
               selectedModel={selectedModel}
               modelInfo={selectedModelInfo || null}
@@ -691,10 +699,58 @@ export default function PlaygroundPage() {
               modelParams={modelParams}
               paramValues={paramValues}
               onParamValuesChange={setParamValues}
+              tab={modelTab}
+              onTabChange={(next) => {
+                setModelTab(next);
+                if (pocket !== "chat") {
+                  setPocket(next === "custom" ? "tune" : "spec");
+                }
+              }}
             />
           </div>
-        </SheetContent>
-      </Sheet>
+        </div>
+      )}
+
+      {/* ── Connectors Workspace: Balanced 2-Zone Split ── */}
+      {activeTab === "connectors" && (
+        <Suspense
+          fallback={
+            <div className="flex flex-1 min-h-0 items-center justify-center text-sm text-muted-foreground font-mono">
+              Loading connector workspace...
+            </div>
+          }
+        >
+          <LazyConnectorTester
+            initialSource={initialConnectorSource}
+            initialConnector={initialConnector}
+            paneCollapsed={paneCollapsed}
+            pocket={connectorPocket}
+            onPocketChange={setConnectorPocket}
+            inspectorTab={connectorTab}
+            onInspectorTabChange={setConnectorTab}
+            commandBarOpen={connectorCommandBarOpen}
+            onCommandBarOpenChange={setConnectorCommandBarOpen}
+          />
+        </Suspense>
+      )}
+
+      {/* ── Surface 3: On-Demand Inference Flow & Settlement Receipt Sheet ── */}
+      <Trace
+        open={traceOpen}
+        onClose={handleCloseTrace}
+        activity={inspectedMessage?.activity ?? latestActivity}
+        receipt={inspectedMessage?.receipt ?? latestReceipt}
+        receipts={inspectedMessage?.receipts ?? latestReceipts}
+        usage={inspectedMessage?.usage ?? latestUsage}
+        focusedNodeId={focusedNodeId}
+      />
+
+      {/* ── Session Dialog ── */}
+      <SessionBudgetDialog
+        open={showSessionDialog}
+        onOpenChange={setShowSessionDialog}
+        showTrigger={false}
+      />
     </div>
   );
 }
