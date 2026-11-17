@@ -117,3 +117,50 @@ export function getAgentCapabilities(input: CapabilityInput): Capability[] {
 
   return items;
 }
+
+export function capabilityIcon(id: CapabilityId, className = "cm-cap-glyph__icon") {
+  const Icon = ICONS[id];
+  return <Icon className={className} aria-hidden="true" />;
+}
+
+export interface CapabilityStripProps {
+  capabilities: Capability[];
+  size?: "sm" | "md";
+  showLabels?: boolean;
+  className?: string;
+}
+
+export function CapabilityStrip({
+  capabilities,
+  size = "md",
+  showLabels = false,
+  className,
+}: CapabilityStripProps) {
+  return (
+    <div
+      className={cn("cm-cap-strip", size === "sm" && "cm-cap-strip--sm", showLabels && "cm-cap-strip--labeled", className)}
+      role="list"
+      aria-label="Agent capabilities"
+    >
+      {capabilities.map((cap) => {
+        const tooltip = `${cap.label} — ${cap.summary}`;
+        return (
+          <Hint key={cap.id} label={tooltip}>
+            <span
+              role="listitem"
+              tabIndex={0}
+              className="cm-cap-glyph"
+              data-tone={cap.tone}
+              data-capability={cap.id}
+              aria-label={tooltip}
+            >
+              {capabilityIcon(cap.id)}
+              {showLabels ? <span className="cm-cap-glyph__label">{cap.label}</span> : null}
+              {cap.badge ? <span className="cm-cap-glyph__count">{cap.badge}</span> : null}
+            </span>
+          </Hint>
+        );
+      })}
+    </div>
+  );
+}
