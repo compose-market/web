@@ -706,9 +706,139 @@ function CodeBlock({
   );
 }
 
-interface RendererProps {
+export interface RendererProps {
   content: string;
   className?: string;
+  suppressedMediaUrls?: ReadonlySet<string>;
+}
+
+const BASE_REMARK_PLUGINS = [remarkGfm];
+const EMPTY_REHYPE_PLUGINS: unknown[] = [];
+
+const MdH1 = ({ children }: { children?: React.ReactNode }) => <h1 className="cm-markdown__h1">{children}</h1>;
+const MdH2 = ({ children }: { children?: React.ReactNode }) => <h2 className="cm-markdown__h2">{children}</h2>;
+const MdH3 = ({ children }: { children?: React.ReactNode }) => <h3 className="cm-markdown__h3">{children}</h3>;
+const MdH4 = ({ children }: { children?: React.ReactNode }) => <h4 className="cm-markdown__h4">{children}</h4>;
+const MdP = ({ children }: { children?: React.ReactNode }) => <p className="cm-markdown__p">{children}</p>;
+const MdUl = ({ children }: { children?: React.ReactNode }) => <ul className="cm-markdown__ul">{children}</ul>;
+const MdOl = ({ children }: { children?: React.ReactNode }) => <ol className="cm-markdown__ol">{children}</ol>;
+const MdLi = ({ children }: { children?: React.ReactNode }) => <li className="cm-markdown__li">{children}</li>;
+const MdTable = ({ children }: { children?: React.ReactNode }) => (
+  <div className="cm-markdown__table-wrap">
+    <table className="cm-markdown__table">{children}</table>
+  </div>
+);
+const MdThead = ({ children }: { children?: React.ReactNode }) => <thead className="cm-markdown__thead">{children}</thead>;
+const MdTh = ({ children }: { children?: React.ReactNode }) => <th className="cm-markdown__th">{children}</th>;
+const MdTd = ({ children }: { children?: React.ReactNode }) => <td className="cm-markdown__td">{children}</td>;
+const MdTr = ({ children }: { children?: React.ReactNode }) => <tr className="cm-markdown__tr">{children}</tr>;
+const MdBlockquote = ({ children }: { children?: React.ReactNode }) => (
+  <blockquote className="cm-markdown__blockquote">{children}</blockquote>
+);
+const MdHr = () => <hr className="cm-markdown__hr" />;
+const MdStrong = ({ children }: { children?: React.ReactNode }) => <strong className="cm-markdown__strong">{children}</strong>;
+const MdEm = ({ children }: { children?: React.ReactNode }) => <em className="italic">{children}</em>;
+const MdDel = ({ children }: { children?: React.ReactNode }) => <del className="opacity-60 line-through">{children}</del>;
+const MdAnchorDefault = ({ href, children }: { href?: string; children?: React.ReactNode }) =>
+  href ? <LinkPreview url={href}>{children}</LinkPreview> : <span>{children}</span>;
+const MdImgDefault = ({ src, alt }: { src?: string; alt?: string }) => {
+  const safe = safeImageSrc(src);
+  if (!safe) return null;
+  return (
+    <img
+      src={safe}
+      alt={alt || "Image"}
+      className="cm-stream-media cm-stream-media--image my-2"
+      loading="lazy"
+      decoding="async"
+    />
+  );
+};
+
+const STATIC_COMPONENTS = {
+  pre: PreBlock as never,
+  code: InlineCode as never,
+  h1: MdH1,
+  h2: MdH2,
+  h3: MdH3,
+  h4: MdH4,
+  p: MdP,
+  ul: MdUl,
+  ol: MdOl,
+  li: MdLi,
+  a: MdAnchorDefault,
+  img: MdImgDefault,
+  table: MdTable,
+  thead: MdThead,
+  th: MdTh,
+  td: MdTd,
+  tr: MdTr,
+  blockquote: MdBlockquote,
+  hr: MdHr,
+  strong: MdStrong,
+  em: MdEm,
+  del: MdDel,
+};
+
+const CODE_STYLE_DEFAULT = {
+  margin: 0,
+  padding: "0.85rem 1rem",
+  fontSize: "0.8125rem",
+  lineHeight: 1.55,
+  background: "transparent",
+  borderRadius: 0,
+} as const;
+
+const CODE_STYLE_COMPACT = {
+  margin: 0,
+  padding: "0.6rem 0.75rem",
+  fontSize: "0.75rem",
+  lineHeight: 1.55,
+  background: "transparent",
+  borderRadius: 0,
+} as const;
+
+const CODE_TAG_PROPS = {
+  style: {
+    background: "transparent",
+    fontFamily: "var(--font-mono), monospace",
+  },
+} as const;
+
+function splitMarkdownChunks(source: string): string[] {
+  if (!source) return [];
+  const lines = source.split("\n");
+  const chunks: string[] = [];
+  let buffer: string[] = [];
+  let inFence = false;
+  let fenceChar = "";
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const trimmed = line.trimStart();
+    if (!inFence && (trimmed.startsWith("```") || trimmed.startsWith("~~~"))) {
+      inFence = true;
+      fenceChar = trimmed.slice(0, 3);
+      buffer.push(line);
+      continue;
+    }
+    if (inFence && trimmed.startsWith(fenceChar)) {
+      inFence = false;
+      fenceChar = "";
+      buffer.push(line);
+      continue;
+    }
+    if (!inFence && line.trim() === "" && buffer.length > 0) {
+      chunks.push(buffer.join("\n"));
+      buffer = [];
+      continue;
+    }
+    buffer.push(line);
+  }
+  if (buffer.length > 0) {
+    chunks.push(buffer.join("\n"));
+  }
+  return chunks;
 }
 
 function MarkdownRendererInner({ content, className }: RendererProps) {
