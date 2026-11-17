@@ -460,6 +460,132 @@ function LinkPreview({
   );
 }
 
+const HighlightedCodeInner = function HighlightedCode({
+  code,
+  language = "",
+  showHeader = true,
+  compact = false,
+  className,
+}: {
+  code: string;
+  language?: string;
+  showHeader?: boolean;
+  compact?: boolean;
+  className?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const [syntaxRuntime, setSyntaxRuntime] = useState<SyntaxRuntime | null>(() => cachedSyntaxRuntime);
+  const copyTimeoutRef = useRef<number | null>(null);
+  const cleanLanguage = language.trim().toLowerCase();
+
+  useEffect(() => {
+    if (!cleanLanguage || cleanLanguage === "mermaid" || syntaxRuntime) return;
+    let active = true;
+    void loadSyntaxRuntime().then((runtime) => {
+      if (active) setSyntaxRuntime(runtime);
+    });
+    return () => {
+      active = false;
+    };
+  }, [cleanLanguage, syntaxRuntime]);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current !== null) {
+        window.clearTimeout(copyTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(code);
+    setCopied(true);
+    if (copyTimeoutRef.current !== null) {
+      window.clearTimeout(copyTimeoutRef.current);
+    }
+    copyTimeoutRef.current = window.setTimeout(() => setCopied(false), 2000);
+  };
+
+  if (cleanLanguage === "mermaid") {
+    return <MermaidDiagram code={code} />;
+  }
+
+  return (
+    <div className={cn("cm-code-block", compact && "cm-code-block--compact", className)}>
+      {showHeader ? (
+        <div className="cm-code-block__head">
+          <span className="cm-code-block__lang">{cleanLanguage || "code"}</span>
+          <button
+            type="button"
+            onClick={() => void handleCopy()}
+            className="cm-code-block__copy"
+            title="Copy code"
+            aria-label="Copy code"
+          >
+            {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+            <span>{copied ? "Copied" : "Copy"}</span>
+          </button>
+        </div>
+      ) : null}
+
+      {syntaxRuntime && cleanLanguage ? (
+        <syntaxRuntime.SyntaxHighlighter
+          style={syntaxRuntime.style}
+          language={cleanLanguage}
+          PreTag="div"
+          customStyle={compact ? CODE_STYLE_COMPACT : CODE_STYLE_DEFAULT}
+          codeTagProps={CODE_TAG_PROPS}
+        >
+          {code}
+        </syntaxRuntime.SyntaxHighlighter>
+      ) : (
+        <pre className={cn("cm-code-block__pre", compact && "cm-code-block__pre--compact")}>
+          <code>{code}</code>
+        </pre>
+      )}
+    </div>
+  );
+};
+
+export const HighlightedCode = memo(HighlightedCodeInner);
+
+function extractNodeText(node: React.ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(extractNodeText).join("");
+  if (React.isValidElement<{ children?: React.ReactNode }>(node)) {
+    return extractNodeText(node.props.children);
+  }
+  return "";
+}
+
+function PreBlock({ children }: { children?: React.ReactNode }) {
+  const childArray = React.Children.toArray(children);
+  const codeEl = childArray.find((child): child is React.ReactElement<{ className?: string; children?: React.ReactNode }> =>
+    React.isValidElement(child),
+  );
+  const className = typeof codeEl?.props?.className === "string" ? codeEl.props.className : "";
+  const langMatch = /language-([a-z0-9_+#.-]+)/i.exec(className);
+  const language = langMatch ? langMatch[1] : "";
+  const rawCode = codeEl ? extractNodeText(codeEl.props.children) : extractNodeText(children);
+  const codeString = rawCode.replace(/\n$/, "");
+
+  return <HighlightedCode code={codeString} language={language} />;
+}
+
+function InlineCode({
+  children,
+  className,
+  node: _node,
+  ...props
+}: React.HTMLAttributes<HTMLElement> & { node?: unknown }) {
+  void _node;
+  return (
+    <code className={cn("cm-inline-code", className)} {...props}>
+      {children}
+    </code>
+  );
+}
+
 function CodeBlock({
   inline,
   className,
