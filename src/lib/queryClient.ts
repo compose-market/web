@@ -76,38 +76,46 @@ async function writePersistedClientNow(client: PersistedClient): Promise<void> {
 
 export const indexedDbQueryPersister: Persister = {
   async persistClient(client: PersistedClient): Promise<void> {
-    const database = await openCacheDatabase();
-    if (!database) return;
-    try {
-      const transaction = database.transaction(STORE_NAME, "readwrite");
-      transaction.objectStore(STORE_NAME).put(client, CLIENT_KEY);
-      await transactionDone(transaction);
-    } finally {
-      database.close();
+    pendingPersistClient = client;
+    if (typeof window === "undefined") {
+      await writePersistedClientNow(client);
+      return;
     }
+    if (persistTimer !== null) return;
+    persistTimer = window.setTimeout(() => {
+      persistTimer = null;
+      const latest = pendingPersistClient;
+      pendingPersistClient = null;
+      if (!latest) return;
+      const run = () => {
+        void writePersistedClientNow(latest).catch(() => undefined);
+      };
+      if (typeof window.requestIdleCallback === "function") {
+        window.requestIdleCallback(run, { timeout: 2_000 });
+      } else {
+        run();
+      }
+    }, PERSIST_DEBOUNCE_MS);
   },
   async restoreClient(): Promise<PersistedClient | undefined> {
     const database = await openCacheDatabase();
     if (!database) return undefined;
-    try {
-      const transaction = database.transaction(STORE_NAME, "readonly");
-      const client = await requestResult(transaction.objectStore(STORE_NAME).get(CLIENT_KEY));
-      await transactionDone(transaction);
-      return client as PersistedClient | undefined;
-    } finally {
-      database.close();
-    }
+    const transaction = database.transaction(STORE_NAME, "readonly");
+    const client = await requestResult(transaction.objectStore(STORE_NAME).get(CLIENT_KEY));
+    await transactionDone(transaction);
+    return client as PersistedClient | undefined;
   },
   async removeClient(): Promise<void> {
+    pendingPersistClient = null;
+    if (persistTimer !== null && typeof window !== "undefined") {
+      window.clearTimeout(persistTimer);
+      persistTimer = null;
+    }
     const database = await openCacheDatabase();
     if (!database) return;
-    try {
-      const transaction = database.transaction(STORE_NAME, "readwrite");
-      transaction.objectStore(STORE_NAME).delete(CLIENT_KEY);
-      await transactionDone(transaction);
-    } finally {
-      database.close();
-    }
+    const transaction = database.transaction(STORE_NAME, "readwrite");
+    transaction.objectStore(STORE_NAME).delete(CLIENT_KEY);
+    await transactionDone(transaction);
   },
 };
 
