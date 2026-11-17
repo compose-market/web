@@ -288,3 +288,9 @@ export async function warmAvatars(urls: string[], priorityCount = 16): Promise<v
     window.setTimeout(prune, 500);
   }
 }
+
+export function resetAvatarCacheMemory(): void {
+  blobUrls.clear();
+  inflight.clear();
+  prunedSignature = null;
+}
