@@ -95,13 +95,32 @@ function loadMathRuntime(): Promise<MathRuntime> {
     mathRuntimePromise = Promise.all([
       import("remark-math"),
       import("rehype-katex"),
-    ]).then(([remarkMathModule, rehypeKatexModule]) => ({
-      remarkPlugins: [remarkMathModule.default],
-      rehypePlugins: [rehypeKatexModule.default],
-    }));
+      import("katex/dist/katex.min.css"),
+    ]).then(([remarkMathModule, rehypeKatexModule]) => {
+      cachedMathRuntime = {
+        remarkPlugins: [[remarkMathModule.default, { singleDollarTextMath: false }]],
+        rehypePlugins: [rehypeKatexModule.default],
+      };
+      return cachedMathRuntime;
+    });
   }
 
   return mathRuntimePromise;
+}
+
+function normalizeExplicitLatexDelimiters(raw: string): string {
+  if (!raw || !/\\\(|\\\[/.test(raw)) {
+    return raw;
+  }
+  return raw
+    .split(/(```[\s\S]*?```|`[^`\n]+`)/g)
+    .map((segment, index) => {
+      if (index % 2 === 1) return segment;
+      return segment
+        .replace(/\\\[([\s\S]+?)\\\]/g, (_match, expr: string) => `\n$$\n${expr.trim()}\n$$\n`)
+        .replace(/\\\(([^\n]+?)\\\)/g, (_match, expr: string) => `$$${expr.trim()}$$`);
+    })
+    .join("");
 }
 
 function loadSyntaxRuntime(): Promise<SyntaxRuntime> {
