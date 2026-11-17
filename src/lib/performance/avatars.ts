@@ -144,3 +144,67 @@ export function useAvatarSrc(url: string | null): string | null {
     () => url,
   );
 }
+
+function canUseCacheStorage(): boolean {
+  return typeof window !== "undefined"
+    && typeof caches !== "undefined"
+    && typeof URL !== "undefined"
+    && typeof URL.createObjectURL === "function";
+}
+
+function isCacheableAvatarUrl(url: string): boolean {
+  return /^https?:\/\/.+\/avatar(\?|$)/i.test(url);
+}
+
+async function openAvatarCache(): Promise<Cache | null> {
+  if (!canUseCacheStorage()) return null;
+  try {
+    return await caches.open(AVATAR_CACHE_NAME);
+  } catch {
+    return null;
+  }
+}
+
+async function fetchAndCacheAvatar(cache: Cache | null, url: string): Promise<string | null> {
+  const existing = blobUrls.get(url);
+  if (existing) return existing;
+  const active = inflight.get(url);
+  if (active) return active;
+
+  const task = (async () => {
+    try {
+      if (cache) {
+        const hit = await cache.match(url);
+        if (hit && hit.ok) {
+          const blob = await hit.blob();
+          if (blob.size > 0) {
+            const objectUrl = URL.createObjectURL(blob);
+            registerBlobUrl(url, objectUrl);
+            return objectUrl;
+          }
+        }
+      }
+
+      const response = await fetch(url, { mode: "cors", credentials: "omit" });
+      if (!response.ok) return null;
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType && !contentType.startsWith("image/")) return null;
+
+      if (cache) {
+        await cache.put(url, response.clone()).catch(() => undefined);
+      }
+      const blob = await response.blob();
+      if (blob.size === 0) return null;
+      const objectUrl = URL.createObjectURL(blob);
+      registerBlobUrl(url, objectUrl);
+      return objectUrl;
+    } catch {
+      return null;
+    } finally {
+      inflight.delete(url);
+    }
+  })();
+
+  inflight.set(url, task);
+  return task;
+}
