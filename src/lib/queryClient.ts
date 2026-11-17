@@ -19,19 +19,36 @@ export function shouldPersistQuery(query: {
 const DATABASE_NAME = "query-cache";
 const STORE_NAME = "query-cache";
 const CLIENT_KEY = "durable-client";
+const PERSIST_DEBOUNCE_MS = 1_500;
+
+let databasePromise: Promise<IDBDatabase | undefined> | null = null;
+let pendingPersistClient: PersistedClient | null = null;
+let persistTimer: number | null = null;
 
 function openCacheDatabase(): Promise<IDBDatabase | undefined> {
   if (typeof indexedDB === "undefined") return Promise.resolve(undefined);
-  return new Promise((resolve, reject) => {
+  if (databasePromise) return databasePromise;
+  databasePromise = new Promise<IDBDatabase | undefined>((resolve, reject) => {
     const request = indexedDB.open(DATABASE_NAME, 2);
     request.onupgradeneeded = () => {
       if (!request.result.objectStoreNames.contains(STORE_NAME)) {
         request.result.createObjectStore(STORE_NAME);
       }
     };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error("Unable to open the durable query cache"));
+    request.onsuccess = () => {
+      const db = request.result;
+      db.onversionchange = () => {
+        db.close();
+        databasePromise = null;
+      };
+      resolve(db);
+    };
+    request.onerror = () => {
+      databasePromise = null;
+      reject(request.error ?? new Error("Unable to open the durable query cache"));
+    };
   });
+  return databasePromise;
 }
 
 function requestResult<T>(request: IDBRequest<T>): Promise<T> {
@@ -47,6 +64,14 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
     transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction aborted"));
     transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed"));
   });
+}
+
+async function writePersistedClientNow(client: PersistedClient): Promise<void> {
+  const database = await openCacheDatabase();
+  if (!database) return;
+  const transaction = database.transaction(STORE_NAME, "readwrite");
+  transaction.objectStore(STORE_NAME).put(client, CLIENT_KEY);
+  await transactionDone(transaction);
 }
 
 export const indexedDbQueryPersister: Persister = {
