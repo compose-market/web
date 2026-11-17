@@ -423,8 +423,24 @@ function MediaEmbed({ url }: { url: string }) {
   return null;
 }
 
-function LinkPreview({ url, children }: { url: string; children: React.ReactNode }) {
-  const media = MediaEmbed({ url });
+function LinkPreview({
+  url,
+  children,
+  suppressedMediaUrls,
+}: {
+  url: string;
+  children: React.ReactNode;
+  suppressedMediaUrls?: ReadonlySet<string>;
+}) {
+  const normalized = normalizeMediaUrl(url);
+  if (suppressedMediaUrls?.has(normalized)) {
+    return null;
+  }
+  const safe = safeHref(url);
+  if (!safe) {
+    return <span>{children}</span>;
+  }
+  const media = MediaEmbed({ url: safe });
   if (media) {
     return media;
   }
@@ -432,13 +448,13 @@ function LinkPreview({ url, children }: { url: string; children: React.ReactNode
   return (
     <span className="inline">
       <a
-        href={url}
+        href={safe}
         target="_blank"
         rel="noopener noreferrer"
-        className="inline-flex items-center gap-1 text-cyan-400 underline underline-offset-2 hover:text-cyan-300"
+        className="cm-markdown__link"
       >
         {children}
-        <ExternalLink className="inline h-3 w-3" />
+        <ExternalLink className="inline h-3 w-3 shrink-0" />
       </a>
     </span>
   );
