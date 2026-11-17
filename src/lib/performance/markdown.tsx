@@ -3,11 +3,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   Check,
-  ChevronDown,
-  ChevronUp,
   Copy,
   ExternalLink,
-  Wrench,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -28,13 +25,49 @@ interface MathRuntime {
 
 interface SyntaxRuntime {
   SyntaxHighlighter: typeof import("react-syntax-highlighter")["Prism"];
-  style: typeof import("react-syntax-highlighter/dist/esm/styles/prism")["oneDark"];
+  style: Record<string, React.CSSProperties>;
 }
 
 let mathRuntimePromise: Promise<MathRuntime> | null = null;
+let cachedMathRuntime: MathRuntime | null = null;
 let syntaxRuntimePromise: Promise<SyntaxRuntime> | null = null;
+let cachedSyntaxRuntime: SyntaxRuntime | null = null;
 let mermaidRuntimePromise: Promise<typeof import("mermaid").default> | null = null;
+let domPurifyPromise: Promise<typeof import("dompurify").default> | null = null;
 let mermaidInitialized = false;
+
+const SAFE_HREF_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
+const SAFE_DATA_IMAGE_RE = /^data:image\/(?:png|jpeg|jpg|webp|gif|avif);base64,[a-z0-9+/=\s]+$/i;
+
+/**
+ * Strict URL allowlist preventing javascript:, data:, and vbscript: XSS.
+ * Returns normalized safe URL or null if disallowed.
+ */
+export function safeHref(url: string | null | undefined): string | null {
+  if (!url || typeof url !== "string") return null;
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (!SAFE_HREF_PROTOCOLS.has(parsed.protocol)) return null;
+    return parsed.href;
+  } catch {
+    return null;
+  }
+}
+
+export function safeImageSrc(src: string | null | undefined): string | null {
+  if (!src || typeof src !== "string") return null;
+  const trimmed = src.trim();
+  if (!trimmed) return null;
+  if (SAFE_DATA_IMAGE_RE.test(trimmed)) return trimmed;
+  if (trimmed.startsWith("blob:")) return trimmed;
+  const href = safeHref(trimmed);
+  if (href && (href.startsWith("http://") || href.startsWith("https://"))) {
+    return href;
+  }
+  return null;
+}
 
 function loadMathRuntime(): Promise<MathRuntime> {
   if (!mathRuntimePromise) {
