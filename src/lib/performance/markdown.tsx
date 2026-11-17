@@ -169,6 +169,10 @@ async function loadMermaidRuntime(): Promise<typeof import("mermaid").default> {
   return mermaid;
 }
 
+export function normalizeMediaUrl(url: string): string {
+  return url.trim().replace(/[)\]>.,;]+$/, "");
+}
+
 function parseBlocks(raw: string): ContentBlock[] {
   if (!raw) {
     return [];
@@ -292,56 +296,85 @@ function InvokeBlock({ toolName, params }: { toolName: string; params?: Record<s
 }
 
 function MermaidDiagram({ code }: { code: string }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const [svg, setSvg] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
     let active = true;
 
-    const renderDiagram = async () => {
+    const timer = window.setTimeout(async () => {
       try {
-        const mermaid = await loadMermaidRuntime();
+        const [mermaid, DOMPurify] = await Promise.all([
+          loadMermaidRuntime(),
+          loadDomPurify(),
+        ]);
         const id = `mermaid-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
         const rendered = await mermaid.render(id, code);
-        if (!active) {
-          return;
-        }
-        setSvg(rendered.svg);
+        if (!active) return;
+        const cleanSvg = DOMPurify.sanitize(rendered.svg, {
+          USE_PROFILES: { svg: true, svgFilters: true },
+          FORBID_TAGS: ["script", "foreignObject", "iframe", "object", "embed"],
+          FORBID_ATTR: ["onerror", "onload", "onclick", "onmouseover", "onfocus", "onblur"],
+        });
+        setSvg(cleanSvg);
         setError("");
       } catch (renderError) {
-        if (!active) {
-          return;
-        }
+        if (!active) return;
         setError(renderError instanceof Error ? renderError.message : "Failed to render diagram");
       }
-    };
-
-    void renderDiagram();
+    }, 200);
 
     return () => {
       active = false;
+      window.clearTimeout(timer);
     };
   }, [code]);
 
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    if (!svg) {
+      el.replaceChildren();
+      return;
+    }
+    const maybeSanitized = el as HTMLDivElement & { setHTML?: (html: string) => void };
+    if (typeof maybeSanitized.setHTML === "function") {
+      maybeSanitized.setHTML(svg);
+      return;
+    }
+    const doc = new DOMParser().parseFromString(svg, "image/svg+xml");
+    const root = doc.documentElement;
+    if (root && root.nodeName.toLowerCase() === "svg") {
+      el.replaceChildren(document.importNode(root, true));
+    } else {
+      el.replaceChildren();
+    }
+  }, [svg]);
+
   if (error) {
     return (
-      <div className="my-3 rounded-lg border border-red-500/30 bg-red-500/10 p-4">
-        <p className="text-sm text-red-400">Diagram error: {error}</p>
-        <pre className="mt-2 overflow-auto text-xs text-zinc-500">{code}</pre>
+      <div className="cm-stream-notice my-3" data-tone="error">
+        <div className="cm-stream-notice__title">Diagram error</div>
+        <div className="cm-stream-notice__body">{error}</div>
+        <pre className="cm-code-block__pre mt-2">{code}</pre>
       </div>
     );
   }
 
   return (
     <div
-      className="my-3 flex justify-center overflow-auto rounded-lg bg-zinc-900 p-4"
-      dangerouslySetInnerHTML={{ __html: svg }}
+      ref={containerRef}
+      className="cm-code-block my-3 flex justify-center overflow-auto p-4"
     />
   );
 }
 
 function MediaEmbed({ url }: { url: string }) {
-  const youtubeMatch = url.match(
+  const safe = safeHref(url);
+  if (!safe || safe.startsWith("mailto:")) return null;
+
+  const youtubeMatch = safe.match(
     /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
   );
   if (youtubeMatch) {
@@ -357,7 +390,7 @@ function MediaEmbed({ url }: { url: string }) {
     );
   }
 
-  const vimeoMatch = url.match(/vimeo\.com\/(\d+)/);
+  const vimeoMatch = safe.match(/vimeo\.com\/(\d+)/);
   if (vimeoMatch) {
     return (
       <div className="my-3 aspect-video overflow-hidden rounded-lg">
@@ -371,18 +404,18 @@ function MediaEmbed({ url }: { url: string }) {
     );
   }
 
-  if (/\.(mp4|webm|ogg)$/i.test(url)) {
+  if (/\.(mp4|webm|ogg)(\?.*)?$/i.test(safe)) {
     return (
-      <video controls className="my-3 w-full rounded-lg">
-        <source src={url} />
+      <video controls className="cm-stream-media cm-stream-media--video my-3">
+        <source src={safe} />
       </video>
     );
   }
 
-  if (/\.(mp3|wav|ogg|m4a)$/i.test(url)) {
+  if (/\.(mp3|wav|ogg|m4a)(\?.*)?$/i.test(safe)) {
     return (
-      <audio controls className="my-3 w-full">
-        <source src={url} />
+      <audio controls className="cm-stream-media cm-stream-media--audio my-3">
+        <source src={safe} />
       </audio>
     );
   }
