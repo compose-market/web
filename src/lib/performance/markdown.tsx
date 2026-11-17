@@ -69,6 +69,27 @@ export function safeImageSrc(src: string | null | undefined): string | null {
   return null;
 }
 
+async function loadDomPurify(): Promise<typeof import("dompurify").default> {
+  if (!domPurifyPromise) {
+    domPurifyPromise = import("dompurify").then((module) => module.default);
+  }
+  return domPurifyPromise;
+}
+
+function stripThemeBackgrounds(
+  theme: Record<string, React.CSSProperties>,
+): Record<string, React.CSSProperties> {
+  const cleaned: Record<string, React.CSSProperties> = {};
+  for (const [selector, rules] of Object.entries(theme)) {
+    if (!rules || typeof rules !== "object") continue;
+    const next: React.CSSProperties = { ...rules };
+    delete next.background;
+    delete next.backgroundColor;
+    cleaned[selector] = next;
+  }
+  return cleaned;
+}
+
 function loadMathRuntime(): Promise<MathRuntime> {
   if (!mathRuntimePromise) {
     mathRuntimePromise = Promise.all([
