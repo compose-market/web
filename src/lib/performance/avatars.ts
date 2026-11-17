@@ -208,3 +208,83 @@ async function fetchAndCacheAvatar(cache: Cache | null, url: string): Promise<st
   inflight.set(url, task);
   return task;
 }
+
+async function runBatched(urls: string[], concurrency: number, fn: (url: string) => Promise<unknown>): Promise<void> {
+  for (let i = 0; i < urls.length; i += concurrency) {
+    await Promise.all(urls.slice(i, i + concurrency).map(fn));
+  }
+}
+
+/**
+ * Hydrate cached thumbnails from `Cache Storage` immediately, then warm any
+ * cache misses (priority visible batch first, offscreen remainder in background
+ * batches) and prune obsolete versions.
+ */
+export async function warmAvatars(urls: string[], priorityCount = 16): Promise<void> {
+  if (!canUseCacheStorage() || urls.length === 0) return;
+  adoptBootAvatars();
+  const unique = [...new Set(urls.filter(isCacheableAvatarUrl))];
+  if (unique.length === 0) return;
+
+  const cache = await openAvatarCache();
+  if (!cache) return;
+
+  // 1. Hydrate all hits already in Cache Storage without touching the network.
+  const misses: string[] = [];
+  const bootPending = typeof window !== "undefined" ? window.__CM_BOOT__?.pending : undefined;
+  await Promise.all(unique.map(async (url) => {
+    if (blobUrls.has(url) || bootPending?.[url]) return;
+    try {
+      const hit = await cache.match(url);
+      if (hit && hit.ok) {
+        const blob = await hit.blob();
+        if (blob.size > 0) {
+          registerBlobUrl(url, URL.createObjectURL(blob));
+          return;
+        }
+      }
+    } catch {
+      // Treat unreadable entry as a miss.
+    }
+    misses.push(url);
+  }));
+
+  if (misses.length > 0) {
+    // Preserve input ordering so visible above-the-fold cards fetch first.
+    const missSet = new Set(misses);
+    const orderedMisses = unique.filter((url) => missSet.has(url));
+    const priorityMisses = orderedMisses.slice(0, priorityCount);
+    const tailMisses = orderedMisses.slice(priorityCount);
+
+    await runBatched(priorityMisses, 8, (url) => fetchAndCacheAvatar(cache, url));
+    if (tailMisses.length > 0) {
+      const warmTail = () => {
+        void runBatched(tailMisses, 6, (url) => fetchAndCacheAvatar(cache, url));
+      };
+      if (typeof window.requestIdleCallback === "function") {
+        window.requestIdleCallback(warmTail, { timeout: 400 });
+      } else {
+        window.setTimeout(warmTail, 32);
+      }
+    }
+  }
+
+  // 2. Prune stale avatar versions once per active URL signature.
+  const signature = `${unique.length}:${unique[0] ?? ""}:${unique[unique.length - 1] ?? ""}`;
+  if (prunedSignature === signature) return;
+  prunedSignature = signature;
+
+  const prune = () => {
+    const active = new Set(unique);
+    void cache.keys().then((requests) => Promise.all(
+      requests
+        .filter((req) => !active.has(req.url))
+        .map((req) => cache.delete(req)),
+    )).catch(() => undefined);
+  };
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(prune, { timeout: 2_000 });
+  } else {
+    window.setTimeout(prune, 500);
+  }
+}
