@@ -128,10 +128,13 @@ function loadSyntaxRuntime(): Promise<SyntaxRuntime> {
     syntaxRuntimePromise = Promise.all([
       import("react-syntax-highlighter"),
       import("react-syntax-highlighter/dist/esm/styles/prism"),
-    ]).then(([syntaxModule, styleModule]) => ({
-      SyntaxHighlighter: syntaxModule.Prism,
-      style: styleModule.oneDark,
-    }));
+    ]).then(([syntaxModule, styleModule]) => {
+      cachedSyntaxRuntime = {
+        SyntaxHighlighter: syntaxModule.Prism,
+        style: stripThemeBackgrounds(styleModule.oneDark as Record<string, React.CSSProperties>),
+      };
+      return cachedSyntaxRuntime;
+    });
   }
 
   return syntaxRuntimePromise;
@@ -146,6 +149,7 @@ async function loadMermaidRuntime(): Promise<typeof import("mermaid").default> {
   if (!mermaidInitialized) {
     mermaid.initialize({
       startOnLoad: false,
+      securityLevel: "strict",
       theme: "dark",
       themeVariables: {
         primaryColor: "#06b6d4",
@@ -153,9 +157,9 @@ async function loadMermaidRuntime(): Promise<typeof import("mermaid").default> {
         primaryBorderColor: "#0891b2",
         lineColor: "#64748b",
         secondaryColor: "#6366f1",
-        tertiaryColor: "#1e1e1e",
-        background: "#1e1e1e",
-        mainBkg: "#1e1e1e",
+        tertiaryColor: "#0d1322",
+        background: "#0d1322",
+        mainBkg: "#0d1322",
         nodeBorder: "#0891b2",
       },
     });
