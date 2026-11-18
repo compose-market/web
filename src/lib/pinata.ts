@@ -7,6 +7,8 @@
  * gateway directly.
  */
 
+import { sdk } from "@/lib/sdk";
+
 const env = import.meta.env ?? {};
 const PINATA_GATEWAY = env.VITE_PINATA_GATEWAY || "jabyl.mypinata.cloud";
 
@@ -42,7 +44,7 @@ export async function uploadFile(
     JSON.stringify({ cidVersion: 1 })
   );
 
-  const response = await fetch("/api/ipfs/pin/file", {
+  const response = await sdk.fetch("/api/ipfs/pin/file", {
     method: "POST",
     body: formData,
   });
@@ -63,7 +65,7 @@ export async function uploadJSON<T extends object>(
   data: T,
   metadata?: PinataMetadata
 ): Promise<string> {
-  const response = await fetch("/api/ipfs/pin/json", {
+  const response = await sdk.fetch("/api/ipfs/pin/json", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -115,7 +117,7 @@ export async function fetchFromIpfs<T = unknown>(cid: string): Promise<T> {
  */
 export async function unpinFile(cid: string): Promise<boolean> {
   try {
-    const response = await fetch(`/api/ipfs/unpin/${encodeURIComponent(cid)}`, {
+    const response = await sdk.fetch(`/api/ipfs/unpin/${encodeURIComponent(cid)}`, {
       method: "DELETE",
     });
 
@@ -166,10 +168,13 @@ export async function cleanupConversationFiles(cids: string[]): Promise<void> {
 // Agent Card Types (A2A Compatible)
 // =============================================================================
 
+export type AgentRole = "executor" | "coordinator";
+
 export interface AgentCard {
   schemaVersion: string;
   name: string;
   description: string;
+  role: AgentRole;
   skills: string[];
   x402: true;
   x402Support: boolean;
@@ -324,14 +329,6 @@ export function generateDnaHash(skills: string[], chain: number, model: string):
   // Note: In production, use a proper keccak256 implementation (e.g., from viem)
   const data = `${skills.sort().join(",")}:${chain}:${model}`;
   return data; // This will be hashed on-chain; frontend stores the source data
-}
-
-/**
- * Check if IPFS pinning is available (server-side proxy; always reachable —
- * the API answers 503 if its Pinata JWT is not configured).
- */
-export function isPinataConfigured(): boolean {
-  return true;
 }
 
 /**
