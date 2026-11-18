@@ -9,7 +9,10 @@ export function extractCid(agentCardUri: string): string {
 }
 
 export async function resolveAgentCardCid(agentWallet: string): Promise<string> {
-  const agent = await fetchAgentByWalletAddress(agentWallet.toLowerCase());
+  const normalized = /^0x[a-f0-9]{40}$/i.test(agentWallet.trim())
+    ? agentWallet.trim().toLowerCase()
+    : agentWallet.trim();
+  const agent = await fetchAgentByWalletAddress(normalized);
   if (!agent?.agentCardUri) {
     throw new Error("Agent metadata missing agentCardUri");
   }
