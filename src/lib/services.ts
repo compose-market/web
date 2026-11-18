@@ -2,16 +2,18 @@
  * Backend Service API Client
  *
  * Talks to:
- * - Connectors broker (https://connectors.compose.market) — tools catalog,
- *   tool execution, onchain connectors
- * - API Gateway (https://api.compose.market) — via the shared SDK singleton
+ * - Runtime unified connectors surface (`sdk.connectors.*`) — MCP tools catalog,
+ *   tool execution, and onchain connectors
+ * - Connectors worker (`https://connectors.compose.market`) — health probe
+ * - API Gateway (`https://api.compose.market`) — via the shared SDK singleton
  */
 
-import { sdk } from "./sdk";
+import type { McpServerSummary } from "@compose-market/sdk";
+import { sdk, CONNECTORS_BASE_URL } from "./sdk";
 import { normalizeConnectorBinding } from "./connectors";
 
 // Service URLs from environment or defaults
-const CONNECTORS_URL = import.meta.env.VITE_CONNECTORS_URL || "https://connectors.compose.market";
+const CONNECTORS_URL = CONNECTORS_BASE_URL;
 
 // =============================================================================
 // Types
@@ -77,36 +79,10 @@ export interface WorkflowRunResult {
 // Connectors broker catalog + execution
 // =============================================================================
 
-interface ServerSummary {
-  slug: string;
-  origin: "mcp" | "onchain";
-  name: string;
-  namespace: string;
-  description: string;
-  tags: string[];
-  category: string | null;
-  status: "live" | "credential_gated";
-  statefulness: "stateless" | "stateful" | "unknown";
-  cardVersion: string;
-  inspectedAt: string | null;
-}
-
-interface ServerListResponse {
-  total: number;
-  offset: number;
-  limit: number;
-  servers: ServerSummary[];
-}
-
 const DEFAULT_CONNECTOR_LIMIT = 50;
 
-async function fetchToolSummariesPage(limit = DEFAULT_CONNECTOR_LIMIT, offset = 0): Promise<ServerSummary[]> {
-  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-  const res = await fetch(`${CONNECTORS_URL}/mcps?${params}`);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch connectors: ${res.status}`);
-  }
-  const data = await res.json() as ServerListResponse;
+async function fetchToolSummariesPage(limit = DEFAULT_CONNECTOR_LIMIT, offset = 0): Promise<McpServerSummary[]> {
+  const data = await sdk.connectors.mcps.list({ limit, offset });
   return data.servers || [];
 }
 
@@ -115,43 +91,34 @@ export async function getConnectors(): Promise<ConnectorInfo[]> {
   return servers.map((s) => ({
     id: s.slug,
     label: s.name,
-    description: s.description,
-    available: true,
+    description: s.description || "",
+    available: s.available ?? true,
   }));
 }
 
 export async function getConnectorTools(connectorId: string): Promise<ConnectorTool[]> {
-  const res = await fetch(`${CONNECTORS_URL}/mcps/${encodeURIComponent(connectorId)}`);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch tools for ${connectorId}: ${res.status}`);
-  }
-  const data = await res.json() as { tools?: ConnectorTool[] };
-  return data.tools || [];
+  const data = await sdk.connectors.mcps.get(connectorId);
+  return (data.tools || []) as ConnectorTool[];
 }
 
 /**
- * Call a tool on a connector directly. Routes through api/ for x402.
+ * Call a tool on a connector directly via `sdk.connectors.mcps.execute`.
  */
 export async function callConnectorTool(
   connectorId: string,
   toolName: string,
   args: Record<string, unknown>
 ): Promise<{ success: boolean; content: unknown; raw: unknown }> {
-  const res = await sdk.fetch(
-    `/api/mcps/${encodeURIComponent(connectorId)}/execute/${encodeURIComponent(toolName)}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ args }),
-    },
-  );
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Connector call failed: ${text}`);
+  const data = await sdk.connectors.mcps.execute(connectorId, toolName, { args }) as Record<string, unknown>;
+  const ok = Boolean(data.ok ?? data.success ?? true);
+  if (!ok) {
+    throw new Error(`Connector call failed: ${String(data.message || data.error || data.kind || "Unknown error")}`);
   }
-
-  return res.json();
+  return {
+    success: ok,
+    content: data.content ?? data.result,
+    raw: data,
+  };
 }
 
 // =============================================================================
@@ -173,15 +140,18 @@ export async function executeGoatConnector(
   tool: string,
   args: Record<string, unknown>
 ): Promise<ConnectorExecutionResult> {
-  const res = await sdk.fetch(
-    `/api/onchain/${encodeURIComponent(connectorId)}/execute/${encodeURIComponent(tool)}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ args }),
-    },
-  );
-  return res.json();
+  const data = await sdk.connectors.onchain.execute(connectorId, tool, { args }) as Record<string, unknown>;
+  const rawResult = data.result as Record<string, unknown> | undefined;
+  const ok = Boolean(data.ok ?? data.success ?? true);
+  return {
+    success: ok,
+    connectorId,
+    tool,
+    result: data.result,
+    txHash: (typeof rawResult?.txHash === "string" ? rawResult.txHash : undefined)
+      || (typeof data.txHash === "string" ? data.txHash : undefined),
+    error: ok ? undefined : String(data.message || data.kind || data.error || "Execution failed"),
+  };
 }
 
 export async function executeSpawnedServer(
@@ -189,46 +159,35 @@ export async function executeSpawnedServer(
   tool: string,
   args: Record<string, unknown>
 ): Promise<ConnectorExecutionResult> {
-  const res = await sdk.fetch(
-    `/api/mcps/${encodeURIComponent(slug)}/execute/${encodeURIComponent(tool)}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ args }),
-    },
-  );
-
-  const data = await res.json() as { ok?: boolean; result?: unknown; kind?: string; message?: string };
+  const data = await sdk.connectors.mcps.execute(slug, tool, { args }) as {
+    ok?: boolean;
+    success?: boolean;
+    result?: unknown;
+    kind?: string;
+    message?: string;
+    error?: unknown;
+  };
+  const ok = Boolean(data.ok ?? data.success ?? true);
   return {
-    success: Boolean(data.ok),
+    success: ok,
     connectorId: slug,
     tool,
     content: data.result,
-    error: data.ok ? undefined : (data.message || data.kind),
+    error: ok ? undefined : (data.message || data.kind || (typeof data.error === "string" ? data.error : undefined)),
   };
 }
 
 export async function fetchToolsConnectorTools(
   serverSlug: string
 ): Promise<{ name: string; description?: string; inputSchema?: Record<string, unknown> }[]> {
-  const res = await fetch(`${CONNECTORS_URL}/mcps/${encodeURIComponent(serverSlug)}`);
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({ error: "Unknown error" }));
-    throw new Error(data.error || `Failed to fetch tools: ${res.status}`);
-  }
-  const data = await res.json() as { tools?: ConnectorTool[] };
+  const data = await sdk.connectors.mcps.get(serverSlug);
   return data.tools || [];
 }
 
 export async function fetchRemoteToolsConnectorTools(serverSlug: string): Promise<ConnectorTool[]> {
   try {
-    const res = await fetch(`${CONNECTORS_URL}/mcps/${encodeURIComponent(serverSlug)}`);
-    if (!res.ok) {
-      console.warn(`Failed to fetch tools for ${serverSlug}: ${res.status}`);
-      return [];
-    }
-    const data = await res.json() as { tools?: ConnectorTool[] };
-    return data.tools || [];
+    const data = await sdk.connectors.mcps.get(serverSlug);
+    return (data.tools || []) as ConnectorTool[];
   } catch (error) {
     console.warn(`Error fetching tools for ${serverSlug}:`, error);
     return [];
@@ -250,6 +209,21 @@ export async function executeRegistryTool(
   if (binding.origin === "onchain") {
     const connectorId = binding.slug;
     return executeGoatConnector(connectorId, tool, args);
+  }
+  if (binding.origin === "account") {
+    const data = await sdk.connectors.accounts.execute({
+      toolkit: binding.slug,
+      action: tool,
+      params: args,
+    });
+    return {
+      success: Boolean(data.success),
+      connectorId: binding.slug,
+      tool,
+      result: data.data ?? data.result,
+      content: data.data ?? data.result,
+      error: data.success ? undefined : (data.error || "Account action failed"),
+    };
   }
   return executeSpawnedServer(binding.slug, tool, args);
 }
