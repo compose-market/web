@@ -111,10 +111,15 @@ export function benchmarkScore(model: ModelBenchmark): number | null {
 export function compareBenchmarkModels(left: ModelBenchmark, right: ModelBenchmark): number {
     const leftMetric = benchmarkMetric(left, left.primaryMetric);
     const rightMetric = benchmarkMetric(right, right.primaryMetric);
-    if (leftMetric?.value != null && rightMetric?.value != null) {
-        const diff = leftMetric.direction === "lower"
-            ? leftMetric.value - rightMetric.value
-            : rightMetric.value - leftMetric.value;
+    const leftVal = leftMetric?.value ?? null;
+    const rightVal = rightMetric?.value ?? null;
+    if (leftVal != null && rightVal == null) return -1;
+    if (leftVal == null && rightVal != null) return 1;
+    if (leftVal != null && rightVal != null) {
+        const direction = leftMetric?.direction ?? rightMetric?.direction ?? "higher";
+        const diff = direction === "lower"
+            ? leftVal - rightVal
+            : rightVal - leftVal;
         if (diff !== 0) return diff;
     }
     return (left.name || left.modelId).localeCompare(right.name || right.modelId);
