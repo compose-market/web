@@ -122,16 +122,11 @@ async function fetchJupiterBuild(input: {
         wrapAndUnwrapSol: "true",
         nativeDestinationAccount: input.walletAddress,
     });
-    const apiKey = import.meta.env?.VITE_JUPITER_API_KEY?.trim();
-    let response = await fetch(`${JUPITER_BUILD_URL}?${params}`, {
-        headers: apiKey ? { "x-api-key": apiKey } : undefined,
-    });
+    let response = await fetch(`${JUPITER_BUILD_URL}?${params}`);
     if (response.status === 429) {
         const retryAfter = Number(response.headers.get("retry-after") ?? "2");
         await new Promise((resolve) => globalThis.setTimeout(resolve, Math.max(1, retryAfter) * 1_000));
-        response = await fetch(`${JUPITER_BUILD_URL}?${params}`, {
-            headers: apiKey ? { "x-api-key": apiKey } : undefined,
-        });
+        response = await fetch(`${JUPITER_BUILD_URL}?${params}`);
     }
     const body = await response.json() as JupiterBuildResponse;
     if (!response.ok || body.error || body.errorMessage) {
