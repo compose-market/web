@@ -1,11 +1,5 @@
 import { sdk } from "./sdk";
-import {
-  chunkKnowledgeText,
-  embedKnowledgeChunks,
-  enqueueBackgroundTask,
-  extractKnowledgeText,
-  uploadFilecoinFile,
-} from "./identity";
+import { chunkKnowledgeText, extractKnowledgeText } from "./identity";
 
 type WorkspaceUploadResult = {
   indexed: number;
@@ -23,6 +17,11 @@ function slugify(value: string): string {
     .slice(0, 64) || "workspace";
 }
 
+/**
+ * Extract & chunk private workspace files in the browser, then delegate
+ * vector embedding and storage to the authenticated Runtime `/api/workspace/index`
+ * endpoint so zero API secrets ever enter the client bundle.
+ */
 export async function uploadWorkspaceFiles(files: File[], params: {
   agentWallet: string;
   userAddress: string;
@@ -42,11 +41,9 @@ export async function uploadWorkspaceFiles(files: File[], params: {
       return null;
     }
 
-    const embeddings = await embedKnowledgeChunks(chunks);
     return {
       file,
       chunks,
-      embeddings,
     };
   }));
 
@@ -56,7 +53,6 @@ export async function uploadWorkspaceFiles(files: File[], params: {
       content,
       key: `${slugify(item.file.name)}-${index + 1}`,
       source: "file" as const,
-      embedding: item.embeddings[index],
       metadata: {
         name: item.file.name,
         mimeType: item.file.type,
@@ -70,9 +66,8 @@ export async function uploadWorkspaceFiles(files: File[], params: {
     throw new Error("No readable workspace content found in the selected files");
   }
 
-  // Runtime/ service expects the same Compose Key JWT contract the gateway
-  // uses. `sdk.fetch` attaches Authorization / x-session-user-address /
-  // x-network-id automatically from the SDK singleton's current wallet context.
+  // Runtime expects the same Compose Key JWT contract as the gateway.
+  // `sdk.fetch` attaches Authorization / x-session-user-address / x-network-id automatically.
   const response = await sdk.fetch(`${RUNTIME_URL}/api/workspace/index`, {
     method: "POST",
     headers: {
@@ -89,43 +84,5 @@ export async function uploadWorkspaceFiles(files: File[], params: {
     throw new Error(`Workspace indexing failed (${response.status}): ${error || response.statusText}`);
   }
 
-  const result = await response.json() as WorkspaceUploadResult;
-
-  prepared
-    .filter((item): item is NonNullable<typeof item> => item !== null)
-    .forEach((item) => {
-      enqueueBackgroundTask(async () => {
-        const artifact = {
-          version: "1.0.0",
-          scope: "workspace",
-          agentWallet: params.agentWallet,
-          userAddress: params.userAddress,
-          source: {
-            name: item.file.name,
-            type: item.file.type,
-            size: item.file.size,
-          },
-          chunks: item.embeddings.map((embedding, index) => ({
-            index: index + 1,
-            embedding,
-          })),
-          createdAt: new Date().toISOString(),
-        };
-
-        const artifactFile = new File(
-          [JSON.stringify(artifact)],
-          `${slugify(item.file.name)}.workspace.json`,
-          { type: "application/json" },
-        );
-
-        await uploadFilecoinFile(artifactFile, {
-          scope: "workspace-artifact",
-          agentWallet: params.agentWallet,
-          userAddress: params.userAddress,
-          sourceName: item.file.name,
-        });
-      });
-    });
-
-  return result;
+  return await response.json() as WorkspaceUploadResult;
 }
