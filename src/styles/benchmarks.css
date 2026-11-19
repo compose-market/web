@@ -23,11 +23,12 @@
 .cm-benchmarks-workspace {
   container-type: size;
   container-name: cm-benchmarks;
-  --cm-bm-unit: clamp(0.6rem, calc(0.35rem + 1.2cqmin), 1.15rem);
-  --cm-bm-radius: calc(var(--cm-bm-unit) * 0.9);
+  --cm-bm-unit: clamp(0.75rem, calc(0.7rem + 0.22cqmin), 0.8125rem);
+  --cm-bm-radius: clamp(0.22rem, 0.5cqi, 0.38rem);
+  --cm-bm-radius-sm: clamp(0.16rem, 0.38cqi, 0.26rem);
   /* Height of the attribution band — shared by the dock's anchor offset so
      the two neighbors can never drift out of sync. */
-  --cm-bm-attribution: clamp(2.2rem, 5.5dvh, 3rem);
+  --cm-bm-attribution: clamp(1.65rem, 3.6dvh, 2.05rem);
   position: relative;
   width: 100%;
   height: 100%;
@@ -38,12 +39,38 @@
   /* Zero page scroll */
   display: flex;
   flex-direction: column;
-  gap: clamp(0.58rem, 1.35cqi, 0.9rem);
+  gap: clamp(0.36rem, 0.85cqi, 0.56rem);
 }
 
 .cm-benchmarks-workspace .cm-market-control-rail {
   flex-shrink: 0;
   width: 100%;
+}
+
+@container cm-benchmarks (max-width: 32rem) {
+  .cm-benchmarks-workspace .cm-market-control-rail {
+    gap: 0.25rem;
+    padding-inline: 0.35rem;
+  }
+
+  .cm-benchmarks-workspace .cm-market-control-rail__title {
+    font-size: 0.8125rem;
+    letter-spacing: 0.02em;
+  }
+
+  .cm-benchmarks-workspace .cm-market-control-rail__actions {
+    gap: 0.22rem;
+    --cm-hud-size: 1.95rem;
+  }
+
+  .cm-benchmarks-workspace .cm-control-switcher__trigger {
+    padding-inline: 0.42rem;
+    gap: 0.22rem;
+  }
+
+  .cm-benchmarks-workspace .cm-control-switcher__trigger .cm-control-switcher__icon {
+    display: none;
+  }
 }
 
 /* Family logos scale with the workspace's own unit (like every other
@@ -54,40 +81,19 @@
 .cm-benchmarks-dock .cm-family-icon {
   width: calc(var(--cm-bm-unit) * 0.85);
   height: calc(var(--cm-bm-unit) * 0.85);
+  aspect-ratio: 1 / 1;
 }
 
-/* Compact proportional controls opt out of the global 2.75rem mobile
-   touch-target inflation (index.css @layer base) — same pattern as the
-   theme model card / agent card. Without it, pill-shaped buttons deform
-   into vertical ellipses on small screens. */
-@media (max-width: 768px) {
-  .cm-benchmarks-workspace button,
-  .cm-benchmarks-workspace [role="button"],
-  .cm-benchmarks-workspace select,
-  .cm-benchmarks-workspace input,
-  .cm-benchmarks-dock button,
-  .cm-benchmarks-dock [role="button"] {
-    min-height: 0;
-    min-width: 0;
-  }
-
-  /* …but the collapsed switcher trigger keeps its designed pill height —
-     zeroing it crushed the label against the top/bottom borders. */
-  .cm-benchmarks-workspace .cm-control-switcher__trigger {
-    min-height: 2.1rem;
-  }
-}
-
-.cm-benchmarks-content-cell {
+.cm-benchmarks-workspace .cm-benchmarks-content-cell {
   position: relative;
   min-width: 0;
   min-height: 0;
   flex: 1 1 0%;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid hsl(var(--primary) / 0.16);
-  border-radius: 16px;
+  border-radius: var(--cm-bm-radius);
   background:
     linear-gradient(145deg, hsl(226 21% 23% / 0.34), hsl(221 50% 9% / 0.26)),
     hsl(224 36% 13% / 0.18);
@@ -99,12 +105,12 @@
   gap: calc(var(--cm-bm-unit) * 0.5);
 }
 
-/* Modality select sizing (replaces inline px bounds) — floors match the
-   original 100px/150px bounds so the "Label (count)" never clips, and the
-   select can still grow proportionally on wider containers. */
+/* Modality select sizing — fluid bounds so the "Label (count)" never clips,
+   without stretching excessively across wide desktop toolbars. */
 .cm-benchmarks__modality-select {
-  min-width: max(6.25rem, 22cqi);
-  max-width: max(9.375rem, 38cqi);
+  min-width: clamp(9.5rem, 15cqi, 12.5rem);
+  max-width: min(100%, 15.5rem);
+  width: auto;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -116,8 +122,7 @@
   border-radius: var(--cm-bm-radius);
   background: hsl(221 50% 9% / 0.35);
   backdrop-filter: blur(14px);
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
+  overflow-x: clip;
   box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.04);
 }
 
@@ -125,7 +130,7 @@
   width: 100%;
   border-collapse: collapse;
   font-family: var(--font-mono), monospace;
-  font-size: clamp(0.68rem, 1.15cqi, 0.78rem);
+  font-size: var(--font-xs);
   text-align: left;
 }
 
@@ -139,7 +144,7 @@
 }
 
 .cm-benchmarks-table__sub {
-  font-size: calc(var(--cm-bm-unit) * 0.62);
+  font-size: var(--font-2xs);
 }
 
 .cm-benchmarks-table thead {
@@ -152,17 +157,17 @@
 }
 
 .cm-benchmarks-table th {
-  padding: calc(var(--cm-bm-unit) * 0.55) calc(var(--cm-bm-unit) * 0.5);
+  padding: calc(var(--cm-bm-unit) * 0.42) calc(var(--cm-bm-unit) * 0.46);
   font-weight: 700;
   color: hsl(var(--muted-foreground));
-  font-size: calc(var(--cm-bm-unit) * 0.7);
+  font-size: var(--font-2xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   white-space: nowrap;
 }
 
 .cm-benchmarks-table td {
-  padding: calc(var(--cm-bm-unit) * 0.5) calc(var(--cm-bm-unit) * 0.5);
+  padding: calc(var(--cm-bm-unit) * 0.36) calc(var(--cm-bm-unit) * 0.46);
   border-bottom: 1px solid hsl(var(--primary) / 0.08);
   color: hsl(var(--foreground));
   transition: background-color 120ms ease;
@@ -176,34 +181,36 @@
   background-color: hsl(var(--primary) / 0.12);
 }
 
-/* Rank column badges — fixed readable floor, matching theme chip sizing */
+/* Rank column badges — 1:1 circular medal/rank token */
 .cm-benchmarks-rank {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.5rem;
-  height: 1.5rem;
-  border-radius: 999px;
+  width: clamp(1.26rem, calc(var(--cm-bm-unit) * 1.62), 1.44rem);
+  height: clamp(1.26rem, calc(var(--cm-bm-unit) * 1.62), 1.44rem);
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
   font-weight: 800;
-  font-size: 0.7rem;
+  font-size: var(--font-2xs);
+  flex-shrink: 0;
 }
 
 .cm-benchmarks-rank--1 {
-  background: linear-gradient(135deg, #ffb800, #ff8800);
-  color: #000;
-  box-shadow: 0 0 10px rgba(255, 184, 0, 0.4);
+  background: linear-gradient(135deg, hsl(43 100% 50%), hsl(32 100% 50%));
+  color: hsl(222 47% 4%);
+  box-shadow: 0 0 0.625rem hsl(43 100% 50% / 0.4);
 }
 
 .cm-benchmarks-rank--2 {
-  background: linear-gradient(135deg, #e0e0e0, #a0a0a0);
-  color: #000;
-  box-shadow: 0 0 8px rgba(220, 220, 220, 0.3);
+  background: linear-gradient(135deg, hsl(0 0% 88%), hsl(0 0% 63%));
+  color: hsl(222 47% 4%);
+  box-shadow: 0 0 0.5rem hsl(0 0% 86% / 0.3);
 }
 
 .cm-benchmarks-rank--3 {
-  background: linear-gradient(135deg, #cd7f32, #a05a20);
-  color: #000;
-  box-shadow: 0 0 8px rgba(205, 127, 50, 0.3);
+  background: linear-gradient(135deg, hsl(30 61% 50%), hsl(27 67% 38%));
+  color: hsl(222 47% 4%);
+  box-shadow: 0 0 0.5rem hsl(30 61% 50% / 0.3);
 }
 
 .cm-benchmarks-rank--other {
@@ -212,102 +219,170 @@
   border: 1px solid hsl(var(--primary) / 0.2);
 }
 
-/* Mobile Ranked Cards Grid */
+/* Mobile Ranked Rows List (8–10 visible models per screen, tap-to-expand) */
 .cm-benchmarks-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, clamp(16rem, 42cqi, 18.5rem)), 1fr));
-  gap: clamp(0.72rem, 1.55cqi, 1.1rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding-block: 0.35rem;
 }
 
 .cm-benchmarks-card {
   display: flex;
   flex-direction: column;
-  gap: calc(var(--cm-bm-unit) * 0.45);
-  padding: calc(var(--cm-bm-unit) * 0.7);
-  border: 1px solid hsl(var(--primary) / 0.16);
+  border: 1px solid hsl(var(--primary) / 0.15);
   border-radius: var(--cm-bm-radius);
   background:
-    linear-gradient(145deg, hsl(226 21% 23% / 0.4), hsl(221 50% 9% / 0.3)),
-    radial-gradient(circle at 0% 0%, hsl(var(--primary) / 0.09), transparent 36%);
-  box-shadow:
-    inset 0 1px 0 hsl(0 0% 100% / 0.05),
-    0 0 16px hsl(var(--primary) / 0.03);
-  backdrop-filter: blur(14px);
-  transition: all 150ms ease;
+    linear-gradient(145deg, hsl(226 21% 23% / 0.36), hsl(221 50% 9% / 0.28)),
+    radial-gradient(circle at 0% 0%, hsl(var(--primary) / 0.08), transparent 36%);
+  box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.045);
+  backdrop-filter: blur(12px);
+  transition: border-color 140ms var(--ease-snappy, ease), background-color 140ms ease;
   font-family: var(--font-mono), monospace;
   position: relative;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .cm-benchmarks-card:hover {
-  border-color: hsl(var(--primary) / 0.4);
-  transform: translateY(-1px);
+  border-color: hsl(var(--primary) / 0.38);
 }
 
 .cm-benchmarks-card[data-comparing="true"] {
   border-color: hsl(var(--primary) / 0.65);
   background:
     linear-gradient(145deg, hsl(226 21% 23% / 0.5), hsl(221 50% 9% / 0.4)),
-    radial-gradient(circle at 0% 0%, hsl(var(--primary) / 0.18), transparent 45%);
+    radial-gradient(circle at 0% 0%, hsl(var(--primary) / 0.16), transparent 45%);
 }
 
-.cm-benchmarks-card__header {
+.cm-benchmarks-card__row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.42rem;
+  min-height: 2.75rem;
+  padding: 0.34rem 0.48rem;
+  cursor: pointer;
+}
+
+.cm-benchmarks-card__identity {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: calc(var(--cm-bm-unit) * 0.45);
+  flex-direction: column;
+  min-width: 0;
+  gap: 0.08rem;
 }
 
-.cm-benchmarks-card__rank-group {
+.cm-benchmarks-card__title-line {
   display: flex;
   align-items: center;
-  gap: calc(var(--cm-bm-unit) * 0.45);
+  gap: 0.34rem;
   min-width: 0;
 }
 
 .cm-benchmarks-card__name {
   margin: 0;
   font-family: var(--font-sans), sans-serif;
-  font-size: calc(var(--cm-bm-unit) * 0.95);
+  font-size: var(--font-sm, 0.8125rem);
   font-weight: 700;
   color: hsl(var(--foreground));
-  line-height: 1.2;
-  overflow-wrap: anywhere;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cm-benchmarks-card__meta {
   display: flex;
   align-items: center;
-  gap: calc(var(--cm-bm-unit) * 0.35);
-  font-size: calc(var(--cm-bm-unit) * 0.68);
+  gap: 0.28rem;
+  font-size: var(--font-2xs);
   color: hsl(var(--muted-foreground));
-  flex-wrap: wrap;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.cm-benchmarks-card__score-pill {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  min-width: 0;
+  padding: 0.14rem 0.38rem;
+  border-radius: var(--cm-bm-radius-sm);
+  border: 1px solid hsl(var(--primary) / 0.22);
+  background: hsl(var(--primary) / 0.09);
+  line-height: 1.05;
+}
+
+.cm-benchmarks-card__score-value {
+  font-size: var(--font-xs, 0.78rem);
+  font-weight: 700;
+  color: hsl(var(--primary));
+  font-variant-numeric: tabular-nums;
+}
+
+.cm-benchmarks-card__score-label {
+  font-size: 0.6875rem;
+  color: hsl(var(--muted-foreground));
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.cm-benchmarks-card__row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.24rem;
+}
+
+.cm-benchmarks-card__chevron {
+  width: 0.85rem;
+  height: 0.85rem;
+  color: hsl(var(--muted-foreground));
+  transition: transform 160ms var(--ease-snappy, ease);
+}
+
+.cm-benchmarks-card[data-expanded="true"] .cm-benchmarks-card__chevron {
+  transform: rotate(180deg);
+  color: hsl(var(--primary));
+}
+
+.cm-benchmarks-card__drawer {
+  display: none;
+  flex-direction: column;
+  gap: 0.38rem;
+  padding: 0.38rem 0.5rem 0.46rem;
+  border-top: 1px solid hsl(var(--primary) / 0.12);
+  background: hsl(221 50% 9% / 0.36);
+}
+
+.cm-benchmarks-card[data-expanded="true"] .cm-benchmarks-card__drawer {
+  display: flex;
 }
 
 .cm-benchmarks-card__metrics {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: calc(var(--cm-bm-unit) * 0.35);
-  padding: calc(var(--cm-bm-unit) * 0.45);
-  border-radius: calc(var(--cm-bm-radius) * 0.7);
-  background: hsl(221 50% 9% / 0.45);
-  border: 1px solid hsl(var(--primary) / 0.12);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.28rem;
 }
 
 .cm-benchmarks-card__metric-item {
   display: flex;
   flex-direction: column;
-  gap: calc(var(--cm-bm-unit) * 0.08);
+  gap: 0.06rem;
+  padding: 0.24rem 0.34rem;
+  border-radius: var(--cm-bm-radius-sm);
+  background: hsl(221 50% 9% / 0.45);
+  border: 1px solid hsl(var(--primary) / 0.1);
 }
 
 .cm-benchmarks-card__metric-label {
-  font-size: calc(var(--cm-bm-unit) * 0.62);
+  font-size: var(--font-2xs);
   color: hsl(var(--muted-foreground));
   text-transform: uppercase;
 }
 
 .cm-benchmarks-card__metric-value {
-  font-size: calc(var(--cm-bm-unit) * 0.85);
+  font-size: var(--font-xs);
   font-weight: 700;
   color: hsl(var(--foreground));
 }
@@ -317,20 +392,18 @@
 }
 
 .cm-benchmarks-card__metric-value--speed {
-  color: #ffb800;
+  color: hsl(43 100% 55%);
 }
 
 .cm-benchmarks-card__metric-value--price {
-  color: #00ff9d;
+  color: hsl(157 100% 50%);
 }
 
 .cm-benchmarks-card__footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: calc(var(--cm-bm-unit) * 0.45);
-  padding-top: calc(var(--cm-bm-unit) * 0.3);
-  border-top: 1px solid hsl(var(--primary) / 0.1);
+  gap: 0.38rem;
 }
 
 /* Zero-scroll container panels with internal snap-scrolling */
@@ -345,6 +418,8 @@
 }
 
 .cm-benchmarks-workspace .cm-market-tab-panel {
+  container-name: cm-bm-panel;
+  container-type: size;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -353,17 +428,29 @@
   flex: 1 1 0%;
   overflow-y: auto;
   overflow-x: hidden;
-  scroll-snap-type: y mandatory;
+  overscroll-behavior: contain;
+  scroll-snap-type: y proximity;
+  scrollbar-width: thin;
   -webkit-overflow-scrolling: touch;
-  gap: clamp(0.72rem, 1.55cqi, 1.1rem);
-  padding: clamp(0.45rem, 1.8dvh, 1rem);
+  gap: clamp(0.42rem, 1cqi, 0.65rem);
+  padding: clamp(0.3rem, 0.8dvh, 0.55rem) clamp(0.38rem, 1.1dvh, 0.72rem) clamp(0.9rem, 2dvh, 1.35rem);
+  scroll-padding-block: clamp(0.6rem, 1.5dvh, 0.95rem);
+}
+
+.cm-benchmarks-workspace .cm-benchmarks-table-wrapper,
+.cm-benchmarks-workspace .cm-benchmarks-scatter-pane,
+.cm-benchmarks-workspace .cm-benchmarks-battle {
+  margin-block: clamp(0.32rem, 0.9dvh, 0.6rem);
+}
+
+.cm-benchmarks-workspace .cm-market-tab-panel[data-state="inactive"] {
+  display: none;
 }
 
 .cm-benchmarks-snap-block,
 .cm-benchmarks-card {
   scroll-snap-align: start;
-  scroll-snap-stop: always;
-  scroll-margin-block: clamp(0.45rem, 1.8dvh, 1rem);
+  scroll-margin-block: 0.35rem;
 }
 
 .cm-benchmarks-snap-block {
@@ -384,20 +471,19 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  /* Matches the theme chip (1.85rem / 0.72rem) — fixed readable floor. */
-  height: 1.85rem;
-  padding: 0 0.6rem;
-  border-radius: 999px;
+  min-height: clamp(1.55rem, calc(var(--cm-bm-unit) * 1.85), 1.8rem);
+  padding: 0 clamp(0.4rem, 0.9cqi, 0.58rem);
+  border-radius: var(--cm-bm-radius-sm);
   border: 1px solid hsl(var(--primary) / 0.35);
   background: hsl(var(--primary) / 0.12);
   color: hsl(var(--primary));
   font-family: var(--font-mono), monospace;
-  font-size: 0.72rem;
+  font-size: var(--font-2xs);
   font-weight: 700;
   white-space: nowrap;
   cursor: pointer;
   flex-shrink: 0;
-  transition: all 120ms ease;
+  transition: background-color 140ms ease, border-color 140ms ease;
 }
 
 .cm-benchmarks-battle__fold:hover {
@@ -405,14 +491,14 @@
   border-color: hsl(var(--primary) / 0.55);
 }
 
-/* Container-driven view flip: table on wide containers, cards on narrow */
+/* Container-driven view flip: table on wide containers, ranked rows on narrow */
 @container (max-width: 48rem) {
   .cm-benchmarks-table-view {
     display: none !important;
   }
 
   .cm-benchmarks-cards-view {
-    display: grid !important;
+    display: flex !important;
   }
 }
 
@@ -433,13 +519,13 @@
 .cm-benchmarks-scatter-pane {
   display: flex;
   flex-direction: column;
-  gap: calc(var(--cm-bm-unit) * 0.5);
+  gap: calc(var(--cm-bm-unit) * 0.45);
   width: 100%;
 }
 
 .cm-benchmarks-scatter-box {
   width: 100%;
-  height: clamp(260px, 48cqh, 480px);
+  height: clamp(14rem, 48cqb, 26rem);
   position: relative;
   border: 1px solid hsl(var(--primary) / 0.16);
   border-radius: var(--cm-bm-radius);
@@ -453,21 +539,21 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: calc(var(--cm-bm-unit) * 0.6);
+  gap: calc(var(--cm-bm-unit) * 0.5);
   flex-wrap: wrap;
-  padding: calc(var(--cm-bm-unit) * 0.5) calc(var(--cm-bm-unit) * 0.8);
+  padding: calc(var(--cm-bm-unit) * 0.45) calc(var(--cm-bm-unit) * 0.65);
   border: 1px solid hsl(var(--primary) / 0.35);
-  border-radius: calc(var(--cm-bm-radius) * 0.8);
+  border-radius: var(--cm-bm-radius-sm);
   background: hsl(221 50% 9% / 0.85);
   font-family: var(--font-mono), monospace;
-  font-size: calc(var(--cm-bm-unit) * 0.74);
+  font-size: var(--font-xs);
   animation: cm-pocket-reveal 150ms ease;
 }
 
 @keyframes cm-pocket-reveal {
   from {
     opacity: 0;
-    transform: translateY(-4px);
+    transform: translateY(-0.25rem);
   }
 
   to {
@@ -482,10 +568,10 @@
 
 .cm-benchmarks-battle {
   container-type: inline-size;
-  --cm-bm-unit: clamp(0.7rem, 1.6cqi, 1rem);
+  --cm-bm-unit: clamp(0.75rem, 1.2cqi, 0.8125rem);
   display: flex;
   flex-direction: column;
-  gap: calc(var(--cm-bm-unit) * 1);
+  gap: calc(var(--cm-bm-unit) * 0.65);
   width: 100%;
   min-width: 0;
 }
@@ -494,14 +580,12 @@
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: calc(var(--cm-bm-unit) * 0.75);
-  /* Single-row rail — chip overflow folds into the "+N" menu (declared
-     with the fold styles earlier in this file) instead of wrapping. */
+  gap: calc(var(--cm-bm-unit) * 0.55);
   flex-wrap: nowrap;
   min-width: 0;
-  padding: calc(var(--cm-bm-unit) * 0.65) calc(var(--cm-bm-unit) * 0.85);
+  padding: calc(var(--cm-bm-unit) * 0.48) calc(var(--cm-bm-unit) * 0.65);
   border: 1px solid hsl(var(--primary) / 0.2);
-  border-radius: calc(var(--cm-bm-unit) * 1.4);
+  border-radius: var(--cm-bm-radius);
   background: hsl(221 50% 9% / 0.45);
   backdrop-filter: blur(14px);
 }
@@ -509,7 +593,7 @@
 .cm-benchmarks-battle__chips {
   display: flex;
   align-items: center;
-  gap: calc(var(--cm-bm-unit) * 0.5);
+  gap: calc(var(--cm-bm-unit) * 0.4);
   flex-wrap: nowrap;
   overflow: hidden;
   min-width: 0;
@@ -531,7 +615,7 @@
 .cm-benchmarks-battle__podium {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--cm-bm-unit) * 9.5)), 1fr));
-  gap: calc(var(--cm-bm-unit) * 0.65);
+  gap: calc(var(--cm-bm-unit) * 0.48);
   width: 100%;
 }
 
@@ -539,14 +623,15 @@
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  gap: calc(var(--cm-bm-unit) * 0.35);
-  padding: calc(var(--cm-bm-unit) * 0.65) calc(var(--cm-bm-unit) * 0.8);
+  gap: calc(var(--cm-bm-unit) * 0.22);
+  padding: calc(var(--cm-bm-unit) * 0.45) calc(var(--cm-bm-unit) * 0.58);
   border: 1px solid hsl(var(--primary) / 0.22);
-  border-radius: calc(var(--cm-bm-unit) * 1.2);
+  border-radius: var(--cm-bm-radius);
   background: hsl(var(--primary) / 0.08);
   backdrop-filter: blur(8px);
   font-family: var(--font-mono), monospace;
-  min-height: calc(var(--cm-bm-unit) * 4.8);
+  height: auto;
+  min-height: 0;
   box-sizing: border-box;
   min-width: 0;
 }
@@ -563,24 +648,24 @@
 
 .cm-benchmarks-battle__matrix {
   border: 1px solid hsl(var(--primary) / 0.18);
-  border-radius: calc(var(--cm-bm-unit) * 1.4);
+  border-radius: var(--cm-bm-radius);
   background: hsl(221 50% 9% / 0.35);
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
+  overflow-x: clip;
 }
 
 .cm-benchmarks-battle__matrix table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-family: var(--font-mono), monospace;
-  font-size: clamp(0.68rem, 1.15cqi, 0.78rem);
+  font-size: var(--font-xs);
 }
 
 .cm-benchmarks-battle__matrix th,
 .cm-benchmarks-battle__matrix td {
-  padding: calc(var(--cm-bm-unit) * 0.6) calc(var(--cm-bm-unit) * 0.75);
+  padding: calc(var(--cm-bm-unit) * 0.55) calc(var(--cm-bm-unit) * 0.7);
   border-bottom: 1px solid hsl(var(--primary) / 0.1);
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .cm-benchmarks-battle__matrix th:first-child,
@@ -598,42 +683,32 @@
    ═══════════════════════════════════════════════════════════════ */
 
 .cm-benchmarks-dock {
-  position: fixed;
-  /* Anchored above the page chrome purely from shared proportional vars:
-     main's bottom padding + the attribution band + one root unit of air.
-     Mobile swaps main's desktop padding for the nav zone (--cm-hud-size). */
-  bottom: calc(
-    env(safe-area-inset-bottom)
-    + clamp(0.85rem, 2vw, 1.55rem)
-    + var(--cm-bm-attribution)
-    + var(--cm-bm-unit)
-  );
+  position: relative;
   left: 50%;
   transform: translateX(-50%);
+  align-self: flex-start;
+  flex-shrink: 0;
   z-index: 50;
   display: flex;
   align-items: center;
   gap: clamp(0.5rem, 1.5cqi, 0.85rem);
-  max-width: min(calc(100vw - 2 * var(--cm-bm-unit)), calc(var(--cm-bm-unit) * 46));
-  width: auto;
+  max-width: min(calc(100cqi - 1.5 * var(--cm-bm-unit)), calc(var(--cm-bm-unit) * 46));
+  width: max-content;
   min-width: 0;
-  padding: calc(var(--cm-bm-unit) * 0.4) clamp(0.75rem, 2.5cqi, 1.1rem);
+  padding: calc(var(--cm-bm-unit) * 0.36) clamp(0.7rem, 2.2cqi, 1.05rem);
   border: 1px solid hsl(var(--primary) / 0.45);
-  border-radius: 999px;
+  border-radius: var(--cm-bm-radius, clamp(0.25rem, 0.65cqi, 0.45rem));
   background:
     linear-gradient(145deg, hsl(226 21% 23% / 0.94), hsl(221 50% 9% / 0.96)),
     radial-gradient(circle at 50% 0%, hsl(var(--primary) / 0.25), transparent 60%);
   box-shadow:
-    0 8px 32px hsl(221 50% 9% / 0.8),
-    0 0 24px hsl(var(--primary) / 0.18),
+    0 0.5rem 2rem hsl(221 50% 9% / 0.8),
+    0 0 1.5rem hsl(var(--primary) / 0.18),
     inset 0 1px 0 hsl(0 0% 100% / 0.15);
   backdrop-filter: blur(20px) saturate(1.2);
-  animation: cm-dock-float 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  animation: cm-dock-float 200ms cubic-bezier(0.16, 1, 0.3, 1);
   font-family: var(--font-mono), monospace;
-  /* Readable at every size — text never scales below legibility. */
-  font-size: clamp(0.68rem, 1.4cqi, 0.78rem);
-  /* Draggable — the user can grab the bar (not its buttons) and park it
-     anywhere. touch-action: none lets pointer drags win over scrolling. */
+  font-size: var(--font-xs);
   cursor: grab;
   touch-action: none;
   user-select: none;
@@ -642,18 +717,6 @@
 .cm-benchmarks-dock[data-dragging="true"] {
   cursor: grabbing;
   animation: none;
-}
-
-@media (max-width: 48rem) {
-  .cm-benchmarks-dock {
-    bottom: calc(
-      env(safe-area-inset-bottom)
-      + var(--cm-hud-size, 2.65rem)
-      + clamp(1.2rem, 4vw, 1.55rem)
-      + var(--cm-bm-attribution)
-      + var(--cm-bm-unit)
-    );
-  }
 }
 
 @keyframes cm-dock-float {
@@ -684,19 +747,16 @@
   outline: none;
 }
 
-/* Folded state — a compact draggable chip that keeps the Battle CTA's cyan
-   highlight so it stays immediately noticeable, with the grip dots as the
-   re-expand affordance. */
 .cm-benchmarks-dock--folded {
-  gap: 0.35rem;
-  padding: 0.55rem 0.85rem;
+  gap: clamp(0.28rem, 0.7cqi, 0.4rem);
+  padding: clamp(0.42rem, 1cqi, 0.58rem) clamp(0.65rem, 1.5cqi, 0.85rem);
   font-weight: 700;
   color: hsl(222 47% 3%);
   background: linear-gradient(145deg, hsl(188 95% 43%), hsl(188 95% 36%));
   border-color: hsl(188 95% 60% / 0.7);
   box-shadow:
-    0 0 18px hsl(188 95% 43% / 0.45),
-    0 8px 32px hsl(221 50% 9% / 0.8),
+    0 0 1.125rem hsl(188 95% 43% / 0.45),
+    0 0.5rem 2rem hsl(221 50% 9% / 0.8),
     inset 0 1px 0 hsl(0 0% 100% / 0.25);
 }
 
@@ -704,8 +764,6 @@
   font-size: inherit;
 }
 
-/* Small containers: the Battle CTA collapses to its scale icon; the label
-   reappears on hover/focus so the action stays discoverable. */
 @container cm-benchmarks (max-width: 48rem) {
   .cm-benchmarks-dock__battle-label {
     display: none;
@@ -721,7 +779,7 @@
 .cm-benchmarks-dock__models {
   display: flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: clamp(0.22rem, 0.5cqi, 0.35rem);
   min-width: 0;
   overflow: hidden;
 }
@@ -729,17 +787,15 @@
 .cm-benchmarks-dock__pill {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: clamp(0.2rem, 0.45cqi, 0.3rem);
   min-width: 0;
-  max-width: 11rem;
-  padding: 0.12rem 0.45rem;
-  border-radius: 999px;
+  max-width: clamp(8rem, 22cqi, 11rem);
+  padding: clamp(0.1rem, 0.25cqi, 0.16rem) clamp(0.38rem, 0.8cqi, 0.5rem);
+  border-radius: var(--cm-bm-radius-sm, clamp(0.18rem, 0.45cqi, 0.3rem));
   border: 1px solid hsl(var(--primary) / 0.35);
   background: hsl(var(--primary) / 0.15);
   color: hsl(var(--primary));
-  /* Fixed readable size, matching the theme chip convention (0.72rem) —
-     micro-copy must never scale below legibility. */
-  font-size: 0.68rem;
+  font-size: var(--font-2xs);
   white-space: nowrap;
 }
 
@@ -754,7 +810,7 @@
   max-width: none;
   cursor: pointer;
   font-weight: 700;
-  transition: all 120ms ease;
+  transition: background-color 140ms ease, border-color 140ms ease;
 }
 
 .cm-benchmarks-dock__pill--more:hover {
@@ -773,16 +829,13 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: calc(var(--cm-bm-unit) * 0.5);
-  /* Never wraps to two rows — the trailing span truncates instead. */
+  gap: clamp(0.25rem, 0.8cqi, 0.5rem);
   flex-wrap: nowrap;
-  /* The band is taller than the text and the text is vertically centered,
-     keeping the row equidistant between the border line above and the
-     page footer below — proportional via dvh, no fixed assumptions. */
   min-block-size: var(--cm-bm-attribution);
-  padding: 0 clamp(0.4rem, 2cqi, 0.75rem);
+  padding: 0 clamp(0.2rem, 1.2cqi, 0.75rem);
   font-family: var(--font-mono), monospace;
-  font-size: clamp(0.7rem, 1.6cqi, 0.8rem);
+  font-size: var(--font-2xs);
+  letter-spacing: -0.015em;
   line-height: 1.35;
   color: hsl(var(--muted-foreground));
   border-top: 1px solid hsl(var(--primary) / 0.1);
@@ -794,4 +847,14 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.cm-benchmarks-attribution > span a {
+  display: inline;
+}
+
+.cm-benchmarks-attribution > span a svg {
+  display: inline-block;
+  vertical-align: -0.12em;
+  margin-left: 0.2rem;
 }
