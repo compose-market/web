@@ -1,0 +1,273 @@
+/**
+ * Compose.Market — Motion, Live Agent Activity Graph & View Transitions
+ *
+ * Strictly GPU-composited (`transform`, `opacity`), opt-in reduced motion,
+ * zero hardcoded viewport pixel assumptions.
+ */
+
+/* ═══════════════════════════════════════════════════════════════
+   Live 3D Agent Activity Graph (Agent Side-Panel)
+   ═══════════════════════════════════════════════════════════════ */
+
+.cm-graph {
+  container: cm-iso / inline-size;
+  position: relative;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: clamp(0.35rem, 1.1cqi, 0.55rem);
+  inline-size: 100%;
+  block-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 0;
+  padding: clamp(0.4rem, 1.5cqi, 0.7rem);
+  background:
+    radial-gradient(circle at 42% 18%, hsl(var(--primary) / 0.1), transparent 55%),
+    radial-gradient(circle at 82% 88%, hsl(var(--accent) / 0.09), transparent 52%),
+    transparent;
+  overflow: hidden;
+  user-select: none;
+  touch-action: pan-y;
+}
+
+.cm-graph:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: -2px;
+}
+
+.cm-graph__canvas {
+  position: relative;
+  display: grid;
+  place-items: center;
+  inline-size: 100%;
+  aspect-ratio: 360 / 192;
+  min-inline-size: 0;
+  min-block-size: 0;
+  max-block-size: 100%;
+  cursor: grab;
+  overflow: hidden;
+}
+
+.cm-graph__canvas:active {
+  cursor: grabbing;
+}
+
+.cm-graph__svg {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  overflow: hidden;
+}
+
+.cm-iso-label {
+  fill: hsl(var(--foreground) / 0.92);
+  font-family: var(--font-mono), monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  transition: fill 150ms ease;
+}
+
+.cm-iso-label--active {
+  fill: hsl(var(--primary));
+}
+
+.cm-iso-sublabel {
+  fill: hsl(var(--muted-foreground));
+  font-family: var(--font-mono), monospace;
+  font-size: 8px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+/* ── WCAG 2.2.2 Pause / Play Motion Control ── */
+
+.cm-iso-control {
+  position: absolute;
+  inset-block-start: 0.4rem;
+  inset-inline-end: 0.4rem;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 1.75rem;
+  block-size: 1.75rem;
+  padding: 0;
+  border: 1px solid hsl(var(--primary) / 0.24);
+  border-radius: var(--radius-sm, 0.32rem);
+  background: hsl(221 50% 8% / 0.78);
+  color: hsl(var(--muted-foreground));
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+  transition: border-color 160ms ease, color 160ms ease, background-color 160ms ease;
+}
+
+.cm-iso-control:hover,
+.cm-iso-control:focus-visible {
+  border-color: hsl(var(--primary) / 0.58);
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 0.14);
+  outline: none;
+}
+
+.cm-iso-control svg {
+  inline-size: 0.8rem;
+  block-size: 0.8rem;
+}
+
+.cm-graph__footer {
+  display: grid;
+  gap: 0.32rem;
+  min-inline-size: 0;
+}
+
+.cm-graph__pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.28rem;
+  min-inline-size: 0;
+}
+
+@container cm-iso (max-width: 26rem) {
+  .cm-graph__pills {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.22rem;
+    padding-block: 0.1rem;
+  }
+}
+
+.cm-graph__pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-block-size: 1.65rem;
+  padding: 0.14rem 0.5rem;
+  border: 1px solid hsl(var(--primary) / 0.2);
+  border-radius: 999px;
+  background: hsl(221 50% 8% / 0.65);
+  color: hsl(var(--muted-foreground));
+  font-family: var(--font-mono), monospace;
+  font-size: var(--font-2xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 150ms ease, color 150ms ease, background-color 150ms ease;
+}
+
+.cm-graph__pill:hover,
+.cm-graph__pill:focus-visible,
+.cm-graph__pill[data-active="true"] {
+  border-color: hsl(var(--primary) / 0.58);
+  background: hsl(var(--primary) / 0.16);
+  color: hsl(var(--primary));
+  outline: none;
+}
+
+.cm-graph__pill[data-accent="fuchsia"][data-active="true"] {
+  border-color: hsl(var(--accent) / 0.62);
+  background: hsl(var(--accent) / 0.18);
+  color: hsl(var(--accent));
+}
+
+.cm-graph__pill[data-accent="emerald"][data-active="true"] {
+  border-color: hsl(152 75% 50% / 0.58);
+  background: hsl(152 75% 50% / 0.16);
+  color: hsl(152 80% 62%);
+}
+
+@media (pointer: coarse) {
+  .cm-iso-control {
+    min-block-size: 2.5rem;
+    min-inline-size: 2.5rem;
+  }
+
+  .cm-graph__pill {
+    min-block-size: 2.15rem;
+    padding-inline: 0.62rem;
+    flex: 0 0 auto;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Subtle Specular Card Glint & Calm Elevation
+   ═══════════════════════════════════════════════════════════════ */
+
+.cm-tilt-surface {
+  position: relative;
+  transform-style: preserve-3d;
+  transition: transform 240ms var(--cm-ease-out, cubic-bezier(0.16, 1, 0.3, 1));
+}
+
+.cm-tilt-surface::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(
+    circle at var(--cm-glare-x, 50%) var(--cm-glare-y, 50%),
+    hsl(var(--primary) / 0.13),
+    hsl(var(--accent) / 0.05) 34%,
+    transparent 64%
+  );
+  transition: opacity 220ms ease;
+  z-index: 2;
+}
+
+.cm-tilt-surface[data-tilt="active"] {
+  will-change: transform;
+  transition: transform 60ms linear;
+}
+
+.cm-tilt-surface[data-tilt="active"]::after {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce), (hover: none) {
+  .cm-tilt-surface {
+    transform: none !important;
+    will-change: auto;
+  }
+
+  .cm-tilt-surface::after {
+    display: none;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Same-Document View Transitions (Market Card ↔ Agent Page)
+   ═══════════════════════════════════════════════════════════════ */
+
+.cm-agent-hero-anchor {
+  view-transition-name: agent-card-hero;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 220ms;
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  ::view-transition-group(agent-card-hero) {
+    animation-duration: 300ms;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation-duration: 0.001ms !important;
+  }
+}
+
+/* Market cards stay rendered continuously at full opacity during scroll
+   (no view() ScrollTimeline opacity fade-in or DisplayLock blanking). */
