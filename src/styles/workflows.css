@@ -1,0 +1,142 @@
+/**
+ * Compose.Market — Workflow Cards & Skeletons
+ */
+
+.cm-workflow-card-skeleton {
+  min-block-size: clamp(14rem, 26dvb, 18rem);
+}
+
+.cm-workflow-card__banner {
+  inline-size: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-sm, 0.32rem);
+  overflow: hidden;
+  border: 1px solid hsl(var(--primary) / 0.16);
+}
+
+.cm-workflow-card__banner img {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cm-workflow-card__badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.32rem;
+}
+
+.cm-workflow-card__coordinator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-inline-size: 0;
+  font-family: var(--font-mono), monospace;
+  font-size: var(--font-xs);
+  color: hsl(var(--primary));
+}
+
+.cm-workflow-card__coordinator-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cm-workflow-card__agents {
+  display: grid;
+  gap: 0.4rem;
+  inline-size: 100%;
+}
+
+.cm-workflow-card__agents-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  inline-size: 100%;
+  padding: 0.25rem 0;
+  border: 0;
+  background: transparent;
+  color: hsl(var(--foreground));
+  font-family: var(--font-mono), monospace;
+  font-size: var(--font-xs);
+  cursor: pointer;
+}
+
+.cm-workflow-card__agents-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.cm-workflow-card__lease {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  font-family: var(--font-mono), monospace;
+  font-size: var(--font-xs);
+}
+
+.cm-workflow-card__lease-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+}
+
+.cm-workflow-card__endpoint-section {
+  display: grid;
+  gap: 0.35rem;
+  inline-size: 100%;
+}
+
+.cm-workflow-card__endpoint-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: var(--font-mono), monospace;
+  font-size: var(--font-2xs);
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+
+.cm-workflow-card__endpoint-header-icon {
+  inline-size: 0.9em;
+  block-size: 0.9em;
+}
+
+.cm-workflow-card__endpoint-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.45rem;
+  border: 1px solid hsl(var(--border) / 0.45);
+  border-radius: var(--radius-sm, 0.32rem);
+  background: hsl(221 50% 7% / 0.55);
+}
+
+.cm-workflow-card__endpoint-code {
+  font-family: var(--font-mono), monospace;
+  font-size: var(--font-xs);
+  color: hsl(var(--primary));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cm-workflow-card__creator {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-family: var(--font-mono), monospace;
+  font-size: var(--font-2xs);
+  color: hsl(var(--muted-foreground));
+}
+
+.cm-workflow-card__creator-value {
+  color: hsl(var(--primary));
+}
