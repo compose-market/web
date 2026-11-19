@@ -1,0 +1,363 @@
+/**
+ * Compose.Market — Session Budget & API Key Controls
+ */
+
+.cm-session-icon {
+  inline-size: 0.95em;
+  block-size: 0.95em;
+  flex: 0 0 auto;
+}
+
+.cm-session-icon--sm {
+  inline-size: 0.82em;
+  block-size: 0.82em;
+}
+
+.cm-session-icon--lg {
+  inline-size: 1.15em;
+  block-size: 1.15em;
+  color: hsl(var(--primary));
+}
+
+.cm-session-menu {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.cm-session-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  white-space: nowrap;
+}
+
+.cm-session-trigger__mobile {
+  font-family: var(--font-mono), monospace;
+  font-weight: 700;
+  color: hsl(152 80% 60%);
+  font-variant-numeric: tabular-nums;
+}
+
+.cm-session-menu__dropdown {
+  position: absolute;
+  inset-block-start: calc(100% + 0.5rem);
+  inset-inline-end: 0;
+  z-index: 95;
+  inline-size: min(16rem, calc(100dvi - 1.5rem));
+  overflow: hidden;
+}
+
+.cm-session-menu__header {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.65rem 0.78rem;
+  border-block-end: 1px solid hsl(var(--border) / 0.45);
+}
+
+.cm-session-menu__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-family: var(--font-mono), monospace;
+  font-size: var(--font-xs);
+  color: hsl(var(--muted-foreground));
+}
+
+.cm-session-menu__row strong {
+  color: hsl(var(--foreground));
+  font-variant-numeric: tabular-nums;
+}
+
+.cm-session-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 0.48rem;
+  inline-size: 100%;
+  min-block-size: 2.35rem;
+  padding: 0.45rem 0.78rem;
+  border: 0;
+  background: transparent;
+  color: hsl(var(--foreground));
+  font-family: var(--font-mono), monospace;
+  font-size: var(--font-xs);
+  text-align: start;
+  cursor: pointer;
+}
+
+.cm-session-menu__item:hover {
+  background: hsl(var(--primary) / 0.12);
+  color: hsl(var(--primary));
+}
+
+.cm-session-modal__title-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.48rem;
+}
+
+.cm-session-modal__body {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.cm-session-section {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.cm-session-section__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  font-family: var(--font-mono), monospace;
+  font-size: var(--font-2xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: hsl(var(--muted-foreground));
+}
+
+.cm-session-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(4.5rem, 1fr));
+  gap: 0.4rem;
+}
+
+.cm-session-choice-grid--tags {
+  grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr));
+}
+
+.cm-session-choice {
+  min-block-size: 2.35rem;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid hsl(var(--primary) / 0.22);
+  border-radius: var(--radius-sm, 0.35rem);
+  background: hsl(221 50% 8% / 0.65);
+  color: hsl(var(--foreground));
+  font-family: var(--font-mono), monospace;
+  font-size: var(--font-xs);
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+
+.cm-session-choice:hover:not(.active):not([data-active="true"]) {
+  border-color: hsl(var(--primary) / 0.45);
+  background: hsl(var(--primary) / 0.09);
+}
+
+.cm-session-choice.active,
+.cm-session-choice[data-active="true"] {
+  border-color: hsl(var(--primary) / 0.7);
+  background: hsl(var(--primary) / 0.18);
+  color: hsl(var(--primary));
+}
+
+.cm-session-choice-input {
+  min-block-size: 2.35rem;
+  padding: 0.35rem 0.6rem;
+  font-family: var(--font-mono), monospace;
+  font-size: var(--font-xs);
+}
+
+.cm-session-choice-input[data-invalid="true"] {
+  border-color: hsl(var(--destructive) / 0.65);
+}
+
+.cm-session-summary {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.65rem 0.78rem;
+  border: 1px solid hsl(var(--border) / 0.5);
+  border-radius: var(--radius-md, 0.5rem);
+  background: hsl(221 50% 7% / 0.6);
+}
+
+.cm-session-summary__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-family: var(--font-mono), monospace;
+  font-size: var(--font-xs);
+  color: hsl(var(--muted-foreground));
+}
+
+.cm-session-summary__row strong {
+  color: hsl(var(--foreground));
+  font-variant-numeric: tabular-nums;
+}
+
+.cm-session-modal__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding-block-start: 0.25rem;
+}
+
+.cm-session-current__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  font-family: var(--font-mono), monospace;
+  font-size: var(--font-xs);
+  font-weight: 700;
+  color: hsl(var(--primary));
+  margin-block-end: 0.45rem;
+}
+
+.cm-session-current__grid,
+.cm-session-key__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.cm-session-current__cell,
+.cm-session-key__cell {
+  display: grid;
+  gap: 0.12rem;
+  font-family: var(--font-mono), monospace;
+  font-size: var(--font-2xs);
+  color: hsl(var(--muted-foreground));
+}
+
+.cm-session-current__cell strong,
+.cm-session-key__cell strong {
+  font-size: var(--font-xs);
+  color: hsl(var(--foreground));
+}
+
+.cm-session-manage__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--font-mono), monospace;
+  font-size: var(--font-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+
+.cm-session-empty {
+  display: grid;
+  place-items: center;
+  gap: 0.4rem;
+  padding: 1.5rem 1rem;
+  text-align: center;
+  font-size: var(--font-xs);
+  color: hsl(var(--muted-foreground));
+}
+
+.cm-session-empty__action {
+  border: 0;
+  background: transparent;
+  color: hsl(var(--primary));
+  font-family: var(--font-mono), monospace;
+  font-size: var(--font-xs);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cm-session-key-list {
+  display: grid;
+  gap: 0.55rem;
+  max-block-size: min(22rem, 42dvb);
+  overflow-y: auto;
+}
+
+.cm-session-key__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.cm-session-key__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.cm-session-key__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 1.85rem;
+  block-size: 1.85rem;
+  border: 1px solid hsl(var(--border) / 0.5);
+  border-radius: var(--radius-sm, 0.28rem);
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+}
+
+.cm-session-key__icon.danger:hover {
+  color: hsl(var(--destructive-foreground));
+  border-color: hsl(var(--destructive) / 0.5);
+}
+
+.cm-session-key__id {
+  font-family: var(--font-mono), monospace;
+  font-size: var(--font-2xs);
+  color: hsl(var(--primary));
+  margin-block: 0.28rem 0.45rem;
+}
+
+.cm-session-generated {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.cm-created-token {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid hsl(var(--primary) / 0.28);
+  border-radius: var(--radius-md, 0.5rem);
+  background: hsl(221 50% 7% / 0.72);
+}
+
+.cm-created-token__value {
+  font-family: var(--font-mono), monospace;
+  font-size: var(--font-xs);
+  color: hsl(var(--primary));
+  word-break: break-all;
+  line-height: 1.5;
+  user-select: all;
+}
+
+.cm-created-token__usage {
+  color: hsl(var(--muted-foreground));
+  font-family: var(--font-mono), monospace;
+  font-size: var(--font-2xs);
+  word-break: break-all;
+}
+
+.cm-created-token__next {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid hsl(var(--border) / 0.5);
+  border-radius: var(--radius-md, 0.5rem);
+  background: hsl(221 50% 7% / 0.52);
+}
+
+.cm-created-token__next-label {
+  color: hsl(var(--primary));
+  font-family: var(--font-mono), monospace;
+  font-size: var(--font-2xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.cm-created-token__next-copy {
+  color: hsl(var(--muted-foreground));
+  font-size: var(--font-xs);
+  line-height: 1.45;
+}
