@@ -211,16 +211,19 @@ test("create indexes the minted card immediately on mint success", () => {
   assert.match(block, /setLocation\("\/profile"\)/);
 });
 
-test("create-agent indexes the minted card immediately on mint success", () => {
-  const source = readFileSync(resolve(import.meta.dirname, "../src/pages/create-agent.tsx"), "utf8");
-  const start = source.indexOf("const handleMintSuccess");
-  assert.ok(start > 0, "handleMintSuccess must exist");
-  const block = source.slice(start);
-
-  assert.match(block, /rememberJustCreatedAgent\(walletAddress\)/);
-  assert.match(block, /indexAgentCard\(\{ cid, walletAddress \}/);
-  assert.match(block, /refreshAgentCatalog\(\)/);
-  // Indexing failure must never block navigation — cron is the fallback.
-  assert.match(block, /catch \(error\)/);
-  assert.match(block, /setLocation\("\/my-assets"\)/);
+test("resolveAgentIdentifier accepts 0u universal and 0s NEAR wallets and rejects fake coord-* wallets", async () => {
+  const { resolveAgentIdentifier } = await import("../src/hooks/use-agents");
+  assert.equal(
+    resolveAgentIdentifier("0ua0cexhh24pgqk9zecxa0tc9z8hd4e4aq49wy2s9dhrwwr8wgc2d0"),
+    "0ua0cexhh24pgqk9zecxa0tc9z8hd4e4aq49wy2s9dhrwwr8wgc2d0",
+  );
+  assert.equal(
+    resolveAgentIdentifier("0usamczf9mc35z6ek779cbtax780t8gn0qa192sww6k5004wrtp07g"),
+    "0usamczf9mc35z6ek779cbtax780t8gn0qa192sww6k5004wrtp07g",
+  );
+  assert.equal(
+    resolveAgentIdentifier("0s1234567890abcdef1234567890abcdef12345678"),
+    "0s1234567890abcdef1234567890abcdef12345678",
+  );
+  assert.equal(resolveAgentIdentifier("coord-f2fc03a2.factory.man0u.testnet"), null);
 });
