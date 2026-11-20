@@ -91,3 +91,10 @@ test("CAIP-2 namespace guards separate EVM, Solana, and NEAR networks", () => {
   assert.equal(isSolanaNetwork("near:mainnet"), false);
   assert.equal(isNearNetwork("near:mainnet"), true);
 });
+
+test("NEAR explorer transaction links use txns segment", () => {
+  assert.equal(
+    getExplorerTxUrl("near:mainnet", "txhash123"),
+    "https://nearblocks.io/txns/txhash123",
+  );
+});
