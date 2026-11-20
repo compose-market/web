@@ -97,10 +97,12 @@ test("usedWeb3Chatbot detects web3_chatbot_call tool usage on assistant message 
     assert.match(chatSource, /showChainGptAttribution[\s\S]*?<PoweredByChainGpt \/>/);
 });
 
-test("SnippetCard renders PoweredByChainGpt in the artifact card footer and appends attribution on .md download", () => {
-    const snippetSource = read("src/components/snippet.tsx");
+test("DocumentCard renders PoweredByChainGpt for ChainGPT artifacts and appends attribution on .md download", () => {
+    const documentSource = read("src/components/document.tsx");
+    const chatSource = read("src/components/chat.tsx");
 
-    assert.match(snippetSource, /import \{ PoweredByChainGpt \} from "@\/components\/chaingpt"/);
-    assert.match(snippetSource, /<PoweredByChainGpt \/>/);
-    assert.match(snippetSource, /_Powered by \[ChainGPT\]\(https:\/\/www\.chaingpt\.org\)_/);
+    assert.match(chatSource, /DocumentCard/);
+    assert.match(documentSource, /import \{ PoweredByChainGpt \} from "@\/components\/chaingpt"/);
+    assert.match(documentSource, /showChainGpt[\s\S]*?<PoweredByChainGpt \/>/);
+    assert.match(documentSource, /_Powered by \[ChainGPT\]\(https:\/\/www\.chaingpt\.org\)_/);
 });
