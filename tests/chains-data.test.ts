@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -6,8 +7,15 @@ import {
   CHAIN_IDS,
   SUPPORTED_CHAIN_IDS,
   USDC_ADDRESSES,
-} from "../src/lib/performance/chains-data";
-import { CHAIN_OBJECTS, getExplorerTxUrl, setChainRegistry } from "../src/lib/chains";
+} from "../src/lib/performance/networks";
+import {
+  CHAIN_OBJECTS,
+  getExplorerTxUrl,
+  isEvmNetwork,
+  isNearNetwork,
+  isSolanaNetwork,
+  setChainRegistry,
+} from "../src/lib/chains";
 import type { FacilitatorChain } from "@compose-market/sdk/chains";
 
 const mockChains: Array<FacilitatorChain & { explorerQuery?: string }> = [
@@ -18,10 +26,19 @@ const mockChains: Array<FacilitatorChain & { explorerQuery?: string }> = [
   { name: "Base", network: "eip155:8453", namespace: "eip155", shortName: "Base", isTestnet: false, explorer: "https://basescan.org", rpcUrl: "https://rpc.example", assetAddress: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", schemes: ["exact","upto","batch-settlement"], asset: "USDC", decimals: 6 },
   { name: "Sei", network: "eip155:1329", namespace: "eip155", shortName: "Sei", isTestnet: false, explorer: "https://seiscan.io", rpcUrl: "https://rpc.example", assetAddress: "0xe15fC38F6D8c56aF07bbCBe3BAf5708A2Bf42392", schemes: ["exact","upto","batch-settlement"], asset: "USDC", decimals: 6 },
   { name: "Solana Devnet", network: "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1", namespace: "solana", shortName: "Solana Devnet", isTestnet: true, explorer: "https://explorer.solana.com", explorerQuery: "cluster=devnet", rpcUrl: "https://api.devnet.solana.com", assetAddress: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", schemes: ["exact","upto","batch-settlement"], asset: "USDC", decimals: 6 },
+  { name: "NEAR", network: "near:mainnet", namespace: "near", shortName: "NEAR", isTestnet: false, explorer: "https://nearblocks.io", rpcUrl: "https://rpc.mainnet.near.org", assetAddress: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", schemes: ["exact","upto","batch-settlement"], asset: "USDC", decimals: 6 },
 ];
 
 test.before(() => {
-  setChainRegistry(mockChains, "eip155:5042");
+  setChainRegistry(mockChains);
+});
+
+test("chains-data module and hardcoded default network singletons are deleted", () => {
+  assert.equal(existsSync(new URL("../src/lib/performance/chains-data.ts", import.meta.url)), false);
+  const networkCtx = readFileSync(new URL("../src/contexts/Network.tsx", import.meta.url), "utf8");
+  const networksLib = readFileSync(new URL("../src/lib/performance/networks.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(networkCtx, /FIRST_TIME_DEFAULT|defaultNetwork/);
+  assert.doesNotMatch(networksLib, /resolvedDefaultNetwork|getDefaultNetwork|getDefaultEvmNetwork|getDefaultChainId/);
 });
 
 test("supported frontend chains exclude cronos entirely", () => {
