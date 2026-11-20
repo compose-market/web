@@ -11,10 +11,11 @@ function read(path: string): string {
 
 test("web SDK singleton configures the channel service URL", () => {
   const source = read("src/lib/sdk.ts");
+  const urlsSource = read("src/lib/performance/urls.ts");
 
-  assert.match(source, /VITE_CHANNELS_URL/);
+  assert.match(urlsSource, /VITE_CHANNELS_URL/);
   assert.doesNotMatch(source, /wss:|ws:|url\.pathname === "\/channels"/);
-  assert.match(source, /channelsUrl,\s*\n\s*userAgent:\s*"compose-market-web"/);
+  assert.match(source, /channelsUrl:\s*CHANNELS_BASE_URL,\s*\n\s*userAgent:\s*"compose-market-web"/);
 });
 
 test("agent page exposes icon-only channel binding through theme primitives", () => {
