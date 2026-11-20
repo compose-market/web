@@ -197,6 +197,20 @@ test("toOnchainAgent maps economics and identity from the snapshot card", () => 
   assert.equal(agent.metadata?.name, "BTC Checker");
 });
 
+test("create indexes the minted card immediately on mint success", () => {
+  const source = readFileSync(resolve(import.meta.dirname, "../src/pages/create.tsx"), "utf8");
+  const start = source.indexOf("const handleMintSuccess");
+  assert.ok(start > 0, "handleMintSuccess must exist");
+  const block = source.slice(start);
+
+  assert.match(block, /rememberJustCreatedAgent\(walletAddress\)/);
+  assert.match(block, /indexAgentCard\(\{ cid, walletAddress \}/);
+  assert.match(block, /refreshAgentCatalog\(\)/);
+  // Indexing failure must never block navigation — cron is the fallback.
+  assert.match(block, /catch \(error\)/);
+  assert.match(block, /setLocation\("\/profile"\)/);
+});
+
 test("create-agent indexes the minted card immediately on mint success", () => {
   const source = readFileSync(resolve(import.meta.dirname, "../src/pages/create-agent.tsx"), "utf8");
   const start = source.indexOf("const handleMintSuccess");
