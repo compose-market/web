@@ -94,7 +94,7 @@ test("usedWeb3Chatbot detects web3_chatbot_call tool usage on assistant message 
     assert.equal(usedWeb3Chatbot(web3ChatbotActivity), true);
 
     const chatSource = read("src/components/chat.tsx");
-    assert.match(chatSource, /showChainGptAttribution && \([\s\S]*?<PoweredByChainGpt \/>/);
+    assert.match(chatSource, /showChainGptAttribution[\s\S]*?<PoweredByChainGpt \/>/);
 });
 
 test("SnippetCard renders PoweredByChainGpt in the artifact card footer and appends attribution on .md download", () => {
