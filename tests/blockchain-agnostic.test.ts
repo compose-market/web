@@ -10,7 +10,7 @@ const contractsSource = readFileSync(new URL("../src/lib/contracts.ts", import.m
 const shareSource = readFileSync(new URL("../src/lib/share.ts", import.meta.url), "utf8");
 const shareDialogSource = readFileSync(new URL("../src/components/share.tsx", import.meta.url), "utf8");
 const pinataSource = readFileSync(new URL("../src/lib/pinata.ts", import.meta.url), "utf8");
-const createAgentSource = readFileSync(new URL("../src/pages/create-agent.tsx", import.meta.url), "utf8");
+const createAgentSource = readFileSync(new URL("../src/pages/create.tsx", import.meta.url), "utf8");
 const composeSource = readFileSync(new URL("../src/pages/compose.tsx", import.meta.url), "utf8");
 const swigSource = readFileSync(new URL("../src/lib/svm/swig.ts", import.meta.url), "utf8");
 
@@ -44,7 +44,7 @@ test("web program adapter is app-local transport glue, not an SDK account factor
   assert.match(programsSource, /buildSwigInstructionTransaction/);
 });
 
-test("create-agent no longer fakes Solana deployment as chainId zero", () => {
+test("create no longer fakes Solana deployment as chainId zero", () => {
   assert.doesNotMatch(createAgentSource, /selectedChainId\s*=\s*isEvmNetwork\(selectedNetwork\)\s*\?\s*evmChainId\(selectedNetwork\)\s*:\s*0/);
   assert.doesNotMatch(createAgentSource, /chainId\s*=\s*selectedChainId\s*\|\|\s*0/);
   assert.match(createAgentSource, /network:\s*selectedNetwork/);
