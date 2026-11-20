@@ -18,13 +18,20 @@ test("web SDK singleton configures the channel service URL", () => {
   assert.match(source, /channelsUrl:\s*CHANNELS_BASE_URL,\s*\n\s*userAgent:\s*"compose-market-web"/);
 });
 
-test("agent page exposes icon-only channel binding through theme primitives", () => {
-  const source = read("src/pages/agent.tsx");
+test("app layout exposes global Backpack dock item and agent page omits per-page Backpack", () => {
+  const layoutSource = read("src/components/layout/Layout.tsx");
+  const walletSource = read("src/components/wallet.tsx");
+  const agentSource = read("src/pages/agent.tsx");
+  const testerSource = read("src/components/connectors/tester.tsx");
 
-  assert.match(source, /import \{ Hint, ShellButton \} from "@compose-market\/theme\/shell"/);
-  assert.match(source, /<Hint label="Backpack">\s*<ShellButton\s+size="sm"\s+tone="secondary"\s+iconOnly\s+aria-label="Backpack"\s+onClick=\{openBackpack\}\s*>[\s\S]*?<Backpack size=\{14\} \/>[\s\S]*?<\/ShellButton>\s*<\/Hint>/);
-  assert.match(source, /<BackpackDialog/);
-  assert.doesNotMatch(source, /fetch\([^)]*\/channels/u);
+  assert.match(layoutSource, /aria-label="Backpack"/);
+  assert.match(layoutSource, /<Backpack\b/);
+  assert.match(walletSource, /<BackpackDialog/);
+  assert.doesNotMatch(agentSource, /<BackpackDialog/);
+  assert.doesNotMatch(agentSource, /fetch\([^)]*\/channels/u);
+  assert.match(testerSource, /value:\s*"account",\s*label:\s*"Accounts"/);
+  assert.match(testerSource, /sdk\.connectors\.accounts\.toolkits\.actions/);
+  assert.match(testerSource, /sdk\.connectors\.accounts\.execute/);
 });
 
 test("channel dialog uses only SDK channel resources for channel routes", () => {
