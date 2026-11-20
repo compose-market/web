@@ -77,3 +77,17 @@ test("Solana devnet explorer links preserve the cluster query", () => {
     "https://explorer.solana.com/tx/signature?cluster=devnet",
   );
 });
+
+test("CAIP-2 namespace guards separate EVM, Solana, and NEAR networks", () => {
+  assert.equal(isEvmNetwork("eip155:42161"), true);
+  assert.equal(isSolanaNetwork("eip155:42161"), false);
+  assert.equal(isNearNetwork("eip155:42161"), false);
+
+  assert.equal(isEvmNetwork("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"), false);
+  assert.equal(isSolanaNetwork("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"), true);
+  assert.equal(isNearNetwork("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"), false);
+
+  assert.equal(isEvmNetwork("near:mainnet"), false);
+  assert.equal(isSolanaNetwork("near:mainnet"), false);
+  assert.equal(isNearNetwork("near:mainnet"), true);
+});
