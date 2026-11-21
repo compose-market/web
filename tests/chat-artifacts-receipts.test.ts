@@ -77,3 +77,17 @@ test("1b: DocumentCard renders formatted preview, exact filename, and conditiona
   assert.match(genericCodeHtml, /SOLIDITY/);
   assert.doesNotMatch(genericCodeHtml, /Powered by/, "Generic non-ChainGPT artifacts must not hardcode ChainGPT attribution");
 });
+
+test("1c: MarkdownRenderer suppresses exact media URLs already rendered as message artifacts", () => {
+  const mediaUrl = "https://gateway.pinata.cloud/ipfs/QmTestImage123/image-1.png";
+  const otherUrl = "https://example.com/docs";
+  const md = `Here is your image:\n\n![cover](${mediaUrl})\n\n[Open file](${mediaUrl})\n\n[Read docs](${otherUrl})`;
+  const suppressed = new Set([normalizeMediaUrl(mediaUrl)]);
+
+  const html = renderToStaticMarkup(
+    React.createElement(MarkdownRenderer, { content: md, suppressedMediaUrls: suppressed }),
+  );
+
+  assert.doesNotMatch(html, /QmTestImage123/, "Suppressed artifact URL must not render again in prose");
+  assert.match(html, /https:\/\/example\.com\/docs/, "Unrelated links must remain visible");
+});
