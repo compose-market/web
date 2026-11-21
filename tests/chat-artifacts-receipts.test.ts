@@ -201,3 +201,17 @@ test("1e: reconcileMessageReceipts & summarizeTurnReceipts merge all turn settle
   assert.equal(summary.totalCount, 3);
   assert.ok(summary.primaryTxHash?.startsWith("0x"));
 });
+
+test("2: agent side-panel scrolls gracefully and Graph Canvas2D prevents clipping/overlay collisions", () => {
+  const agentsCss = readFileSync(resolve(process.cwd(), "src/styles/agents.css"), "utf8");
+  const motionCss = readFileSync(resolve(process.cwd(), "src/styles/motion.css"), "utf8");
+  const graphSrc = readFileSync(resolve(process.cwd(), "src/motion/graph.tsx"), "utf8");
+
+  assert.match(agentsCss, /\.cm-agent-panel\s*\{[\s\S]*?overflow-y:\s*auto/);
+  assert.match(agentsCss, /\.cm-agent-panel__activity-icon-btn/);
+  assert.match(motionCss, /\.cm-graph__svg\s*\{[\s\S]*?overflow:\s*hidden/);
+  assert.match(motionCss, /@container cm-iso \(max-width: 26rem\)/);
+  assert.match(graphSrc, /const VB_W = 360;/);
+  assert.match(graphSrc, /const VB_H = 192;/);
+  assert.match(graphSrc, /const LABEL_X = 208;/);
+});
