@@ -207,3 +207,24 @@ test("scroll performance invariants hold across theme, styles, graph, and market
   assert.match(identikitSrc, /export const AgentCard = React\.memo\(/);
   assert.match(identikitSrc, /onError=\{/);
 });
+
+test("sizedAvatarUrl selects thumb for market tiles and full for detail portraits without touching external/data URLs", () => {
+  assert.equal(
+    sizedAvatarUrl("https://agents.compose.market/agent/0xabc/avatar?v=0123456789abcdef", "thumb"),
+    "https://agents.compose.market/agent/0xabc/avatar?v=0123456789abcdef&size=thumb",
+  );
+  assert.equal(
+    sizedAvatarUrl("https://agents.compose.market/agent/0xabc/avatar?v=0123456789abcdef", "full"),
+    "https://agents.compose.market/agent/0xabc/avatar?v=0123456789abcdef&size=full",
+  );
+  assert.equal(
+    sizedAvatarUrl("https://agents.compose.market/agent/0xabc/avatar?v=0123456789abcdef&w=160", "thumb"),
+    "https://agents.compose.market/agent/0xabc/avatar?v=0123456789abcdef&size=thumb",
+  );
+  assert.equal(
+    sizedAvatarUrl("https://cdn.example.com/photo.png", "thumb"),
+    "https://cdn.example.com/photo.png",
+  );
+  assert.equal(sizedAvatarUrl("data:image/png;base64,AAAA", "full"), "data:image/png;base64,AAAA");
+  assert.equal(sizedAvatarUrl(null, "thumb"), null);
+});
