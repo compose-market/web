@@ -110,3 +110,94 @@ test("1d: SlashCommandPopover uses unified .cm-slash-popover glass classes and o
   const outputSrc = readFileSync(resolve(process.cwd(), "src/components/output.tsx"), "utf8");
   assert.doesNotMatch(outputSrc, /snap-y|snap-proximity|snap-start/);
 });
+
+test("1e: reconcileMessageReceipts & summarizeTurnReceipts merge all turn settlements and upgrade queued -> settled", () => {
+  const initialAgentReceipt: Receipt = {
+    id: "pi-agent-1",
+    service: "agent",
+    action: "stream",
+    subject: "agent:0xabc",
+    finalAmountWei: "90",
+    platformFeeWei: "90",
+    settlementStatus: "queued",
+    paymentIntentId: "pi-agent-1",
+    network: "eip155:43114",
+    settledAt: 0,
+  };
+
+  const fetchedFromApi: Receipt[] = [
+    {
+      id: "rct_model_1",
+      service: "inference",
+      subject: "openai/gpt-4o",
+      finalAmountWei: "4500",
+      providerAmountWei: "4455",
+      platformFeeWei: "45",
+      settlementStatus: "settled",
+      txHash: "0x1111111111111111111111111111111111111111111111111111111111111111",
+      paymentIntentId: "pi-model-1",
+      network: "eip155:43114",
+      settledAt: 1_700_000_001_000,
+    },
+    {
+      id: "rct_conn_1",
+      service: "connector",
+      subject: "mcp:smart-contracts",
+      finalAmountWei: "5000",
+      providerAmountWei: "5000",
+      settlementStatus: "queued",
+      paymentIntentId: "pi-conn-1",
+      network: "eip155:43114",
+      settledAt: 0,
+    },
+    {
+      id: "rct_agent_1",
+      service: "agent",
+      subject: "agent:0xabc",
+      finalAmountWei: "90",
+      platformFeeWei: "90",
+      settlementStatus: "settled",
+      txHash: "0x3333333333333333333333333333333333333333333333333333333333333333",
+      paymentIntentId: "pi-agent-1",
+      network: "eip155:43114",
+      settledAt: 1_700_000_003_000,
+    },
+  ];
+
+  const analyticsRows: InferenceAnalytics.InferenceSettlement[] = [
+    {
+      id: "settle-conn-1",
+      requestId: "req-conn-1",
+      paymentIntentId: "pi-conn-1",
+      network: "eip155:43114",
+      family: "connector",
+      model: "mcp:smart-contracts",
+      types: [],
+      operation: "execute",
+      status: "settled",
+      transactionHash: "0x2222222222222222222222222222222222222222222222222222222222222222",
+      pricedUnits: [],
+      billing: {
+        inferenceAmountAtomic: "5000",
+        platformFeeAtomic: "0",
+        finalAmountAtomic: "5000",
+        currency: "USDC",
+        decimals: 6,
+      },
+      settledAt: new Date(1_700_000_002_000).toISOString(),
+      createdAt: new Date(1_700_000_000_000).toISOString(),
+    },
+  ];
+
+  const merged = reconcileMessageReceipts([initialAgentReceipt], fetchedFromApi, analyticsRows);
+  assert.equal(merged.length, 3, "Should deduplicate agent receipt by paymentIntentId and include model + connector");
+
+  const summary = summarizeTurnReceipts(merged);
+  assert.ok(summary);
+  assert.equal(summary.totalAmountWei, "9590");
+  assert.equal(formatWeiUsd(summary.totalAmountWei), "$0.009590");
+  assert.equal(summary.status, "settled");
+  assert.equal(summary.settledCount, 3);
+  assert.equal(summary.totalCount, 3);
+  assert.ok(summary.primaryTxHash?.startsWith("0x"));
+});
