@@ -108,3 +108,66 @@ test("applyPendingDeltaMap coalesces text deltas atomically and preserves untouc
   // Empty batch returns exact same array reference
   assert.equal(applyPendingDeltaMap(prev, new Map()), prev);
 });
+
+test("MessageItem places sleek actions inline inside assistant footer when present, and below bubble otherwise", () => {
+  const receipt: Receipt = {
+    id: "rcpt-1",
+    service: "agent",
+    action: "stream",
+    subject: "agent:0x123",
+    finalAmountWei: "1200",
+    settled: true,
+    txHash: "0xdeadbeef",
+    createdAt: Date.now(),
+  };
+
+  const assistantWithFooter: ChatMessage = {
+    id: "m-asst-footer",
+    role: "assistant",
+    content: "Done auditing.",
+    timestamp: 1000,
+    type: "text",
+    receipt,
+    receipts: [receipt],
+  };
+
+  const withFooterHtml = renderToStaticMarkup(
+    React.createElement(MessageItem, {
+      message: assistantWithFooter,
+      showActions: true,
+      onCopy: () => undefined,
+      onRetry: () => undefined,
+      onDelete: () => undefined,
+    }),
+  );
+
+  assert.match(withFooterHtml, /cm-chat-message__footer/);
+  assert.match(withFooterHtml, /cm-chat-message__actions--inline/);
+  assert.doesNotMatch(withFooterHtml, /cm-chat-message__actions--below/);
+
+  const userMsg: ChatMessage = {
+    id: "m-user-1",
+    role: "user",
+    content: "Hello agent",
+    timestamp: 1001,
+    type: "text",
+  };
+
+  const userHtml = renderToStaticMarkup(
+    React.createElement(MessageItem, {
+      message: userMsg,
+      showActions: true,
+      onCopy: () => undefined,
+      onRetry: () => undefined,
+      onDelete: () => undefined,
+    }),
+  );
+
+  assert.match(userHtml, /cm-chat-message__actions--below/);
+  assert.doesNotMatch(userHtml, /cm-chat-message__actions--inline/);
+  // Actions strip must appear after the bubble, never above it
+  assert.ok(
+    userHtml.indexOf("cm-chat-message__bubble") < userHtml.indexOf("cm-chat-message__actions--below"),
+    "Message actions must sit below the bubble, never above it",
+  );
+});
