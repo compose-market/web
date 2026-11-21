@@ -91,3 +91,22 @@ test("1c: MarkdownRenderer suppresses exact media URLs already rendered as messa
   assert.doesNotMatch(html, /QmTestImage123/, "Suppressed artifact URL must not render again in prose");
   assert.match(html, /https:\/\/example\.com\/docs/, "Unrelated links must remain visible");
 });
+
+test("1d: SlashCommandPopover uses unified .cm-slash-popover glass classes and output.tsx removes snap-y leftovers", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(SlashCommandPopover, {
+      input: "/p",
+      selectedIndex: 0,
+      onSelect: () => undefined,
+      onHighlight: () => undefined,
+    }),
+  );
+
+  assert.match(html, /class="cm-slash-popover"/);
+  assert.match(html, /role="listbox"/);
+  assert.match(html, /\/plan/);
+  assert.match(html, /\/proof/);
+
+  const outputSrc = readFileSync(resolve(process.cwd(), "src/components/output.tsx"), "utf8");
+  assert.doesNotMatch(outputSrc, /snap-y|snap-proximity|snap-start/);
+});
