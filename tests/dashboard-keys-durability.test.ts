@@ -73,9 +73,10 @@ test("persistence allowlist accepts only successful explicitly marked durable qu
 });
 
 test("pair registration, persisted providers, owner reads, local filters, and one Keys hook stay within scope", async () => {
-  const [pair, app, analytics, keysHook, dashboard, networks, keysPage, quickstart, session, connector] = await Promise.all([
+  const [pair, app, wallet, analytics, keysHook, dashboard, networks, keysPage, quickstart, session, connector] = await Promise.all([
     readFile(new URL("../src/hooks/use-pair.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/App.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/wallet.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/hooks/use-analytics.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/hooks/use-keys.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/pages/dashboard.tsx", import.meta.url), "utf8"),
@@ -94,7 +95,7 @@ test("pair registration, persisted providers, owner reads, local filters, and on
 
   assert.match(app, /PersistQueryClientProvider/);
   assert.doesNotMatch(app, /<QueryClientProvider/);
-  assert.match(app, /OwnerCacheBoundary/);
+  assert.match(wallet, /OwnerCacheBoundary/);
 
   assert.doesNotMatch(analytics, /useChain|paymentNetwork|wallets\.attach/);
   assert.match(analytics, /readCachedAccount/);
