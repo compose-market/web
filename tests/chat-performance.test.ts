@@ -228,3 +228,48 @@ test("sizedAvatarUrl selects thumb for market tiles and full for detail portrait
   assert.equal(sizedAvatarUrl("data:image/png;base64,AAAA", "full"), "data:image/png;base64,AAAA");
   assert.equal(sizedAvatarUrl(null, "thumb"), null);
 });
+
+test("synchronous localStorage snapshots survive reload and purge owner-scoped data cleanly", () => {
+  const store = new Map<string, string>();
+  const mockLocalStorage = {
+    get length() { return store.size; },
+    key(index: number) { return [...store.keys()][index] ?? null; },
+    getItem(key: string) { return store.get(key) ?? null; },
+    setItem(key: string, value: string) { store.set(key, value); },
+    removeItem(key: string) { store.delete(key); },
+    clear() { store.clear(); },
+  };
+  const prevWindow = globalThis.window;
+  const prevStorage = globalThis.localStorage;
+  Object.defineProperty(globalThis, "window", { value: { localStorage: mockLocalStorage }, configurable: true });
+  Object.defineProperty(globalThis, "localStorage", { value: mockLocalStorage, configurable: true });
+
+  try {
+    writeAgentSnapshot("https://agents.compose.market", "v1", [{ walletAddress: "0x1111111111111111111111111111111111111111" } as never], "2026-11-20T00:00:00Z");
+    const agentSnap = readAgentSnapshot("https://agents.compose.market");
+    assert.equal(agentSnap?.version, "v1");
+    assert.equal(agentSnap?.items.length, 1);
+
+    writeModelSnapshot("https://models.compose.market", "m1", [{ modelId: "gpt-4o", provider: "openai" } as never], null);
+    assert.equal(readModelSnapshot("https://models.compose.market")?.items[0]?.modelId, "gpt-4o");
+
+    writeBenchmarksSnapshot("https://api.compose.market", { ok: true, data: [{ modelId: "gpt-4o" }] } as never);
+    assert.equal(readBenchmarksSnapshot("https://api.compose.market")?.data.data.length, 1);
+
+    const owner = "0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa";
+    writeCachedKeys(owner, [{ keyId: "k1", createdAt: 100 } as never]);
+    writeCachedAnalytics(owner, "7d::{}", { kind: "inference" } as never);
+    assert.equal(readCachedKeys(owner)?.data.length, 1);
+    assert.equal(readCachedAnalytics(owner, "7d::{}")?.data.kind, "inference");
+
+    // Purging owner clears keys + analytics but keeps public catalogs intact
+    purgeOwnerCaches(owner);
+    assert.equal(readCachedKeys(owner), null);
+    assert.equal(readCachedAnalytics(owner, "7d::{}"), null);
+    assert.equal(readAgentSnapshot("https://agents.compose.market")?.version, "v1");
+    assert.equal(readModelSnapshot("https://models.compose.market")?.version, "m1");
+  } finally {
+    Object.defineProperty(globalThis, "window", { value: prevWindow, configurable: true });
+    Object.defineProperty(globalThis, "localStorage", { value: prevStorage, configurable: true });
+  }
+});
