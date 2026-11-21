@@ -44,3 +44,23 @@ test("buildPreviewExcerpt caps huge code and markdown bodies and closes truncate
   const fenceCount = (slicedMd.match(/^```/gm) ?? []).length;
   assert.equal(fenceCount % 2, 0, "Truncated markdown excerpt must close any open code fence");
 });
+
+test("DocumentCard does not mount ShellModal while closed and renders capped preview", () => {
+  const longBody = Array.from({ length: 80 }, (_, i) => `Paragraph line ${i} about security findings.`).join("\n");
+  const html = renderToStaticMarkup(
+    React.createElement(DocumentCard, {
+      variant: "document",
+      artifact: {
+        id: "doc-perf-1",
+        artifactType: "document",
+        title: "Large Audit",
+        filename: "audit.md",
+        content: longBody,
+      },
+    }),
+  );
+
+  assert.match(html, /Paragraph line 0/);
+  assert.doesNotMatch(html, /Paragraph line 75/, "Closed DocumentCard preview must not parse tail of huge body");
+  assert.doesNotMatch(html, /cm-shell-modal/, "ShellModal must remain unmounted until expanded");
+});
