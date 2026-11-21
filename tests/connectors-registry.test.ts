@@ -34,3 +34,74 @@ test("command bar, tester, backpack, and chat support full Composio accounts and
   assert.match(chat, /sdk\.connectors\.accounts\.status\(/);
   assert.match(chat, /Waiting for login in popup/);
 });
+
+test("connector snapshot client helpers validate versioned index and merge semantic rerank-2.5 hits", async () => {
+  const {
+    connectorsOrigin,
+    fetchConnectorCatalogHealth,
+    fetchConnectorCatalogIndex,
+    mergeSemanticConnectorRanks,
+    rankCatalogConnectors,
+  } = await import("../src/lib/connectors.js");
+
+  assert.equal(connectorsOrigin("https://connectors.compose.market/mcps"), "https://connectors.compose.market");
+
+  const health = await fetchConnectorCatalogHealth("https://connectors.compose.market", async () =>
+    new Response(JSON.stringify({
+      version: "v1234abcd",
+      lastUpdated: "2026-11-12T08:00:00Z",
+      counts: { total: 3, mcp: 1, account: 1, onchain: 1 },
+    }), { status: 200 }),
+  );
+  assert.equal(health.version, "v1234abcd");
+  assert.equal(health.counts.total, 3);
+
+  await assert.rejects(() =>
+    fetchConnectorCatalogIndex("https://connectors.compose.market", "v1234abcd", async () =>
+      new Response(JSON.stringify({ version: "wrong", mcps: [], accounts: [], onchain: { connectors: [], status: {} } }), { status: 200 }),
+    ),
+  );
+
+  const catalog = [
+    {
+      registryId: "mcp:notion",
+      origin: "mcp" as const,
+      slug: "notion",
+      name: "Notion MCP",
+      description: "Gated MCP server for Notion",
+      tags: ["docs"],
+      status: "credential_gated" as const,
+    },
+    {
+      registryId: "account:notion",
+      origin: "account" as const,
+      slug: "notion",
+      name: "Notion",
+      description: "1-click OAuth Notion workspace",
+      tags: ["productivity"],
+      status: "credential_gated" as const,
+      authMode: "oauth" as const,
+    },
+    {
+      registryId: "account:gmail",
+      origin: "account" as const,
+      slug: "gmail",
+      name: "Gmail",
+      description: "Send and read email messages",
+      tags: ["communication"],
+      status: "credential_gated" as const,
+      authMode: "oauth" as const,
+    },
+  ];
+
+  const localNotion = rankCatalogConnectors(catalog, "notion", 10);
+  assert.equal(localNotion[0]?.item.registryId, "account:notion");
+
+  const localConceptual = rankCatalogConnectors(catalog, "inbox newsletter dispatch", 10);
+  const merged = mergeSemanticConnectorRanks(catalog, localConceptual, [
+    { bindingId: "account:gmail", origin: "account", slug: "gmail", score: 0.94 },
+  ], 10);
+  assert.equal(merged[0]?.registryId, "account:gmail");
+});
+
+
