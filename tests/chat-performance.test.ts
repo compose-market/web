@@ -171,3 +171,39 @@ test("MessageItem places sleek actions inline inside assistant footer when prese
     "Message actions must sit below the bubble, never above it",
   );
 });
+
+test("scroll performance invariants hold across theme, styles, graph, and market without stripping glass aesthetics", () => {
+  const shellCss = readFileSync(resolve(process.cwd(), "../packages/theme/src/shell/shell.css"), "utf8");
+  assert.match(shellCss, /\.cm-shell-modal-overlay::before/);
+  assert.match(shellCss, /\.cm-shell-modal::before/);
+  assert.match(shellCss, /\.cm-shell-modal__body[\s\S]*contain:\s*layout style paint/);
+
+  const indexCss = readFileSync(resolve(process.cwd(), "src/styles/index.css"), "utf8");
+  assert.match(indexCss, /\.cm-agent-chat-cell::before/);
+  assert.match(indexCss, /backdrop-filter:\s*blur\(16px\)/);
+
+  const traceCss = readFileSync(resolve(process.cwd(), "src/styles/trace.css"), "utf8");
+  assert.match(traceCss, /\.cm-trace-backdrop::before/);
+  assert.match(traceCss, /\.cm-trace__body[\s\S]*contain:\s*layout style paint/);
+
+  const motionCss = readFileSync(resolve(process.cwd(), "src/styles/motion.css"), "utf8");
+  assert.doesNotMatch(motionCss, /animation-timeline:\s*view\(\)/);
+  assert.match(motionCss, /\.cm-tilt-surface\[data-tilt="active"\][\s\S]*will-change:\s*transform/);
+
+  const marketCss = readFileSync(resolve(process.cwd(), "src/styles/market.css"), "utf8");
+  assert.doesNotMatch(marketCss, /content-visibility:\s*auto/);
+  assert.match(marketCss, /\.cm-market-agent-slot[\s\S]*contain:\s*layout style paint/);
+
+  const graphSrc = readFileSync(resolve(process.cwd(), "src/motion/graph.tsx"), "utf8");
+  assert.match(graphSrc, /<canvas\b/);
+  assert.match(graphSrc, /getContext\("2d"\)/);
+  assert.match(graphSrc, /memo\(/);
+
+  const chatSrc = readFileSync(resolve(process.cwd(), "src/components/chat.tsx"), "utf8");
+  assert.doesNotMatch(chatSrc, /\bmessages:\s*ChatMessage\[\]/);
+  assert.match(chatSrc, /const MessageList = memo\(/);
+
+  const identikitSrc = readFileSync(resolve(process.cwd(), "src/components/identikit.tsx"), "utf8");
+  assert.match(identikitSrc, /export const AgentCard = React\.memo\(/);
+  assert.match(identikitSrc, /onError=\{/);
+});
