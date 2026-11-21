@@ -64,3 +64,47 @@ test("DocumentCard does not mount ShellModal while closed and renders capped pre
   assert.doesNotMatch(html, /Paragraph line 75/, "Closed DocumentCard preview must not parse tail of huge body");
   assert.doesNotMatch(html, /cm-shell-modal/, "ShellModal must remain unmounted until expanded");
 });
+
+test("applyPendingDeltaMap coalesces text deltas atomically and preserves untouched message refs", () => {
+  const userMsg: ChatMessage = {
+    id: "user-1",
+    role: "user",
+    content: "Audit this contract",
+    timestamp: 1000,
+    type: "text",
+  };
+  const assistantMsg: ChatMessage = {
+    id: "asst-1",
+    role: "assistant",
+    content: "Init ",
+    timestamp: 1001,
+    type: "text",
+    isStreaming: true,
+    blocks: [{ id: "b-1", type: "text", text: "Init " }],
+  };
+  const prev = [userMsg, assistantMsg];
+
+  const batch = new Map<string, PendingDeltaBatch>([
+    [
+      "asst-1",
+      {
+        blocks: new Map([
+          ["b-1", { type: "text", delta: "chunk 1 chunk 2." }],
+        ]),
+        content: "Init chunk 1 chunk 2.",
+      },
+    ],
+  ]);
+
+  const next = applyPendingDeltaMap(prev, batch);
+  assert.equal(next[0], userMsg, "Untouched user message must keep identical reference");
+  assert.notEqual(next[1], assistantMsg, "Updated assistant message must produce new object");
+  assert.equal(next[1].content, "Init chunk 1 chunk 2.");
+  assert.equal(next[1].blocks?.[0]?.type, "text");
+  if (next[1].blocks?.[0]?.type === "text") {
+    assert.equal(next[1].blocks[0].text, "Init chunk 1 chunk 2.");
+  }
+
+  // Empty batch returns exact same array reference
+  assert.equal(applyPendingDeltaMap(prev, new Map()), prev);
+});
