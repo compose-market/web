@@ -75,15 +75,17 @@ test("agent detail page uses the catalog hook with an indexing state", () => {
 
 test("default market agents path does not statically pull on-chain tab code", () => {
   const source = readFileSync(resolve(root, "src/pages/market.tsx"), "utf8");
-  const card = readFileSync(resolve(root, "src/components/agent-card.tsx"), "utf8");
+  const boards = readFileSync(resolve(root, "src/components/boards.tsx"), "utf8");
+  const card = readFileSync(resolve(root, "src/components/identikit.tsx"), "utf8");
 
   assert.doesNotMatch(source, /import\s+\{[^}]*useOnchainWorkflows[^}]*\}\s+from\s+"@\/hooks\/use-onchain"/);
   assert.doesNotMatch(source, /import\s+\{[^}]*useOpenRFAs[^}]*\}\s+from\s+"@\/hooks\/use-onchain"/);
   assert.doesNotMatch(source, /from\s+"@\/lib\/contracts"/);
   assert.doesNotMatch(source, /from\s+"@\/lib\/chains"/);
   assert.doesNotMatch(source, /import\s+\{[^}]*RFADetails[^}]*\}\s+from\s+"@\/components\/RFADetails"/);
-  assert.match(source, /import\("@\/hooks\/use-onchain"\)/);
-  assert.match(source, /React\.lazy\(\(\) =>\s*import\("@\/components\/RFADetails"\)/);
+  assert.match(source, /React\.lazy\(\(\) =>\s*import\("@\/components\/boards"\)/);
+  assert.match(boards, /import\("@\/hooks\/use-onchain"\)/);
+  assert.match(boards, /React\.lazy\(\(\) =>\s*import\("@\/components\/RFADetails"\)/);
 
   assert.doesNotMatch(card, /from\s+"@\/lib\/contracts"/);
   assert.doesNotMatch(card, /from\s+"@\/hooks\/use-warp"/);
