@@ -27,9 +27,13 @@ test("market agents tab renders the cached catalog snapshot with semantic search
   assert.doesNotMatch(agents, /useOnchainAgents/);
   assert.doesNotMatch(source, /staleTime:\s*0/);
   assert.doesNotMatch(source, /gcTime:\s*0/);
-  // Progressive reveal still works from the complete snapshot.
-  assert.match(agents, /IntersectionObserver/);
-  assert.match(agents, /content-visibility:auto/);
+  // Renders the full snapshot statically (zero React scroll commits, zero DisplayLock thrashing).
+  assert.doesNotMatch(agents, /useGrid\(/);
+  assert.doesNotMatch(agents, /IntersectionObserver/);
+  const marketCss = readFileSync(resolve(root, "src/styles/market.css"), "utf8");
+  assert.match(marketCss, /contain:\s*layout style paint/);
+  assert.doesNotMatch(marketCss, /content-visibility:\s*auto/);
+  assert.doesNotMatch(marketCss, /scroll-snap-type/);
   // Price sorts are client-side over the snapshot.
   assert.match(agents, /"price-low" \|\| sort === "price-high"/);
 });
