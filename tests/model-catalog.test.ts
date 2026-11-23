@@ -1,15 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { fetchModelCatalogHealth, fetchModelCatalogIndex, modelsOrigin } from "../src/lib/models.js";
+import {
+  fetchModelCatalogHealth,
+  fetchModelCatalogIndex,
+  isSupersededCatalogQueryKey,
+  modelsOrigin,
+} from "../src/lib/models.js";
 
 test("modelsOrigin strips noncanonical deployment paths", () => {
   assert.equal(modelsOrigin("https://models.compose.market/sandbox"), "https://models.compose.market");
 });
 
 test("model catalog health returns the immutable import version", async () => {
-  const health = await fetchModelCatalogHealth("https://models.compose.market", async (input) => {
+  const health = await fetchModelCatalogHealth("https://models.compose.market", async (input, init) => {
     assert.equal(String(input), "https://models.compose.market/health");
+    assert.equal(init?.cache, "no-store");
     return Response.json({ models: 755, version: "catalog-hash", lastUpdated: "2026-08-28T00:00:00.000Z" });
   });
   assert.deepEqual(health, {
