@@ -25,6 +25,45 @@ test("model catalog health returns the immutable import version", async () => {
   });
 });
 
+test("model catalog index requires a complete matching version and supports cache bypass", async () => {
+  const seenCaches: Array<RequestCache | undefined> = [];
+  const models = await fetchModelCatalogIndex("https://models.compose.market", "catalog-hash", async (input, init) => {
+    assert.equal(String(input), "https://models.compose.market/index?version=catalog-hash");
+    seenCaches.push(init?.cache);
+    return Response.json({
+      version: "catalog-hash",
+      total: 1,
+      data: [{ modelId: "glm-5.3", provider: "cloudflare" }],
+    });
+  });
+  assert.equal(models[0]?.modelId, "glm-5.3");
+  assert.equal(seenCaches[0], "default");
+
+  await fetchModelCatalogIndex(
+    "https://models.compose.market",
+    "catalog-hash",
+    async (_input, init) => {
+      seenCaches.push(init?.cache);
+      return Response.json({
+        version: "catalog-hash",
+        total: 1,
+        data: [{ modelId: "glm-5.3", provider: "cloudflare" }],
+      });
+    },
+    { cache: "no-store" },
+  );
+  assert.equal(seenCaches[1], "no-store");
+
+  await assert.rejects(
+    fetchModelCatalogIndex("https://models.compose.market", "catalog-hash", async () => Response.json({
+      version: "catalog-hash",
+      total: 2,
+      data: [{ modelId: "glm-5.3", provider: "cloudflare" }],
+    })),
+    /Incomplete model catalog index/,
+  );
+});
+
 test("model catalog index requires a complete matching version", async () => {
   const models = await fetchModelCatalogIndex("https://models.compose.market", "catalog-hash", async (input) => {
     assert.equal(String(input), "https://models.compose.market/index?version=catalog-hash");
