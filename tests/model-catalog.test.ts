@@ -64,23 +64,10 @@ test("model catalog index requires a complete matching version and supports cach
   );
 });
 
-test("model catalog index requires a complete matching version", async () => {
-  const models = await fetchModelCatalogIndex("https://models.compose.market", "catalog-hash", async (input) => {
-    assert.equal(String(input), "https://models.compose.market/index?version=catalog-hash");
-    return Response.json({
-      version: "catalog-hash",
-      total: 1,
-      data: [{ modelId: "glm-5.3", provider: "cloudflare" }],
-    });
-  });
-  assert.equal(models[0]?.modelId, "glm-5.3");
-
-  await assert.rejects(
-    fetchModelCatalogIndex("https://models.compose.market", "catalog-hash", async () => Response.json({
-      version: "catalog-hash",
-      total: 2,
-      data: [{ modelId: "glm-5.3", provider: "cloudflare" }],
-    })),
-    /Incomplete model catalog index/,
-  );
+test("isSupersededCatalogQueryKey matches only older catalog versions for the same origin", () => {
+  const origin = "https://models.compose.market";
+  assert.equal(isSupersededCatalogQueryKey(["models-catalog", origin, "old-hash"], origin, "new-hash"), true);
+  assert.equal(isSupersededCatalogQueryKey(["models-catalog", origin, "new-hash"], origin, "new-hash"), false);
+  assert.equal(isSupersededCatalogQueryKey(["models-catalog", "https://other.origin", "old-hash"], origin, "new-hash"), false);
+  assert.equal(isSupersededCatalogQueryKey(["models-health", origin], origin, "new-hash"), false);
 });
