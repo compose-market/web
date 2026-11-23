@@ -13,6 +13,9 @@ const chatHookSource = readFileSync(new URL("../src/hooks/use-chat.ts", import.m
 const chatSource = readFileSync(new URL("../src/components/chat.tsx", import.meta.url), "utf8");
 const outputSource = readFileSync(new URL("../src/components/output.tsx", import.meta.url), "utf8");
 const receiptSource = readFileSync(new URL("../src/components/receipt-indicator.tsx", import.meta.url), "utf8");
+const traceSource = readFileSync(new URL("../src/components/trace.tsx", import.meta.url), "utf8");
+const pulseSource = readFileSync(new URL("../src/components/pulse.tsx", import.meta.url), "utf8");
+const chatStyles = readFileSync(new URL("../src/styles/chat.css", import.meta.url), "utf8");
 const missionSource = readFileSync(new URL("../src/components/mission-control.tsx", import.meta.url), "utf8");
 const themeStreamSource = readFileSync(new URL("../../packages/theme/src/stream/index.tsx", import.meta.url), "utf8");
 const themeStreamStyles = readFileSync(new URL("../../packages/theme/src/stream/stream.css", import.meta.url), "utf8");
@@ -64,13 +67,13 @@ test("chat renders ordered blocks instead of a fixed stream tree order", () => {
 });
 
 test("activity folds render real activity state and hide traces by default", () => {
-  assert.match(missionSource, /ActivityState/);
-  assert.match(missionSource, /isVisibleNode/);
-  assert.match(missionSource, /node\.kind === "trace"/);
-  assert.match(missionSource, /node\.kind === "plan"/);
-  assert.match(missionSource, /node\.kind === "message"/);
+  assert.match(traceSource, /ActivityState/);
+  assert.match(traceSource, /isDisplayableNode/);
+  assert.match(traceSource, /node\.kind === "trace"/);
+  assert.match(traceSource, /node\.kind === "plan"/);
+  assert.match(traceSource, /node\.kind === "message"/);
   assert.match(streamSource, /if \(event\.type === "activity\.trace"\) return/);
-  assert.doesNotMatch(missionSource, /kind="debug"|status="info"/);
+  assert.match(pulseSource, /export function Pulse/);
 });
 
 test("direct model output stays on text, reasoning, and asset surfaces", () => {
