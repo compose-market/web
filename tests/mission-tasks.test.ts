@@ -96,20 +96,13 @@ test("task row statuses map to fold states", () => {
     assert.equal(TASK_ROW_STATUS.failed, "failed");
 });
 
-test("mission control renders one fold per task titled with the assigned agent name", () => {
-    const source = readFileSync(resolve(here, "../src/components/mission-control.tsx"), "utf8");
-    assert.match(source, /task \$\{task\.id\} - \$\{ownerName\}/);
-    assert.match(source, /ownerName = task\.ownerName \?\? task\.title/);
-    // Task folds render between the connector gates and the swarm timeline.
-    const order = [
-        source.indexOf("renderPlanSection()"),
-        source.indexOf("renderConnectorSection()"),
-        source.indexOf("renderTaskSection()"),
-        source.indexOf("renderActivitySection()"),
-    ];
-    assert.deepEqual(order, [...order].sort());
-    // The general timeline excludes task-claimed subtrees.
-    assert.match(source, /hiddenIds=\{claimedIds\}/);
+test("trace flow inspector renders readable plans, tasks, interactions, and x402 bills", () => {
+    const source = readFileSync(resolve(here, "../src/components/trace.tsx"), "utf8");
+    assert.match(source, /activePlan\.tasks/);
+    assert.match(source, /TaskStatusPill/);
+    assert.match(source, /TraceNodeCard/);
+    assert.match(source, /BillTree/);
+    assert.match(source, /isDisplayableNode/);
 });
 
 test("child model reasoning folds into the agent's tree node, never the chat", () => {
