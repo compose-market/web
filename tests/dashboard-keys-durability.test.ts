@@ -143,5 +143,5 @@ test("all current settlement statuses and remaining list call sites use the new 
   ]);
 
   assert.match(receipts, /submitted:\s*0/);
-  assert.match(sessionUi, /sdk\.keys\.list\(\{\s*userAddress:\s*account\.address\s*\}\)/);
+  assert.match(sessionUi, /sdk\.keys\.list\(\{\s*userAddress\s*\}\)/);
 });
