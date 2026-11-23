@@ -5,7 +5,7 @@ import {
   createObjectUrlPreview,
   revokeObjectUrlPreview,
   revokeObjectUrlSet,
-} from "@/lib/performance/object-url";
+} from "@/lib/performance/urls";
 
 test("createObjectUrlPreview creates blob previews and revokeObjectUrlSet cleans them up", () => {
   const createdUrls: string[] = [];
