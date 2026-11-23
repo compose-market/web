@@ -113,6 +113,11 @@ test("artifact merges never clobber hydrated fields with undefined follow-up fra
   assert.doesNotMatch(upsert, /\.\.\.artifact, id: artifacts\[idx\]\.id/);
 });
 
+test("trace guards against parent cycles with a visited set", () => {
+  assert.match(traceSource, /if \(visited\.has\(node\.id\)\) return null/);
+  assert.match(traceSource, /nextVisited\.add\(node\.id\)/);
+});
+
 test("mission control roots never duplicate between declared roots and orphan re-roots", () => {
   const roots = section(missionSource, "const visited = new Set<string>();", "const groupedRoots");
   assert.match(roots, /const rootIds = new Set\(roots\.map\(\(n\) => n\.id\)\)/);
