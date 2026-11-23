@@ -83,11 +83,11 @@ test("direct model output stays on text, reasoning, and asset surfaces", () => {
   assert.match(streamSource, /event\.type === "model\.reasoning\.delta"/);
   assert.match(streamSource, /event\.type === "model\.asset"/);
   assert.match(streamSource, /function artifactFromModelEvent/);
-  assert.match(messageItem, /title="Thinking"/);
+  assert.match(messageItem, /<ReasoningBlock/);
   assert.match(artifactBlock, /partial/);
   assert.match(artifactBlock, /progress/);
-  assert.match(artifactBlock, /SharedStreamMedia/);
-  assert.match(themeStreamStyles, /cm-stream-media--partial/);
+  assert.match(artifactBlock, /StreamMedia/);
+  assert.match(chatStyles, /cm-stream-media--partial/);
   assert.doesNotMatch(streamSource, /artifactFrames|emitArtifact|function artifactFromEvent/);
   assert.doesNotMatch(chatSource, /DirectModelDetails|Model stream|Model activity/);
 });
