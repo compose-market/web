@@ -99,8 +99,8 @@ test("generated media hydrate and render as normal chat assets", () => {
   assert.match(chatHookSource, /upsertAssistantArtifact/);
   assert.match(chatHookSource, /type: "asset", artifactId/);
   assert.doesNotMatch(streamSource, /imageUrl:\s*outputItemUrl|audioUrl:\s*outputItemUrl|videoUrl:\s*outputItemUrl/);
-  assert.doesNotMatch(mediaBranch, /SharedStreamNode/);
-  assert.match(artifactBlock, /SharedStreamMedia/);
+  assert.doesNotMatch(mediaBranch, /FoldNode/);
+  assert.match(artifactBlock, /StreamMedia/);
   assert.match(artifactBlock, /Download/);
   assert.match(artifactBlock, /MediaPreview/);
   assert.match(outputSource, /SharedStreamMedia kind="image"/);
