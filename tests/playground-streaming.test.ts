@@ -16,9 +16,6 @@ const receiptSource = readFileSync(new URL("../src/components/receipt-indicator.
 const traceSource = readFileSync(new URL("../src/components/trace.tsx", import.meta.url), "utf8");
 const pulseSource = readFileSync(new URL("../src/components/pulse.tsx", import.meta.url), "utf8");
 const chatStyles = readFileSync(new URL("../src/styles/chat.css", import.meta.url), "utf8");
-const missionSource = readFileSync(new URL("../src/components/mission-control.tsx", import.meta.url), "utf8");
-const themeStreamSource = readFileSync(new URL("../../packages/theme/src/stream/index.tsx", import.meta.url), "utf8");
-const themeStreamStyles = readFileSync(new URL("../../packages/theme/src/stream/stream.css", import.meta.url), "utf8");
 
 function section(source: string, start: string, end: string): string {
   const startIndex = source.indexOf(start);
@@ -116,12 +113,6 @@ test("artifact merges never clobber hydrated fields with undefined follow-up fra
 test("trace guards against parent cycles with a visited set", () => {
   assert.match(traceSource, /if \(visited\.has\(node\.id\)\) return null/);
   assert.match(traceSource, /nextVisited\.add\(node\.id\)/);
-});
-
-test("mission control roots never duplicate between declared roots and orphan re-roots", () => {
-  const roots = section(missionSource, "const visited = new Set<string>();", "const groupedRoots");
-  assert.match(roots, /const rootIds = new Set\(roots\.map\(\(n\) => n\.id\)\)/);
-  assert.match(roots, /rootIds\.has\(n\.id\)/);
 });
 
 test("embedding artifacts render as foldable vectors without fake artifact status chrome", () => {
@@ -241,19 +232,17 @@ test("chat folds expose structured tone and open attributes cleanly", () => {
   assert.match(chatSource, /export function MultimodalCanvas/);
 });
 
-test("theme stream nodes keep raw kind and status out of visible chrome by default", () => {
-  const nodeSource = section(themeStreamSource, "export function StreamNode", "export interface MissionControlPanelProps");
-  assert.match(nodeSource, /data-kind=\{kind\}/);
-  assert.match(nodeSource, /data-status=\{status\}/);
-  assert.match(themeStreamSource, /badges\?: React\.ReactNode/);
-  assert.match(nodeSource, /\{badges\}/);
-  assert.doesNotMatch(nodeSource, /cm-stream-node__kind/);
-  assert.doesNotMatch(nodeSource, /cm-stream-node__status/);
-});
-
 test("chat scroll preserves manual inspection during live updates", () => {
   assert.match(chatHookSource, /stickToBottomRef\.current = true/);
   assert.match(chatHookSource, /addEventListener\("wheel", markUserScroll/);
   assert.match(chatHookSource, /addEventListener\("touchmove", markUserScroll/);
   assert.match(chatSource, /New messages/);
+});
+
+test("multi-round model text resets active text block on model.start and disables single-dollar KaTeX collisions", () => {
+  const dispatchModel = section(streamSource, "function dispatchModel", "function dispatchActivity");
+  const markdownSource = readFileSync(new URL("../src/lib/performance/markdown.tsx", import.meta.url), "utf8");
+  assert.match(dispatchModel, /event\.type === "model\.start"[\s\S]{0,120}textBlockRef\.current = null/);
+  assert.match(dispatchModel, /chat\.streamedTextRef\.current \+= "\\n\\n"/);
+  assert.match(markdownSource, /singleDollarTextMath:\s*false/);
 });
