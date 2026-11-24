@@ -28,12 +28,15 @@ test("root route redirects to keys while home stays outside the app graph", () =
 
 test("network selector lives in the nav utility, not the top HUD or overflow", () => {
   const layout = read("src/components/layout/Layout.tsx");
-  const selectorUses = layout.match(/<NetworkSelector/g) || [];
+  const wallet = read("src/components/wallet.tsx");
+  const selectorUses = wallet.match(/<NetworkSelector/g) || [];
 
   assert.equal(selectorUses.length, 1);
-  assert.match(layout, /cm-app-chrome__navutility[\s\S]*<NetworkSelector/);
+  assert.match(layout, /cm-app-chrome__navutility[\s\S]*ref=\{onNavUtilityRef\}/);
+  assert.match(wallet, /navUtilityEl[\s\S]*<NetworkSelector/);
   assert.doesNotMatch(layout, /cm-app-chrome__hud-item[\s\S]{0,140}<NetworkSelector/);
-  assert.doesNotMatch(layout, /cm-app-chrome__hud-popover-title">Network/);
+  assert.doesNotMatch(wallet, /cm-app-chrome__hud-item[\s\S]{0,140}<NetworkSelector/);
+  assert.doesNotMatch(wallet, /cm-app-chrome__hud-popover-title">Network/);
 });
 
 test("market agent cards use root open handlers without nested links", () => {
