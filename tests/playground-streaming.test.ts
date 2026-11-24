@@ -140,9 +140,9 @@ test("embedding artifacts render as foldable vectors without fake artifact statu
 
 test("plan review and failures are product blocks, not backend stream events", () => {
   const planReview = section(chatSource, "function InlinePlanGate", "function ArtifactBlock");
-  assert.match(planReview, /SharedPlanGate/);
-  assert.match(missionSource, /PlanVersionCarousel/);
-  assert.match(missionSource, /planTasks\(activePlan\)/);
+  assert.match(planReview, /cm-chat-plan/);
+  assert.match(traceSource, /cm-trace-versions/);
+  assert.match(traceSource, /activePlan\.tasks/);
   assert.match(streamSource, /function planFromActivityEvent/);
   assert.match(chatHookSource, /type: "notice"/);
   assert.match(chatHookSource, /export function noticeId/);
