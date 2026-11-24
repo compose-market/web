@@ -41,6 +41,8 @@ test("web consumes @compose-market/sdk as a third-party integrator", async () =>
   const calls: Array<{ host: string; method: string; path: string; headers: Headers }> = [];
   const sdk = new ComposeSDK({
     baseUrl: "https://api.example.test",
+    connectorsUrl: "https://connectors.example.test",
+    runtimeUrl: "https://runtime.example.test",
     channelsUrl: "https://services.example.test",
     defaultHeaders: {
       Authorization: "Bearer compose-test",
@@ -56,17 +58,35 @@ test("web consumes @compose-market/sdk as a third-party integrator", async () =>
         path: `${url.pathname}${url.search}`,
         headers: new Headers(init?.headers),
       });
-      const body = url.pathname.startsWith("/channels/")
-        ? {
-          code: "link-test",
-          channel: "telegram",
-          userAddress: "0x0000000000000000000000000000000000000001",
-          agentWallet: "0x0000000000000000000000000000000000000002",
-          createdAt: Date.now(),
-          expiresAt: Date.now() + 60000,
-          url: "https://t.me/compose_bot?start=link-test",
-        }
-        : { agents: [], total: 0, tags: [], categories: [] };
+      const body = url.host === "connectors.example.test"
+        ? (url.pathname === "/"
+          ? {
+            service: "connectors",
+            ok: true,
+            timestamp: "2026-11-11T00:00:00.000Z",
+            meta: { mcpsTotal: 0, accountsTotal: 0, onchainTotal: 0 },
+            mcps: { total: 0, servers: [] },
+            accounts: { total: 0, toolkits: [] },
+            onchain: { totalConnectors: 0, totalTools: 0, connectors: [] },
+          }
+          : { toolkits: [], total: 0 })
+        : url.pathname.startsWith("/channels/")
+          ? {
+            code: "link-test",
+            channel: "telegram",
+            userAddress: "0x0000000000000000000000000000000000000001",
+            agentWallet: "0x0000000000000000000000000000000000000002",
+            createdAt: Date.now(),
+            expiresAt: Date.now() + 60000,
+            url: "https://t.me/compose_bot?start=link-test",
+          }
+          : url.pathname.startsWith("/connectors/")
+            ? {
+              userAddress: "0x0000000000000000000000000000000000000001",
+              accounts: [],
+              connectors: [],
+            }
+            : { agents: [], total: 0, tags: [], categories: [] };
       return new Response(JSON.stringify(body), {
         status: 200,
         headers: { "content-type": "application/json" },
@@ -80,10 +100,18 @@ test("web consumes @compose-market/sdk as a third-party integrator", async () =>
   assert.equal(typeof sdk.directory.agents.agentverse, "function");
   assert.equal(typeof sdk.system.health, "function");
   assert.equal(typeof sdk.permissions.list, "function");
-  assert.equal(typeof sdk.accounts.connect, "function");
+  assert.equal(typeof sdk.connectors.all, "function");
+  assert.equal(typeof sdk.connectors.status, "function");
+  assert.equal(typeof sdk.connectors.accounts.connect, "function");
+  assert.equal(typeof sdk.connectors.accounts.toolkits.list, "function");
+  assert.equal(typeof sdk.connectors.gated.connect, "function");
+  assert.equal(typeof sdk.connectors.mcps.list, "function");
+  assert.equal(typeof sdk.connectors.onchain.list, "function");
+  assert.equal("accounts" in sdk, false);
+  assert.equal("gated" in sdk, false);
   assert.equal(typeof sdk.channels.link, "function");
   assert.equal(typeof sdk.dispenser.status, "function");
-  assert.equal(typeof sdk.settlement.status, "function");
+  assert.equal("settlement" in sdk, false);
   assert.equal("metrics" in sdk, false);
 
   await sdk.directory.agents.agentverse({
@@ -99,6 +127,30 @@ test("web consumes @compose-market/sdk as a third-party integrator", async () =>
     "/api/agentverse/agents?search=research&tags=ai%2Cpayments&limit=5&sort=interactions&direction=desc",
   );
   assert.equal(calls[0]?.host, "api.example.test");
+
+  await sdk.connectors.all({ limit: 2 });
+  const allCatalogCall = calls.at(-1);
+  assert.equal(allCatalogCall?.host, "connectors.example.test");
+  assert.equal(allCatalogCall?.method, "GET");
+  assert.equal(allCatalogCall?.path, "/?limit=2");
+
+  await sdk.connectors.accounts.toolkits.list({ search: "gmail" });
+  const toolkitsCall = calls.at(-1);
+  assert.equal(toolkitsCall?.host, "connectors.example.test");
+  assert.equal(toolkitsCall?.method, "GET");
+  assert.equal(toolkitsCall?.path, "/accounts/toolkits?search=gmail");
+
+  await sdk.connectors.status({
+    userAddress: "0x0000000000000000000000000000000000000001",
+  });
+
+  const connectorCall = calls.at(-1);
+  assert.equal(connectorCall?.host, "runtime.example.test");
+  assert.equal(connectorCall?.method, "GET");
+  assert.equal(
+    connectorCall?.path,
+    "/connectors/status?userAddress=0x0000000000000000000000000000000000000001",
+  );
 
   await sdk.channels.link("telegram", {
     userAddress: "0x0000000000000000000000000000000000000001",
