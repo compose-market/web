@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
+import { getAgentCapabilities } from "../src/lib/capabilities.tsx";
 
 const root = resolve(import.meta.dirname, "..");
 const repo = resolve(root, "..");
@@ -12,15 +13,16 @@ function read(path: string): string {
 
 test("root route redirects to keys while home stays outside the app graph", () => {
   const app = read("src/App.tsx");
+  const wallet = read("src/components/wallet.tsx");
   const layout = read("src/components/layout/Layout.tsx");
 
   assert.equal(existsSync(resolve(root, "src/pages/home.tsx")), false);
   assert.doesNotMatch(app, /@\/pages\/home/);
   assert.match(app, /<Redirect\s+to="\/playground"\s+replace\s*\/>/);
-  assert.match(app, /const Dashboard = lazy\(\(\) => import\("@\/pages\/dashboard"\)\);/);
-  assert.match(app, /<Route path="\/dashboard" component=\{Dashboard\} \/>/);
-  assert.match(app, /const Market = lazy\(\(\) => import\("@\/pages\/market"\)\);/);
-  assert.match(app, /<Route path="\/market" component=\{Market\} \/>/);
+  assert.match(wallet, /const Dashboard = lazy\(\(\) => import\("@\/pages\/dashboard"\)\);/);
+  assert.match(wallet, /<Route path="\/dashboard" component=\{Dashboard\} \/>/);
+  assert.match(app, /import Market from "@\/pages\/market";/);
+  assert.match(app, /location === "\/market"/);
   assert.doesNotMatch(layout, /label:\s*"Home"/);
 });
 
