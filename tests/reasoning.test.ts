@@ -182,3 +182,10 @@ test("projectStreamEvent keeps late mid-sentence reasoning deltas and reasoning.
   assert.equal(blocks[0]?.type === "reasoning" ? blocks[0].text : "", fullReasoning);
   assert.equal(blocks[1]?.type === "text" ? blocks[1].text : "", answer);
 });
+
+test("stream and pulse never fabricate client-side Connecting to model status copy", () => {
+  const streamSource = readFileSync(new URL("../src/hooks/use-stream.ts", import.meta.url), "utf8");
+  const pulseSource = readFileSync(new URL("../src/components/pulse.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(streamSource, /Connecting to model|Connecting to agent|Starting workflow/);
+  assert.doesNotMatch(pulseSource, /if \(status === "waiting"\) return "Connecting"/);
+});
