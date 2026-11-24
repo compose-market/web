@@ -149,3 +149,36 @@ test("projectStreamEvent coalesces multi-step tool-loop reasoning rounds into on
   assert.equal(textBlocks.length, 1);
   assert.equal(textBlocks[0].text, "Here is the final answer.");
 });
+
+test("projectStreamEvent keeps late mid-sentence reasoning deltas and reasoning.done in one ReasoningBlock above the answer", () => {
+  const { chat, blocks } = makeMockChat();
+  const cbRef = { current: {} };
+  const textBlockRef = { current: null as string | null };
+  const blockTextRef = { current: "" };
+  const reasoningStateRef = { current: createReasoningState() };
+  const blockSeqRef = { current: 0 };
+
+  const prefix = "The user is asking a flirtatious/inappropriate question in French. No tools";
+  const tail = " needed.";
+  const fullReasoning = `${prefix}${tail}`;
+  const answer = "I’m here to help you get things done—research, code, plans, whatever you need. Let’s keep it professional. What can I do for you today?";
+
+  const events: ModelEvent[] = [
+    { domain: "model", type: "model.start", id: "start:1", ts: 1, responseId: "resp_nemo" },
+    { domain: "model", type: "model.reasoning.delta", id: "rs_1", itemId: "rs_1", ts: 2, responseId: "resp_nemo", delta: prefix },
+    { domain: "model", type: "model.text.delta", id: "txt:1", ts: 3, responseId: "resp_nemo", delta: answer },
+    { domain: "model", type: "model.reasoning.delta", id: "rs_2", itemId: "rs_1", ts: 4, responseId: "resp_nemo", delta: tail },
+    { domain: "model", type: "model.reasoning.done", id: "rs_done", itemId: "rs_1", ts: 5, responseId: "resp_nemo", text: fullReasoning },
+    { domain: "model", type: "model.done", id: "done:1", ts: 6, responseId: "resp_nemo" },
+  ];
+
+  for (const event of events) {
+    projectStreamEvent(event, chat, cbRef, textBlockRef, blockTextRef, reasoningStateRef, blockSeqRef);
+  }
+
+  assert.equal(blocks.length, 2);
+  assert.equal(blocks[0]?.type, "reasoning");
+  assert.equal(blocks[1]?.type, "text");
+  assert.equal(blocks[0]?.type === "reasoning" ? blocks[0].text : "", fullReasoning);
+  assert.equal(blocks[1]?.type === "text" ? blocks[1].text : "", answer);
+});
