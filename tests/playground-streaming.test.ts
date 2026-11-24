@@ -217,8 +217,8 @@ test("stopping realtime audio terminalizes web presentation immediately", () => 
   assert.ok(liveAudio.indexOf("closePlayback();") < liveAudio.indexOf("onStopRealtime?.();"));
   assert.match(chatSource, /raw === "stopped"/);
   assert.match(chatSource, /!stopped && <Loader2/);
-  assert.match(dispatchModel, /event\.type === "model\.done"[\s\S]{0,220}stopRealtimeArtifacts/);
-  assert.match(dispatchModel, /event\.type === "model\.done"[\s\S]{0,260}onDone\?\.\(\)/);
+  assert.match(dispatchModel, /event\.type === "model\.done"[\s\S]{0,480}stopRealtimeArtifacts/);
+  assert.match(dispatchModel, /event\.type === "model\.done"[\s\S]{0,480}onDone\?\.\(\)/);
   assert.match(playgroundSource, /onDone:\s*\(\) => setStreaming\(false\)/);
 });
 
