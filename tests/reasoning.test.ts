@@ -115,3 +115,37 @@ test("projectStreamEvent deduplicates repeated model.reasoning.done events into 
   assert.equal(reasoningBlocks[0].text, "First thought.");
   assert.equal(reasoningBlocks[0].finishedAt, 2);
 });
+
+test("projectStreamEvent coalesces multi-step tool-loop reasoning rounds into one ReasoningBlock", () => {
+  const { chat, blocks } = makeMockChat();
+  const cbRef = { current: {} };
+  const textBlockRef = { current: null as string | null };
+  const blockTextRef = { current: "" };
+  const reasoningStateRef = { current: createReasoningState() };
+  const blockSeqRef = { current: 0 };
+
+  const events: Array<ModelEvent | ActivityEvent> = [
+    { domain: "model", type: "model.start", id: "m1", ts: 1, responseId: "resp_1" },
+    { domain: "model", type: "model.reasoning.delta", id: "r1", itemId: "rs_1", ts: 2, responseId: "resp_1", delta: "Step 1: inspect tools." },
+    { domain: "model", type: "model.reasoning.done", id: "r1", itemId: "rs_1", ts: 3, responseId: "resp_1", text: "Step 1: inspect tools." },
+    { domain: "activity", type: "activity.tool", id: "tool:1", ts: 4, kind: "tool", status: "running", name: "search" },
+    { domain: "activity", type: "activity.tool", id: "tool:1", ts: 5, kind: "tool", status: "completed", name: "search" },
+    { domain: "model", type: "model.start", id: "m2", ts: 6, responseId: "resp_2" },
+    { domain: "model", type: "model.reasoning.delta", id: "r2", itemId: "rs_2", ts: 7, responseId: "resp_2", delta: "Step 2: synthesize result." },
+    { domain: "model", type: "model.reasoning.done", id: "r2", itemId: "rs_2", ts: 8, responseId: "resp_2", text: "Step 2: synthesize result." },
+    { domain: "model", type: "model.text.delta", id: "t1", ts: 9, responseId: "resp_2", delta: "Here is the final answer." },
+    { domain: "model", type: "model.done", id: "d1", ts: 10, responseId: "resp_2" },
+  ];
+
+  for (const event of events) {
+    projectStreamEvent(event, chat, cbRef, textBlockRef, blockTextRef, reasoningStateRef, blockSeqRef, true);
+  }
+
+  const reasoningBlocks = blocks.filter((b) => b.type === "reasoning");
+  const textBlocks = blocks.filter((b) => b.type === "text");
+  assert.equal(reasoningBlocks.length, 1);
+  assert.equal(reasoningBlocks[0].text, "Step 1: inspect tools.\n\nStep 2: synthesize result.");
+  assert.equal(reasoningBlocks[0].finishedAt, 2);
+  assert.equal(textBlocks.length, 1);
+  assert.equal(textBlocks[0].text, "Here is the final answer.");
+});
