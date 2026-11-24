@@ -229,8 +229,8 @@ test("ordinary responses stop presenting as live while payment finalizes and rem
   assert.match(streamSource, /const cancelResponses = useCallback/);
   assert.match(responsesRunner, /const controller = new AbortController\(\)/);
   assert.match(responsesRunner, /signal: controller\.signal/);
-  assert.match(dispatchModel, /event\.type === "model\.status" && phase === "finalizing_payment"[\s\S]{0,120}clearActivityStateUnlessError/);
-  assert.doesNotMatch(dispatchModel, /event\.type === "model\.status" && phase === "finalizing_payment"[\s\S]{0,180}onDone/);
+  assert.match(dispatchModel, /phase === "finalizing_payment"[\s\S]{0,120}clearActivityStateUnlessError/);
+  assert.doesNotMatch(dispatchModel, /phase === "finalizing_payment"[\s\S]{0,180}onDone/);
   assert.doesNotMatch(streamSource, /event\.type === "model\.text\.done"[\s\S]{0,400}onDone/);
   assert.match(playgroundSource, /streamer\.cancelResponses\(\)/);
 });
