@@ -189,3 +189,46 @@ test("stream and pulse never fabricate client-side Connecting to model status co
   assert.doesNotMatch(streamSource, /Connecting to model|Connecting to agent|Starting workflow/);
   assert.doesNotMatch(pulseSource, /if \(status === "waiting"\) return "Connecting"/);
 });
+
+test("model search ranks Frontier models ahead of older variants while exact modelId stays first", () => {
+  const catalog: CatalogModel[] = [
+    {
+      modelId: "gpt-image-2.5-flare",
+      name: "GPT Image 2.5 Flare",
+      provider: "openai",
+      family: "openai",
+      type: "text-to-image",
+      input: ["text"],
+      output: ["image"],
+      description: "Fast image generation model",
+      isFrontier: false,
+      isLatest: false,
+    },
+    {
+      modelId: "gpt-image-2.5",
+      name: "GPT Image 2.5",
+      provider: "openai",
+      family: "openai",
+      type: "text-to-image",
+      input: ["text"],
+      output: ["image"],
+      description: "Flagship image generation model",
+      isFrontier: true,
+      isLatest: true,
+    },
+  ];
+
+  const generalLocal = rankCatalogModels(catalog, "image generation", 10);
+  const generalMerged = mergeSemanticModelRanks(catalog, generalLocal, [
+    { modelId: "gpt-image-2.5", provider: "openai", score: 0.96, isFrontier: true, isLatest: true },
+    { modelId: "gpt-image-2.5-flare", provider: "openai", score: 0.72, isFrontier: false, isLatest: false },
+  ], 10);
+  assert.equal(generalMerged[0]?.model.modelId, "gpt-image-2.5");
+
+  const exactLocal = rankCatalogModels(catalog, "gpt-image-2.5-flare", 10);
+  const exactMerged = mergeSemanticModelRanks(catalog, exactLocal, [
+    { modelId: "gpt-image-2.5", provider: "openai", score: 0.9, isFrontier: true, isLatest: true },
+    { modelId: "gpt-image-2.5-flare", provider: "openai", score: 0.99, isFrontier: false, isLatest: false },
+  ], 10);
+  assert.equal(exactMerged[0]?.model.modelId, "gpt-image-2.5-flare");
+});
