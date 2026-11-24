@@ -86,3 +86,32 @@ test("shouldAttachPersistedKey covers both api and runtime authenticated paths o
   assert.equal(shouldAttachPersistedKey(new URL(`${API_BASE_URL}/v1/models`)), false);
   assert.equal(hasSessionAuth("0x0000000000000000000000000000000000000001"), false);
 });
+
+test("projectStreamEvent deduplicates repeated model.reasoning.done events into one ReasoningBlock", () => {
+  const { chat, blocks } = makeMockChat();
+  const cbRef = { current: {} };
+  const textBlockRef = { current: null as string | null };
+  const blockTextRef = { current: "" };
+  const reasoningStateRef = { current: createReasoningState() };
+  const blockSeqRef = { current: 0 };
+
+  const events: ModelEvent[] = [
+    { domain: "model", type: "model.start", id: "start:1", ts: 1, responseId: "resp_1" },
+    { domain: "model", type: "model.reasoning.delta", id: "rs_1", itemId: "rs_1", ts: 2, responseId: "resp_1", delta: "First " },
+    { domain: "model", type: "model.reasoning.delta", id: "rs_1", itemId: "rs_1", ts: 3, responseId: "resp_1", delta: "thought." },
+    { domain: "model", type: "model.reasoning.done", id: "rs_1", itemId: "rs_1", ts: 4, responseId: "resp_1", text: "First thought." },
+    { domain: "model", type: "model.reasoning.done", id: "rs_1", itemId: "rs_1", ts: 5, responseId: "resp_1", text: "First thought." },
+    { domain: "model", type: "model.reasoning.done", id: "rs_alt", ts: 6, responseId: "resp_1", text: "First thought." },
+    { domain: "model", type: "model.text.delta", id: "txt:1", ts: 7, responseId: "resp_1", delta: "Answer" },
+    { domain: "model", type: "model.done", id: "done:1", ts: 8, responseId: "resp_1" },
+  ];
+
+  for (const event of events) {
+    projectStreamEvent(event, chat, cbRef, textBlockRef, blockTextRef, reasoningStateRef, blockSeqRef);
+  }
+
+  const reasoningBlocks = blocks.filter((b) => b.type === "reasoning");
+  assert.equal(reasoningBlocks.length, 1);
+  assert.equal(reasoningBlocks[0].text, "First thought.");
+  assert.equal(reasoningBlocks[0].finishedAt, 2);
+});
