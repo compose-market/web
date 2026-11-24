@@ -235,6 +235,12 @@ test("ordinary responses stop presenting as live while payment finalizes and rem
   assert.match(playgroundSource, /streamer\.cancelResponses\(\)/);
 });
 
+test("chat folds expose structured tone and open attributes cleanly", () => {
+  assert.match(chatSource, /data-tone=\{tone \?\? "default"\}/);
+  assert.match(chatSource, /data-open=\{open \? "true" : "false"\}/);
+  assert.match(chatSource, /export function MultimodalCanvas/);
+});
+
 test("theme stream nodes keep raw kind and status out of visible chrome by default", () => {
   const nodeSource = section(themeStreamSource, "export function StreamNode", "export interface MissionControlPanelProps");
   assert.match(nodeSource, /data-kind=\{kind\}/);
