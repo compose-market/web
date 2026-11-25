@@ -106,6 +106,27 @@ test("shared card and model primitives stay self-contained without internal card
   assert.doesNotMatch(shell, /\.cm-playground__|\.cm-chat\b|\.cm-type--text/);
 });
 
+test("model card owns its responsive inline-size styles cleanly in web/src/styles/models.css", () => {
+  const styles = read("src/styles/index.css");
+  const modelsCss = read("src/styles/models.css");
+  const card = read("src/components/models/card.tsx");
+  const playground = read("src/pages/playground.tsx");
+
+  assert.equal(existsSync(resolve(repo, "packages/theme/src/model")), false);
+  assert.doesNotMatch(styles, /\.cm-model-card/);
+  assert.match(modelsCss, /\.cm-model-card\s*\{/);
+  assert.match(modelsCss, /container:\s*cm-model-card \/ inline-size/);
+  assert.match(modelsCss, /--cm-model-unit:\s*clamp/);
+  assert.match(modelsCss, /@container cm-model-card \(max-width:\s*17rem\)/);
+  assert.doesNotMatch(card, /<Prism/);
+  assert.match(card, /cm-model-card__description/);
+  assert.match(card, /modelInfo\?\.description/);
+  assert.match(card, /role="radiogroup"/);
+  assert.match(card, /role="radio"/);
+  assert.match(playground, /definition\.default !== undefined/);
+  assert.doesNotMatch(card, /@\/components\/ui\/select|SelectTrigger|SelectContent|SelectItem/);
+});
+
 test("model card owns its responsive styles in the theme module", () => {
   const styles = read("src/styles/index.css");
   const card = read("src/components/models/card.tsx");
