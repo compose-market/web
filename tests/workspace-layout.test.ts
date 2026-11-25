@@ -571,6 +571,33 @@ test("published theme stays 100% brand-pure with zero product-specific directori
   assert.doesNotMatch(shell, /\.cm-app-chrome|\.cm-playground__|\.cm-chat\b|\.cm-market-control-rail/);
 });
 
+test("split workspaces and mobile stages use single-tree pockets without duplicate Sheet drawers", () => {
+  const agent = read("src/pages/agent.tsx");
+  const playground = read("src/pages/playground.tsx");
+  const workflow = read("src/pages/workflow.tsx");
+  const keys = read("src/components/keys.tsx");
+  const dashboard = read("src/pages/dashboard.tsx");
+  const create = read("src/pages/create.tsx");
+  const explorer = read("src/components/benchmarks/explorer.tsx");
+
+  assert.doesNotMatch(agent, /@\/components\/ui\/sheet|<Sheet\b/);
+  assert.doesNotMatch(playground, /@\/components\/ui\/sheet|<Sheet\b/);
+  assert.doesNotMatch(workflow, /@\/components\/ui\/sheet|<Sheet\b/);
+  assert.doesNotMatch(keys, /@\/components\/ui\/sheet|<Sheet\b/);
+
+  assert.match(agent, /<Pockets[\s\S]*?data-pocket=/);
+  assert.match(playground, /<Pockets[\s\S]*?data-pocket=/);
+  assert.match(workflow, /<Pockets[\s\S]*?data-pocket=/);
+  assert.match(keys, /<Pockets/);
+  assert.match(keys, /data-pocket=\{pocket\}/);
+  assert.match(dashboard, /<Pockets/);
+  assert.match(dashboard, /data-pocket=\{pocket\}/);
+  assert.match(create, /<Pockets/);
+  assert.match(create, /data-pocket=\{builderPocket\}/);
+  assert.match(explorer, /cm-benchmarks-card__row/);
+  assert.match(explorer, /cm-benchmarks-card__drawer/);
+});
+
 test("published theme sources keep generic primitives separate from product layouts", () => {
   const shell = readFileSync(resolve(repo, "packages/theme/src/shell/shell.css"), "utf8");
   const agents = readFileSync(resolve(repo, "packages/theme/src/agents/agents.css"), "utf8");
