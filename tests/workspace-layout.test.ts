@@ -439,16 +439,16 @@ test("dashboard uses the platform rail, picker stats, and composite mobile grid"
   assert.match(spending, /focused \?/);
   assert.doesNotMatch(spending, /<Switcher/);
 
-  // Composite narrow layout: hero row + two full-width stacked rows whose
-  // combined height equals the old shared row, focus-aware areas.
-  assert.match(styles, /"main"/);
-  assert.match(styles, /"sideA"/);
-  assert.match(styles, /"sideB"/);
-  assert.match(styles, /grid-template-rows:\s*auto auto minmax\(0,\s*1\.35fr\) minmax\(0,\s*0\.5fr\) minmax\(0,\s*0\.5fr\)/);
-  assert.match(styles, /\.cm-dashboard\[data-focus="models"\] \.cm-block\[data-block="models"\]\s*\{\s*grid-area:\s*main/);
-  assert.match(styles, /\.cm-dashboard\[data-focus="feed"\] \.cm-block\[data-block="feed"\]\s*\{\s*grid-area:\s*main/);
+  // Mobile pocketed layout: overview | models | activity pockets give each surface full stage height.
+  assert.match(styles, /\.cm-dashboard\[data-pocket="overview"\]/);
+  assert.match(styles, /\.cm-dashboard\[data-pocket="models"\]/);
+  assert.match(styles, /\.cm-dashboard\[data-pocket="activity"\]/);
   assert.doesNotMatch(styles, /repeat\(3, minmax\(10rem/);
   assert.doesNotMatch(styles, /"sideA\s+sideB"/);
+  // Spacious 3:1 desktop grid + proximity snapping on dashboard blocks & feed.
+  assert.match(styles, /"chart  chart  chart  feed"/);
+  assert.match(styles, /"models models models feed"/);
+  assert.doesNotMatch(styles, /scroll-snap-type:\s*y mandatory/);
   // Internal scrollers contain overscroll instead of chaining to the shell.
   assert.match(styles, /\.cm-block__body\s*\{[\s\S]*?overscroll-behavior:\s*contain/);
   assert.match(styles, /\.cm-feed-list\s*\{[\s\S]*?overscroll-behavior:\s*contain/);
