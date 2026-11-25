@@ -552,6 +552,25 @@ test("backpack rows and binary controls use high-contrast theme primitives", () 
   assert.match(checkbox, /cm-checkbox/);
 });
 
+test("published theme stays 100% brand-pure with zero product-specific directories", () => {
+  const shell = readFileSync(resolve(repo, "packages/theme/src/shell/shell.css"), "utf8");
+
+  assert.equal(existsSync(resolve(repo, "packages/theme/src/agents")), false);
+  assert.equal(existsSync(resolve(repo, "packages/theme/src/workflows")), false);
+  assert.equal(existsSync(resolve(repo, "packages/theme/src/model")), false);
+  assert.equal(existsSync(resolve(repo, "packages/theme/src/market")), false);
+  assert.equal(existsSync(resolve(repo, "packages/theme/src/session")), false);
+  assert.equal(existsSync(resolve(repo, "packages/theme/src/stream")), false);
+  assert.equal(existsSync(resolve(repo, "packages/theme/src/icons")), false);
+
+  assert.match(shell, /\.cm-shell-grid/);
+  assert.match(shell, /\.cm-shell-split/);
+  assert.match(shell, /\.cm-chip/);
+  assert.match(shell, /\.cm-command-panel/);
+  assert.match(shell, /\.cm-control-search-fold/);
+  assert.doesNotMatch(shell, /\.cm-app-chrome|\.cm-playground__|\.cm-chat\b|\.cm-market-control-rail/);
+});
+
 test("published theme sources keep generic primitives separate from product layouts", () => {
   const shell = readFileSync(resolve(repo, "packages/theme/src/shell/shell.css"), "utf8");
   const agents = readFileSync(resolve(repo, "packages/theme/src/agents/agents.css"), "utf8");
