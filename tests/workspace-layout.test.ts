@@ -488,7 +488,12 @@ test("keys page uses the standard title and a contained central panel", () => {
   assert.match(keys, /<span className="text-fuchsia-500 mr-2">\/\/<\/span>/);
   assert.doesNotMatch(keys, /cm-keys-header__title-icon/);
   assert.doesNotMatch(styles, /cm-keys-header__title-icon/);
-  assert.match(styles, /\.cm-keys-header__title\s*\{[\s\S]*?font-size:\s*clamp\(0\.7rem,\s*3cqi,\s*1\.12rem\)/);
+  assert.match(styles, /\.cm-keys-header__title\s*\{[^}]*text-overflow:\s*ellipsis/);
+  assert.doesNotMatch(styles, /\.cm-keys-header__title\s*\{[^}]*3cqi/);
+
+  // Named cm-stage container + main-first split ratio keeps API Keys dominant and Setup beside it.
+  assert.match(styles, /\.cm-keys-page\s*\{[\s\S]*?container:\s*cm-stage \/ inline-size/);
+  assert.match(styles, /\.cm-keys-page\s*>\s*\.cm-split\s*\{[\s\S]*?--cm-split-main:\s*1\.35fr/);
 
   // Central composition is a contained panel (like .cm-quickstart beside it)
   // with internal list scrolling — never a bare transparent region.
@@ -496,6 +501,12 @@ test("keys page uses the standard title and a contained central panel", () => {
   assert.match(styles, /\.cm-keys-main\s*\{[\s\S]*?backdrop-filter:\s*blur/);
   assert.match(styles, /\.cm-keys-main\s*\{[\s\S]*?overflow:\s*hidden/);
   assert.match(styles, /\.cm-keys-list\s*\{[\s\S]*?overflow-y:\s*auto[\s\S]*?overscroll-behavior:\s*contain/);
+  assert.match(styles, /\.cm-keys-list\s*\{[\s\S]*?scroll-padding-block:/);
+  assert.doesNotMatch(styles, /\.cm-quickstart\s*\{[^}]*scroll-snap-type/);
+  assert.match(styles, /\.cm-quickstart__body\s*\{[\s\S]*?flex:\s*0 0 auto/);
+  assert.match(keys, /<ShellModal/);
+  assert.doesNotMatch(keys, /cm-create-key__|border-violet-500/);
+  assert.doesNotMatch(styles, /\.cm-create-key__/);
 });
 
 test("benchmark surfaces show family logos with proportional, non-breaking sizing", () => {
