@@ -516,7 +516,7 @@ test("benchmark surfaces show family logos with proportional, non-breaking sizin
   const family = read("src/components/benchmarks/family.tsx");
   const models = read("src/lib/models.ts");
   const benchmarks = read("src/styles/benchmarks.css");
-  const styles = read("src/styles/index.css");
+  const modelsCss = read("src/styles/models.css");
 
   // Shared renderer reuses the platform logo map + cm-family-icon class and
   // renders nothing for unmapped families (text fallback never shifts).
@@ -537,7 +537,7 @@ test("benchmark surfaces show family logos with proportional, non-breaking sizin
 
   // Base class can never stretch a row; workspace rule keeps logos
   // proportional to the benchmarks unit on small screens.
-  assert.match(styles, /\.cm-family-icon\s*\{[\s\S]*?flex:\s*0 0 auto[\s\S]*?object-fit:\s*contain/);
+  assert.match(modelsCss, /\.cm-family-icon\s*\{[\s\S]*?flex:\s*0 0 auto[\s\S]*?object-fit:\s*contain/);
   assert.match(benchmarks, /\.cm-benchmarks-workspace \.cm-family-icon[\s\S]*?calc\(var\(--cm-bm-unit\) \* 0\.85\)/);
 });
 
