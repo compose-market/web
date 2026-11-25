@@ -127,6 +127,45 @@ test("model card owns its responsive inline-size styles cleanly in web/src/style
   assert.doesNotMatch(card, /@\/components\/ui\/select|SelectTrigger|SelectContent|SelectItem/);
 });
 
+test("launch recovery pages use content canvases and proximity snap-scrolling without blind clipping", () => {
+  const market = read("src/pages/market.tsx");
+  const boards = read("src/components/boards.tsx");
+  const create = read("src/pages/create.tsx");
+  const createCss = read("src/styles/create.css");
+  const assets = read("src/pages/profile.tsx");
+  const styles = read("src/styles/index.css");
+  const marketCss = read("src/styles/market.css");
+  const agentsCss = read("src/styles/agents.css");
+  const control = read("src/components/control.tsx");
+
+  assert.match(market, /variant="market"/);
+  assert.match(market, /cm-control-rail cm-market-control-rail/);
+  assert.match(market, /<SearchFold/);
+  assert.doesNotMatch(market, /<Colony|cm-market-hero|Colony/);
+  assert.match(control, /cm-control-search-fold/);
+  assert.match(boards, /cm-market-row-grid/);
+  assert.match(marketCss, /\.cm-market-agent-slot/);
+  assert.doesNotMatch(marketCss, /scroll-snap-type:\s*y (mandatory|proximity)/);
+  assert.match(agentsCss, /\.cm-agent-tile__head/);
+  assert.match(agentsCss, /\.cm-identikit\b/);
+  assert.match(agentsCss, /\.cm-cap-glyph\b/);
+  assert.match(agentsCss, /\.cm-agent-panel/);
+  assert.match(create, /cm-create-page/);
+  assert.match(create, /cm-split/);
+  assert.match(create, /activeSection/);
+  assert.match(create, /cm-create-sections-stage/);
+  assert.match(create, /cm-create-sections/);
+  assert.match(create, /cm-create-preview-stage/);
+  assert.match(createCss, /\.cm-create-page\s*\{[\s\S]*?container:\s*cm-stage \/ inline-size/);
+  assert.match(createCss, /\.cm-create-form\s*\{[\s\S]*?grid-template-rows:\s*minmax\(0,\s*1fr\)\s*auto/);
+  assert.match(createCss, /\.cm-create-sections\s*\{[\s\S]*?margin-block:\s*auto/);
+  assert.doesNotMatch(createCss, /scroll-snap-type/);
+  assert.match(assets, /cm-market-agent-canvas/);
+  assert.match(assets, /useAgentCatalog/);
+  assert.match(assets, /toOnchainAgent/);
+  assert.doesNotMatch(styles, /scroll-snap-type:\s*y mandatory/);
+});
+
 test("model card owns its responsive styles in the theme module", () => {
   const styles = read("src/styles/index.css");
   const card = read("src/components/models/card.tsx");
