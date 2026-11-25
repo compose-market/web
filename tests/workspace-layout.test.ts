@@ -166,6 +166,28 @@ test("launch recovery pages use content canvases and proximity snap-scrolling wi
   assert.doesNotMatch(styles, /scroll-snap-type:\s*y mandatory/);
 });
 
+test("fixed page shells keep whole-page canvases locked and avoid forced snapping on reading/form surfaces", () => {
+  const styles = read("src/styles/index.css");
+  const disclaimer = read("src/components/disclaimer.tsx");
+  const shell = readFileSync(resolve(repo, "packages/theme/src/shell/shell.css"), "utf8");
+  const assets = read("src/pages/profile.tsx");
+
+  assert.equal(existsSync(resolve(root, "src/pages/agents.tsx")), false);
+  assert.equal(existsSync(resolve(root, "src/pages/models.tsx")), false);
+  assert.equal(existsSync(resolve(root, "src/pages/registry.tsx")), false);
+
+  assert.match(styles, /\.cm-web-page__canvas\s*\{[^}]*overflow-y:\s*hidden/);
+  assert.match(styles, /\.cm-web-page__canvas--scroll\s*\{[^}]*overflow-y:\s*auto/);
+  assert.doesNotMatch(styles, /\.cm-web-page__canvas--scroll\s*\{[^}]*scroll-snap-type/);
+  assert.doesNotMatch(disclaimer, /snap-y|snap-start/);
+  assert.match(shell, /\.cm-page-list\s*\{[^}]*padding-block:/);
+  assert.match(shell, /\.cm-page-tab-panel\s*\{[^}]*padding-block:/);
+  assert.doesNotMatch(shell, /\.cm-page-list,\s*\.cm-page-tab-panel,\s*\.cm-shell-scroll\s*\{[^}]*scroll-snap-type/);
+  assert.match(shell, /\.cm-fold:not\(\[open\]\)\s*>\s*\.cm-fold__body\s*\{[\s\S]*display:\s*none/);
+  assert.match(assets, /cm-market-workspace/);
+  assert.match(assets, /cm-market-tabs/);
+});
+
 test("model card owns its responsive styles in the theme module", () => {
   const styles = read("src/styles/index.css");
   const card = read("src/components/models/card.tsx");
