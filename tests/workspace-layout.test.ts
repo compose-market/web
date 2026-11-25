@@ -468,8 +468,9 @@ test("playground header keeps the platform title and tab counts visible everywhe
   // One-line default model before user selection (deep link still wins).
   assert.match(playground, /const DEFAULT_MODEL = "[^"]+"/);
   assert.match(playground, /requested\.trim\(\) : DEFAULT_MODEL/);
-  // The title never hides — it scales + ellipsizes via the toolbar container.
-  assert.match(styles, /\.cm-playground__toolbar-title\s*\{[\s\S]*?font-size:\s*clamp\(0\.7rem,\s*3cqi,\s*1\.12rem\)/);
+  // The title never hides — it inherits the calibrated .cm-page-header__title token and ellipsizes cleanly.
+  assert.match(styles, /\.cm-playground__toolbar-title\s*\{[^}]*text-overflow:\s*ellipsis/);
+  assert.doesNotMatch(styles, /\.cm-playground__toolbar-title\s*\{[^}]*3cqi/);
   assert.doesNotMatch(styles, /cm-playground__title-text|cm-playground__model-count/);
   // The page root keeps the standard separation (rail ↔ composition ↔ edges).
   assert.match(styles, /\.cm-playground\s*\{[\s\S]*?gap:\s*clamp\(0\.4rem,\s*1cqi,\s*0\.7rem\)/);
