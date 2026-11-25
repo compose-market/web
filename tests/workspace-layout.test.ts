@@ -77,36 +77,33 @@ test("market agent cards use root open handlers without nested links", () => {
 });
 
 test("shared card and model primitives stay self-contained without internal card scroll", () => {
-  const agents = readFileSync(resolve(repo, "packages/theme/src/agents/agents.css"), "utf8");
-  const agentCard = readFileSync(resolve(repo, "web/src/styles/agent-card.css"), "utf8");
+  const agentsCss = read("src/styles/agents.css");
+  const modelsCss = read("src/styles/models.css");
+  const chatCss = read("src/styles/chat.css");
   const shell = readFileSync(resolve(repo, "packages/theme/src/shell/shell.css"), "utf8");
   const playground = read("src/pages/playground.tsx");
   const chips = read("src/components/models/capabilities.tsx");
 
-  assert.doesNotMatch(agentCard, /cm-agent-card--match-chat[\s\S]{0,180}overflow-y:\s*auto/);
-  assert.match(agentCard, /cm-agent-card--market/);
-  assert.doesNotMatch(agentCard, /cm-agent-card--market-full/);
-  assert.doesNotMatch(agentCard, /cm-agent-card--market[\s\S]{0,180}display:\s*none/);
+  assert.doesNotMatch(agentsCss, /cm-agent-card--match-chat[\s\S]{0,180}overflow-y:\s*auto/);
+  assert.match(agentsCss, /cm-agent-card--market/);
   assert.match(playground, /<CapabilityChips/);
   assert.doesNotMatch(playground, /<select/);
-  assert.match(chips, /cm-chip/);
+  assert.match(chips, /cm-playground__chip-trigger/);
+  assert.doesNotMatch(chips, /"cm-chip"/);
+  assert.doesNotMatch(chips, /hidden sm:inline/);
   assert.match(chips, /cm-type-icon/);
-  assert.doesNotMatch(chips, /cm-playground__chip-icon/);
   assert.match(chips, /DropdownMenuTrigger/);
   assert.match(chips, /DropdownMenuContent/);
   assert.match(chips, /cm-playground__chip-menu-grid/);
-  assert.match(chips, /selected === "all" \? label/);
-  assert.match(chips, /function triggerClass/);
   assert.match(chips, /familyCategories/);
-  assert.doesNotMatch(chips, /cm-playground__chip-label/);
-  assert.doesNotMatch(chips, /DropdownMenuLabel/);
-  assert.doesNotMatch(chips, /categoryClass\(selectedCat,\s*variant,\s*true\)/);
-  assert.doesNotMatch(chips, /displayProviders|slice\(0,\s*11\)/);
-  assert.match(shell, /\.cm-chip,\s*\n\.cm-tool-chip/);
-  assert.match(shell, /\.cm-type--text/);
+  assert.match(modelsCss, /container:\s*cm-chat-toolbar \/ inline-size/);
+  assert.match(modelsCss, /\.cm-type-icon\s*\{[\s\S]*?inline-size:\s*clamp/);
+  assert.match(modelsCss, /\.cm-playground__chip-trigger\s*\{[\s\S]*?border-radius:\s*var\(--radius-md/);
+  assert.match(modelsCss, /\.cm-type--text/);
   assert.match(shell, /\.cm-command-panel/);
-  assert.match(shell, /\.cm-chat\s*\{/);
-  assert.doesNotMatch(shell, /\.cm-playground__/);
+  assert.match(chatCss, /\.cm-chat\s*\{/);
+  assert.match(chatCss, /\.cm-chat__composer-row textarea\s*\{[\s\S]*?field-sizing:\s*content/);
+  assert.doesNotMatch(shell, /\.cm-playground__|\.cm-chat\b|\.cm-type--text/);
 });
 
 test("model card owns its responsive styles in the theme module", () => {
