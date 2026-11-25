@@ -41,14 +41,14 @@ test("network selector lives in the nav utility, not the top HUD or overflow", (
 
 test("market agent cards use root open handlers without nested links", () => {
   const market = read("src/pages/market.tsx");
-  const card = read("src/components/agent-card.tsx");
+  const card = read("src/components/identikit.tsx");
   const networks = read("src/contexts/Network.tsx");
 
   assert.match(market, /cm-market-agent-canvas/);
-  assert.match(market, /onOpen=\{\(\) => setLocation\(agentPageUrl\)\}/);
+  assert.match(market, /onOpen=\{handleOpenAgent\}/);
   assert.doesNotMatch(market, /<Link[\s\S]{0,220}<SharedAgentCard/);
-  assert.match(card, /onOpen\?: \(\) => void/);
-  assert.match(card, /role=\{onOpen \? "link" : undefined\}/);
+  assert.match(card, /onOpen\?: \(triggerEl\?: HTMLElement \| null, agent\?: OnchainAgent\) => void/);
+  assert.match(card, /role=\{onOpen \? \(compact \? "button" : "link"\) : undefined\}/);
   assert.match(card, /variant === "market"/);
   assert.match(card, /cm-agent-card__verified/);
   assert.match(card, /cm-agent-card__network/);
@@ -67,10 +67,11 @@ test("market agent cards use root open handlers without nested links", () => {
   assert.match(networks, /"eip155:1329": "\/networks\/sei\.jpeg"/);
   assert.match(networks, /"solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1": "\/networks\/solanaDevnet\.jpeg"/);
   assert.match(networks, /"solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp": "\/networks\/solana\.jpeg"/);
-  assert.match(card, /!isMarketCard && apiEndpoint/);
+  assert.match(card, /function MarketAgentCard\(/);
+  assert.match(card, /function IdentikitAgentCard\(/);
   assert.match(card, /navigator\.clipboard\.writeText\(apiEndpoint\)/);
   assert.match(card, /title=\{apiEndpoint\}/);
-  assert.match(card, /return value \? `\/agent\/\$\{value\.slice\(0,\s*5\)\}\.\.\.` : "Unavailable"/);
+  assert.match(card, /return value \? `\/agent\/\$\{short\(value,\s*8,\s*6\)\}` : "Unavailable"/);
   assert.doesNotMatch(card, /API_BASE_URL\.replace\([\s\S]{0,120}\/agent\/\$\{value\.slice/);
   assert.doesNotMatch(market, /A2A Endpoint|Creator|Cloneable/);
 });
